@@ -31,6 +31,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/ring"
 	"github.com/cortexproject/cortex/pkg/ruler"
 	"github.com/cortexproject/cortex/pkg/util"
+	"github.com/cortexproject/cortex/pkg/util/push"
 	"github.com/cortexproject/cortex/pkg/util/validation"
 )
 
@@ -169,7 +170,7 @@ func (t *Cortex) initDistributor(cfg *Config) (err error) {
 	}
 
 	t.server.HTTP.HandleFunc("/all_user_stats", t.distributor.AllUserStatsHandler)
-	t.server.HTTP.Handle("/api/prom/push", t.httpAuthMiddleware.Wrap(http.HandlerFunc(t.distributor.PushHandler)))
+	t.server.HTTP.Handle("/api/prom/push", t.httpAuthMiddleware.Wrap(push.Handler(t.distributor.Push)))
 	return
 }
 
@@ -228,6 +229,7 @@ func (t *Cortex) initIngester(cfg *Config) (err error) {
 	grpc_health_v1.RegisterHealthServer(t.server.GRPC, t.ingester)
 	t.server.HTTP.Path("/ready").Handler(http.HandlerFunc(t.ingester.ReadinessHandler))
 	t.server.HTTP.Path("/flush").Handler(http.HandlerFunc(t.ingester.FlushHandler))
+	t.server.HTTP.Handle("/push", t.httpAuthMiddleware.Wrap(push.Handler(t.ingester.Push)))
 	return
 }
 
