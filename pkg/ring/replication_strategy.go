@@ -63,7 +63,7 @@ func (r *Ring) ReplicationFactor() int {
 	return r.cfg.ReplicationFactor
 }
 
-// Number of ingesters in the ring
+// IngesterCount is number of ingesters in the ring
 func (r *Ring) IngesterCount() int {
 	r.mtx.Lock()
 	c := len(r.ringDesc.Ingesters)
