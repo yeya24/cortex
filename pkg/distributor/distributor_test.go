@@ -464,13 +464,14 @@ type mockRing struct {
 	replicationFactor uint32
 }
 
-func (r mockRing) Get(key uint32, op ring.Operation) (ring.ReplicationSet, error) {
-	result := ring.ReplicationSet{
-		MaxErrors: 1,
-	}
+func (r mockRing) Get(key uint32, op ring.Operation, ingesters []ring.IngesterDesc) (ring.ReplicationSet, error) {
 	for i := uint32(0); i < r.replicationFactor; i++ {
 		n := (key + i) % uint32(len(r.ingesters))
-		result.Ingesters = append(result.Ingesters, r.ingesters[n])
+		ingesters = append(ingesters, r.ingesters[n])
+	}
+	result := ring.ReplicationSet{
+		MaxErrors: 1,
+		Ingesters: ingesters,
 	}
 	return result, nil
 }

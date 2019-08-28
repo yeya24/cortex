@@ -25,13 +25,15 @@ const (
 
 	// ConsulKey is the key under which we store the ring in consul.
 	ConsulKey = "ring"
+
+	maxExpectedReplicationSet = 5 // used to pre-allocate some arrays
 )
 
 // ReadRing represents the read inferface to the ring.
 type ReadRing interface {
 	prometheus.Collector
 
-	Get(key uint32, op Operation) (ReplicationSet, error)
+	Get(key uint32, op Operation, descs []IngesterDesc) (ReplicationSet, error)
 	GetAll() (ReplicationSet, error)
 	ReplicationFactor() int
 	IngesterCount() int
@@ -181,20 +183,16 @@ func migrateRing(desc *Desc) []TokenDesc {
 }
 
 // Get returns n (or more) ingesters which form the replicas for the given key.
-func (r *Ring) Get(key uint32, op Operation) (ReplicationSet, error) {
+// ingesters should be a 0-length slice which can be overwritten (or nil)
+func (r *Ring) Get(key uint32, op Operation, ingesters []IngesterDesc) (ReplicationSet, error) {
 	r.mtx.RLock()
 	defer r.mtx.RUnlock()
-	return r.getInternal(key, op)
-}
-
-func (r *Ring) getInternal(key uint32, op Operation) (ReplicationSet, error) {
 	if r.ringDesc == nil || len(r.ringDesc.Tokens) == 0 {
 		return ReplicationSet{}, ErrEmptyRing
 	}
 
 	var (
 		n             = r.cfg.ReplicationFactor
-		ingesters     = make([]IngesterDesc, 0, n)
 		distinctHosts = map[string]struct{}{}
 		start         = r.search(key)
 		iterations    = 0

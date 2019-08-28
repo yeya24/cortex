@@ -40,8 +40,9 @@ func DoBatch(ctx context.Context, r ReadRing, keys []uint32, callback func(Inges
 	itemTrackers := make([]itemTracker, len(keys))
 	ingesters := make(map[string]ingester, r.IngesterCount())
 
+	var descs [maxExpectedReplicationSet]IngesterDesc
 	for i, key := range keys {
-		replicationSet, err := r.Get(key, Write)
+		replicationSet, err := r.Get(key, Write, descs[:0])
 		if err != nil {
 			return err
 		}
