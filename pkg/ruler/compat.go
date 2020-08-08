@@ -63,7 +63,7 @@ type PusherAppendable struct {
 }
 
 // Appender returns a storage.Appender
-func (t *PusherAppendable) Appender() storage.Appender {
+func (t *PusherAppendable) Appender(_ context.Context) storage.Appender {
 	return &pusherAppender{
 		pusher: t.pusher,
 		userID: t.userID,
