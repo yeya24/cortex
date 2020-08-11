@@ -8,14 +8,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
+type intervalFunc func(r Request) time.Duration
+
 // SplitByIntervalMiddleware creates a new Middleware that splits requests by a given interval.
-func SplitByIntervalMiddleware(interval time.Duration, limits Limits, merger Merger, registerer prometheus.Registerer) Middleware {
+func SplitByIntervalMiddleware(interval intervalFunc, limits Limits, merger Merger, registerer prometheus.Registerer) Middleware {
 	return MiddlewareFunc(func(next Handler) Handler {
 		return splitByInterval{
-			next:     next,
-			limits:   limits,
-			merger:   merger,
-			interval: interval,
+			next:              next,
+			limits:            limits,
+			merger:            merger,
+			intervalRetriever: interval,
 			splitByCounter: promauto.With(registerer).NewCounter(prometheus.CounterOpts{
 				Namespace: "cortex",
 				Name:      "frontend_split_queries_total",
@@ -26,10 +28,10 @@ func SplitByIntervalMiddleware(interval time.Duration, limits Limits, merger Mer
 }
 
 type splitByInterval struct {
-	next     Handler
-	limits   Limits
-	merger   Merger
-	interval time.Duration
+	next              Handler
+	limits            Limits
+	merger            Merger
+	intervalRetriever intervalFunc
 
 	// Metrics.
 	splitByCounter prometheus.Counter
@@ -38,7 +40,7 @@ type splitByInterval struct {
 func (s splitByInterval) Do(ctx context.Context, r Request) (Response, error) {
 	// First we're going to build new requests, one for each day, taking care
 	// to line up the boundaries with step.
-	reqs := splitQuery(r, s.interval)
+	reqs := splitQuery(r, s.intervalRetriever(r))
 	s.splitByCounter.Add(float64(len(reqs)))
 
 	reqResps, err := DoRequests(ctx, s.next, reqs, s.limits)
