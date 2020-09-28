@@ -155,7 +155,8 @@ func NewTripperware(
 	}
 	if cfg.SplitQueriesByInterval != 0 {
 		staticIntervalFn := func(_ Request) time.Duration { return cfg.SplitQueriesByInterval }
-		queryRangeMiddleware = append(queryRangeMiddleware, InstrumentMiddleware("split_by_interval", metrics), SplitByIntervalMiddleware(staticIntervalFn, limits, codec, registerer))
+		queryRangeMiddleware = append(queryRangeMiddleware, InstrumentMiddleware("split_by_interval", metrics),
+			SplitByIntervalMiddleware(staticIntervalFn, limits, codec, NewSplitByIntervalMiddleware(registerer)))
 	}
 
 	var c cache.Cache
