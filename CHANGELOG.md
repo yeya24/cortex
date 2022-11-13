@@ -67,6 +67,7 @@
 * [FEATURE] QueryFrontend: Support vertical sharding for subqueries. #4955
 * [FEATURE] Querier: Added a new limit `-querier.max-fetched-data-bytes-per-query` allowing to limit the maximum size of all data in bytes that a query can fetch from each ingester and storage. #4854
 * [FEATURE] Added 2 flags `-alertmanager.alertmanager-client.grpc-compression` and `-querier.store-gateway-client.grpc-compression` to configure compression methods for grpc clients. #4889
+* [FEATURE] Enable experimental out-of-order samples support. Added 2 new configs `out_of_order_time_window` and `out_of_order_cap_max`. Removed config `reject_old_samples` and `reject_old_samples_max_age`. #4964
 * [BUGFIX] Storage/Bucket: Enable AWS SDK for go authentication for s3 to fix IMDSv1 authentication. #4897
 * [BUGFIX] Memberlist: Add join with no retrying when starting service. #4804
 * [BUGFIX] Ruler: Fix /ruler/rule_groups returns YAML with extra fields. #4767
