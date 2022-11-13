@@ -36,7 +36,6 @@ const (
 
 	missingMetricName       = "missing_metric_name"
 	invalidMetricName       = "metric_name_invalid"
-	greaterThanMaxSampleAge = "greater_than_max_sample_age"
 	maxLabelNamesPerSeries  = "max_label_names_per_series"
 	tooFarInFuture          = "too_far_in_future"
 	invalidLabel            = "label_invalid"
@@ -105,11 +104,6 @@ func init() {
 // The returned error may retain the provided series labels.
 func ValidateSample(limits *Limits, userID string, ls []cortexpb.LabelAdapter, s cortexpb.Sample) ValidationError {
 	unsafeMetricName, _ := extract.UnsafeMetricNameFromLabelAdapters(ls)
-
-	if limits.RejectOldSamples && model.Time(s.TimestampMs) < model.Now().Add(-time.Duration(limits.RejectOldSamplesMaxAge)) {
-		DiscardedSamples.WithLabelValues(greaterThanMaxSampleAge, userID).Inc()
-		return newSampleTimestampTooOldError(unsafeMetricName, s.TimestampMs)
-	}
 
 	if model.Time(s.TimestampMs) > model.Now().Add(time.Duration(limits.CreationGracePeriod)) {
 		DiscardedSamples.WithLabelValues(tooFarInFuture, userID).Inc()

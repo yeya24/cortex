@@ -2,12 +2,14 @@ package tsdb
 
 import (
 	"flag"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/units"
 	"github.com/pkg/errors"
+	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/tsdb/wal"
 	"github.com/thanos-io/thanos/pkg/store"
@@ -147,8 +149,12 @@ type TSDBConfig struct {
 	// How often to check for idle TSDBs for closing. DefaultCloseIdleTSDBInterval is not suitable for testing, so tests can override.
 	CloseIdleTSDBInterval time.Duration `yaml:"-"`
 
-	// Positive value enables experiemental support for exemplars. 0 or less to disable.
+	// Positive value enables experimental support for exemplars. 0 or less to disable.
 	MaxExemplars int `yaml:"max_exemplars"`
+
+	// OutOfOrderCapMax is maximum capacity for OOO chunks (in samples).
+	// If it is <=0, the default value is assumed.
+	OutOfOrderCapMax int64 `yaml:"out_of_order_cap_max"`
 }
 
 // RegisterFlags registers the TSDBConfig flags.
@@ -173,6 +179,7 @@ func (cfg *TSDBConfig) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&cfg.FlushBlocksOnShutdown, "blocks-storage.tsdb.flush-blocks-on-shutdown", false, "True to flush blocks to storage on shutdown. If false, incomplete blocks will be reused after restart.")
 	f.DurationVar(&cfg.CloseIdleTSDBTimeout, "blocks-storage.tsdb.close-idle-tsdb-timeout", 0, "If TSDB has not received any data for this duration, and all blocks from TSDB have been shipped, TSDB is closed and deleted from local disk. If set to positive value, this value should be equal or higher than -querier.query-ingesters-within flag to make sure that TSDB is not closed prematurely, which could cause partial query results. 0 or negative value disables closing of idle TSDB.")
 	f.IntVar(&cfg.MaxExemplars, "blocks-storage.tsdb.max-exemplars", 0, "Enables support for exemplars in TSDB and sets the maximum number that will be stored. 0 or less means disabled.")
+	f.Int64Var(&cfg.OutOfOrderCapMax, "blocks-storage.tsdb.out-of-order-cap-max", tsdb.DefaultOutOfOrderCapMax, fmt.Sprintf("[EXPERIMENTAL] Configures the maximum capacity for out-of-order chunks (in samples). If set to <=0, default value %d is assumed.", tsdb.DefaultOutOfOrderCapMax))
 }
 
 // Validate the config.

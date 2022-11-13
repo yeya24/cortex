@@ -2587,14 +2587,6 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 # CLI flag: -validation.max-metadata-length
 [max_metadata_length: <int> | default = 1024]
 
-# Reject old samples.
-# CLI flag: -validation.reject-old-samples
-[reject_old_samples: <boolean> | default = false]
-
-# Maximum accepted sample age before rejecting.
-# CLI flag: -validation.reject-old-samples.max-age
-[reject_old_samples_max_age: <duration> | default = 2w]
-
 # Duration which table will be created/deleted before/after it's needed; we
 # won't accept sample from before this time.
 # CLI flag: -validation.create-grace-period
@@ -2666,6 +2658,11 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 # The maximum number of metadata per metric, across the cluster. 0 to disable.
 # CLI flag: -ingester.max-global-metadata-per-metric
 [max_global_metadata_per_metric: <int> | default = 0]
+
+# [Experimental] Configures the allowed time window for ingestion of
+# out-of-order samples. Disabled (0s) by default.
+# CLI flag: -ingester.out-of-order-time-window
+[out_of_order_time_window: <duration> | default = 0s]
 
 # Maximum number of chunks that can be fetched in a single query from ingesters
 # and long-term storage. This limit is enforced in the querier, ruler and
@@ -3714,6 +3711,11 @@ tsdb:
   # be stored. 0 or less means disabled.
   # CLI flag: -blocks-storage.tsdb.max-exemplars
   [max_exemplars: <int> | default = 0]
+
+  # [EXPERIMENTAL] Configures the maximum capacity for out-of-order chunks (in
+  # samples). If set to <=0, default value 32 is assumed.
+  # CLI flag: -blocks-storage.tsdb.out-of-order-cap-max
+  [out_of_order_cap_max: <int> | default = 32]
 ```
 
 ### `compactor_config`

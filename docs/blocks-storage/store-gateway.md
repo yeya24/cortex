@@ -942,4 +942,9 @@ blocks_storage:
     # will be stored. 0 or less means disabled.
     # CLI flag: -blocks-storage.tsdb.max-exemplars
     [max_exemplars: <int> | default = 0]
+
+    # [EXPERIMENTAL] Configures the maximum capacity for out-of-order chunks (in
+    # samples). If set to <=0, default value 32 is assumed.
+    # CLI flag: -blocks-storage.tsdb.out-of-order-cap-max
+    [out_of_order_cap_max: <int> | default = 32]
 ```
