@@ -1,9 +1,20 @@
 package querier
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/promql/parser"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	"github.com/prometheus/prometheus/util/stats"
+	"github.com/thanos-io/thanos/pkg/store/labelpb"
+	"github.com/thanos-io/thanos/pkg/store/storepb"
+	"io"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,3 +111,91 @@ type sortedByLabels []labels.Labels
 func (b sortedByLabels) Len() int           { return len(b) }
 func (b sortedByLabels) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b sortedByLabels) Less(i, j int) bool { return labels.Compare(b[i], b[j]) < 0 }
+
+func TestCountByteSize(t *testing.T) {
+	seriesNum := 12_000_000
+	labelCount := 19
+	labelLength := 20
+	labelStr := make([]string, 0, labelCount*2)
+	//series := make([]*storepb.Series, seriesNum)
+	lblKeyPrefix := "label_key_" + strings.Repeat("k", labelLength)
+	lblValPrefix := "label_val_" + strings.Repeat("v", labelLength)
+	size := 0
+
+	vector := make([]promql.Sample, 0, seriesNum)
+	for i := 0; i < seriesNum; i++ {
+		c := chunkenc.NewXORChunk()
+		a, err := c.Appender()
+		require.NoError(t, err)
+		t := time.Now().UnixMilli()
+		v := float64(i)
+		a.Append(t, v)
+		labelStr = labelStr[:0]
+		for j := 0; j < labelCount; j++ {
+			labelStr = append(labelStr, fmt.Sprintf("%s_%d_%d", lblKeyPrefix, i, j))
+			labelStr = append(labelStr, fmt.Sprintf("%s_%d_%d", lblValPrefix, i, j))
+		}
+		lbls := mkZLabels(labelStr...)
+		x := &storepb.Series{
+			Labels: lbls,
+			Chunks: []storepb.AggrChunk{{Raw: &storepb.Chunk{
+				Type: storepb.Chunk_XOR,
+				Data: c.Bytes(),
+			}}},
+		}
+		size += x.Size()
+		vector = append(vector, promql.Sample{
+			Metric: labelpb.ZLabelsToPromLabels(lbls),
+			Point: promql.Point{
+				T: t,
+				V: v,
+			},
+		})
+	}
+
+	fmt.Println(float64(size) / 1000 / 1000 / 1000)
+
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
+	b, err := json.Marshal(&response{
+		Status: statusSuccess,
+		Data: queryData{
+			ResultType: "vector",
+			Result:     promql.Vector(vector),
+		},
+	})
+	require.NoError(t, err)
+
+	buf := bytes.NewBuffer(b)
+	gReader, err := gzip.NewReader(buf)
+	require.NoError(t, err)
+	gzipped, err := io.ReadAll(gReader)
+	require.NoError(t, err)
+	fmt.Printf("Size in storepb: %f GB, before gzipped response: %f GB, after gzipped response: %f GB\n", float64(size)/1000/1000/1000, float64(len(b))/1000/1000/1000, float64(len(gzipped))/1000/1000/1000)
+}
+
+type errorType string
+
+const (
+	errorNone        errorType = ""
+	errorTimeout     errorType = "timeout"
+	errorCanceled    errorType = "canceled"
+	errorExec        errorType = "execution"
+	errorBadData     errorType = "bad_data"
+	errorInternal    errorType = "internal"
+	errorUnavailable errorType = "unavailable"
+	errorNotFound    errorType = "not_found"
+)
+
+type response struct {
+	Status    string      `json:"status"`
+	Data      interface{} `json:"data,omitempty"`
+	ErrorType errorType   `json:"errorType,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	Warnings  []string    `json:"warnings,omitempty"`
+}
+
+type queryData struct {
+	ResultType parser.ValueType `json:"resultType"`
+	Result     parser.Value     `json:"result"`
+	Stats      stats.QueryStats `json:"stats,omitempty"`
+}
