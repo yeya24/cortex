@@ -301,7 +301,7 @@ func (d *Distributor) queryIngesterStream(ctx context.Context, replicationSet ri
 	hashToTimeSeries := map[string]cortexpb.TimeSeries{}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for {
