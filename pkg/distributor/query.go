@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -292,100 +293,132 @@ func (d *Distributor) queryIngesterStream(ctx context.Context, replicationSet ri
 		reqStats     = stats.FromContext(ctx)
 	)
 
-	// Fetch samples from multiple ingesters
-	results, err := replicationSet.Do(ctx, d.cfg.ExtraQueryDelay, func(ctx context.Context, ing *ring.InstanceDesc) (interface{}, error) {
-		client, err := d.ingesterPool.GetClientFor(ing.Addr)
-		if err != nil {
-			return nil, err
-		}
-		d.ingesterQueries.WithLabelValues(ing.Addr).Inc()
+	chCS := make(chan []ingester_client.TimeSeriesChunk, 1000)
+	chTS := make(chan []cortexpb.TimeSeries, 1000)
+	errCh := make(chan error)
+	doneCh := make(chan struct{})
 
-		stream, err := client.(ingester_client.IngesterClient).QueryStream(ctx, req)
-		if err != nil {
-			d.ingesterQueryFailures.WithLabelValues(ing.Addr).Inc()
-			return nil, err
-		}
-		defer stream.CloseSend() //nolint:errcheck
-
-		result := &ingester_client.QueryStreamResponse{}
-		for {
-			resp, err := stream.Recv()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				// Do not track a failure if the context was canceled.
-				if !grpcutil.IsGRPCContextCanceled(err) {
-					d.ingesterQueryFailures.WithLabelValues(ing.Addr).Inc()
-				}
-
-				return nil, err
-			}
-
-			// Enforce the max chunks limits.
-			if chunkLimitErr := queryLimiter.AddChunks(resp.ChunksCount()); chunkLimitErr != nil {
-				return nil, validation.LimitError(chunkLimitErr.Error())
-			}
-
-			for _, series := range resp.Chunkseries {
-				if limitErr := queryLimiter.AddSeries(series.Labels); limitErr != nil {
-					return nil, validation.LimitError(limitErr.Error())
-				}
-			}
-
-			if chunkBytesLimitErr := queryLimiter.AddChunkBytes(resp.ChunksSize()); chunkBytesLimitErr != nil {
-				return nil, validation.LimitError(chunkBytesLimitErr.Error())
-			}
-
-			if dataBytesLimitErr := queryLimiter.AddDataBytes(resp.Size()); dataBytesLimitErr != nil {
-				return nil, validation.LimitError(dataBytesLimitErr.Error())
-			}
-
-			for _, series := range resp.Timeseries {
-				if limitErr := queryLimiter.AddSeries(series.Labels); limitErr != nil {
-					return nil, validation.LimitError(limitErr.Error())
-				}
-			}
-
-			result.Chunkseries = append(result.Chunkseries, resp.Chunkseries...)
-			result.Timeseries = append(result.Timeseries, resp.Timeseries...)
-		}
-		return result, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	span, _ := opentracing.StartSpanFromContext(ctx, "Distributor.MergeIngesterStreams")
-	defer span.Finish()
-	hashToChunkseries := map[string]ingester_client.TimeSeriesChunk{}
+	hashToChunkseries := make(map[string]ingester_client.TimeSeriesChunk, 128)
 	hashToTimeSeries := map[string]cortexpb.TimeSeries{}
 
-	for _, result := range results {
-		response := result.(*ingester_client.QueryStreamResponse)
-
-		// Parse any chunk series
-		for _, series := range response.Chunkseries {
-			key := ingester_client.LabelsToKeyString(cortexpb.FromLabelAdaptersToLabels(series.Labels))
-			existing := hashToChunkseries[key]
-			existing.Labels = series.Labels
-			existing.Chunks = append(existing.Chunks, series.Chunks...)
-			hashToChunkseries[key] = existing
-		}
-
-		// Parse any time series
-		for _, series := range response.Timeseries {
-			key := ingester_client.LabelsToKeyString(cortexpb.FromLabelAdaptersToLabels(series.Labels))
-			existing := hashToTimeSeries[key]
-			existing.Labels = series.Labels
-			if existing.Samples == nil {
-				existing.Samples = series.Samples
-			} else {
-				existing.Samples = mergeSamples(existing.Samples, series.Samples)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case cs := <-chCS:
+				for _, series := range cs {
+					key := ingester_client.LabelsToKeyString(cortexpb.FromLabelAdaptersToLabels(series.Labels))
+					existing := hashToChunkseries[key]
+					existing.Labels = series.Labels
+					existing.Chunks = append(existing.Chunks, series.Chunks...)
+					hashToChunkseries[key] = existing
+				}
+			case ts := <-chTS:
+				for _, series := range ts {
+					key := ingester_client.LabelsToKeyString(cortexpb.FromLabelAdaptersToLabels(series.Labels))
+					existing := hashToTimeSeries[key]
+					existing.Labels = series.Labels
+					if existing.Samples == nil {
+						existing.Samples = series.Samples
+					} else {
+						existing.Samples = mergeSamples(existing.Samples, series.Samples)
+					}
+					hashToTimeSeries[key] = existing
+				}
 			}
-			hashToTimeSeries[key] = existing
 		}
+	}()
+
+	go func() {
+		defer func() {
+			wg.Done()
+			doneCh <- struct{}{}
+		}()
+		// Fetch samples from multiple ingesters
+		_, err := replicationSet.Do(ctx, d.cfg.ExtraQueryDelay, func(ctx context.Context, ing *ring.InstanceDesc) (interface{}, error) {
+			client, err := d.ingesterPool.GetClientFor(ing.Addr)
+			if err != nil {
+				return nil, err
+			}
+			d.ingesterQueries.WithLabelValues(ing.Addr).Inc()
+
+			stream, err := client.(ingester_client.IngesterClient).QueryStream(ctx, req)
+			if err != nil {
+				d.ingesterQueryFailures.WithLabelValues(ing.Addr).Inc()
+				return nil, err
+			}
+			defer stream.CloseSend() //nolint:errcheck
+
+			result := &ingester_client.QueryStreamResponse{}
+			for {
+				resp, err := stream.Recv()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					// Do not track a failure if the context was canceled.
+					if !grpcutil.IsGRPCContextCanceled(err) {
+						d.ingesterQueryFailures.WithLabelValues(ing.Addr).Inc()
+					}
+
+					return nil, err
+				}
+
+				// Enforce the max chunks limits.
+				if chunkLimitErr := queryLimiter.AddChunks(resp.ChunksCount()); chunkLimitErr != nil {
+					return nil, validation.LimitError(chunkLimitErr.Error())
+				}
+
+				for _, series := range resp.Chunkseries {
+					if limitErr := queryLimiter.AddSeries(series.Labels); limitErr != nil {
+						return nil, validation.LimitError(limitErr.Error())
+					}
+				}
+
+				if chunkBytesLimitErr := queryLimiter.AddChunkBytes(resp.ChunksSize()); chunkBytesLimitErr != nil {
+					return nil, validation.LimitError(chunkBytesLimitErr.Error())
+				}
+
+				if dataBytesLimitErr := queryLimiter.AddDataBytes(resp.Size()); dataBytesLimitErr != nil {
+					return nil, validation.LimitError(dataBytesLimitErr.Error())
+				}
+
+				for _, series := range resp.Timeseries {
+					if limitErr := queryLimiter.AddSeries(series.Labels); limitErr != nil {
+						return nil, validation.LimitError(limitErr.Error())
+					}
+				}
+
+				if len(resp.Chunkseries) > 0 {
+					chCS <- resp.Chunkseries
+				}
+				if len(resp.Timeseries) > 0 {
+					chTS <- resp.Timeseries
+				}
+			}
+			return result, nil
+		})
+		if err != nil {
+			errCh <- err
+		}
+		close(chTS)
+		close(chCS)
+	}()
+
+	go func() {
+		wg.Wait()
+		doneCh <- struct{}{}
+	}()
+
+	select {
+	case err := <-errCh:
+		return nil, err
+	case <-doneCh:
 	}
 
+	close(errCh)
+	close(doneCh)
 	resp := &ingester_client.QueryStreamResponse{
 		Chunkseries: make([]ingester_client.TimeSeriesChunk, 0, len(hashToChunkseries)),
 		Timeseries:  make([]cortexpb.TimeSeries, 0, len(hashToTimeSeries)),
