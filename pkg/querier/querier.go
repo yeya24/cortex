@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/storage/exemplars"
 	"strings"
 	"sync"
 	"time"
@@ -80,6 +81,9 @@ type Config struct {
 	// Experimental. Use https://github.com/thanos-community/promql-engine rather than
 	// the Prometheus query engine.
 	ThanosEngine bool `yaml:"thanos_engine"`
+
+	ExemplarsStorage exemplars.ExemplarStoreConfig `yaml:"-"`
+	ExemplarsStore   exemplars.ExemplarStore       `yaml:"-"`
 }
 
 var (
@@ -163,7 +167,7 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 		}
 	}
 	queryable := NewQueryable(distributorQueryable, ns, iteratorFunc, cfg, limits, tombstonesLoader)
-	exemplarQueryable := newDistributorExemplarQueryable(distributor)
+	exemplarQueryable := newDistributorExemplarQueryable(distributor, cfg.ExemplarsStore)
 
 	lazyQueryable := storage.QueryableFunc(func(ctx context.Context, mint int64, maxt int64) (storage.Querier, error) {
 		querier, err := queryable.Querier(ctx, mint, maxt)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/storage/exemplars"
+	"go.opentelemetry.io/otel"
 	"net/http"
 
 	"github.com/go-kit/log"
@@ -221,6 +223,14 @@ func (t *Cortex) initDistributor() (serv services.Service, err error) {
 func (t *Cortex) initQueryable() (serv services.Service, err error) {
 	querierRegisterer := prometheus.WrapRegistererWith(prometheus.Labels{"engine": "querier"}, prometheus.DefaultRegisterer)
 
+	t.Cfg.Querier.ExemplarsStorage = t.Cfg.ExemplarsStorageConfig
+	if len(t.Cfg.ExemplarsStorageConfig.Backend) > 0 {
+		t.Cfg.Querier.ExemplarsStore, err = exemplars.NewExemplarStore(t.Cfg.ExemplarsStorageConfig, util_log.Logger, otel.GetTracerProvider().Tracer("exemplars"), nil, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Create a querier queryable and PromQL engine
 	t.QuerierQueryable, t.ExemplarQueryable, t.QuerierEngine = querier.New(t.Cfg.Querier, t.Overrides, t.Distributor, t.StoreQueryables, t.TombstonesLoader, querierRegisterer, util_log.Logger)
 
@@ -291,7 +301,7 @@ func (t *Cortex) initTenantFederation() (serv services.Service, err error) {
 //	                   └──────────────────────│  Prometheus API  │
 //	                                          │                  │
 //	                                          └──────────────────┘
-func (t *Cortex) initQuerier() (serv services.Service, err error) {
+func (t *Cortex) initQuerier() (servinitQuerier services.Service, err error) {
 	// Create a internal HTTP handler that is configured with the Prometheus API routes and points
 	// to a Prometheus API struct instantiated with the Cortex Queryable.
 	internalQuerierRouter := api.NewQuerierHandler(
@@ -400,6 +410,7 @@ func (t *Cortex) initIngesterService() (serv services.Service, err error) {
 	t.Cfg.Ingester.QueryStoreForLabels = t.Cfg.Querier.QueryStoreForLabels
 	t.Cfg.Ingester.QueryIngestersWithin = t.Cfg.Querier.QueryIngestersWithin
 	t.tsdbIngesterConfig()
+	t.Cfg.Ingester.ExemplarsStorageConfig = t.Cfg.ExemplarsStorageConfig
 
 	t.Ingester, err = ingester.New(t.Cfg.Ingester, t.Overrides, prometheus.DefaultRegisterer, util_log.Logger)
 	if err != nil {

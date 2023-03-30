@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/storage/exemplars"
 	"net/http"
 	"os"
 	"reflect"
@@ -94,23 +95,24 @@ type Config struct {
 	ExternalQueryable prom_storage.Queryable `yaml:"-"`
 	ExternalPusher    ruler.Pusher           `yaml:"-"`
 
-	API              api.Config                      `yaml:"api"`
-	Server           server.Config                   `yaml:"server"`
-	Distributor      distributor.Config              `yaml:"distributor"`
-	Querier          querier.Config                  `yaml:"querier"`
-	IngesterClient   client.Config                   `yaml:"ingester_client"`
-	Ingester         ingester.Config                 `yaml:"ingester"`
-	Flusher          flusher.Config                  `yaml:"flusher"`
-	Storage          storage.Config                  `yaml:"storage"`
-	LimitsConfig     validation.Limits               `yaml:"limits"`
-	Prealloc         cortexpb.PreallocConfig         `yaml:"prealloc" doc:"hidden"`
-	Worker           querier_worker.Config           `yaml:"frontend_worker"`
-	Frontend         frontend.CombinedFrontendConfig `yaml:"frontend"`
-	QueryRange       queryrange.Config               `yaml:"query_range"`
-	BlocksStorage    tsdb.BlocksStorageConfig        `yaml:"blocks_storage"`
-	Compactor        compactor.Config                `yaml:"compactor"`
-	StoreGateway     storegateway.Config             `yaml:"store_gateway"`
-	TenantFederation tenantfederation.Config         `yaml:"tenant_federation"`
+	API                    api.Config                      `yaml:"api"`
+	Server                 server.Config                   `yaml:"server"`
+	Distributor            distributor.Config              `yaml:"distributor"`
+	Querier                querier.Config                  `yaml:"querier"`
+	IngesterClient         client.Config                   `yaml:"ingester_client"`
+	Ingester               ingester.Config                 `yaml:"ingester"`
+	Flusher                flusher.Config                  `yaml:"flusher"`
+	Storage                storage.Config                  `yaml:"storage"`
+	LimitsConfig           validation.Limits               `yaml:"limits"`
+	Prealloc               cortexpb.PreallocConfig         `yaml:"prealloc" doc:"hidden"`
+	Worker                 querier_worker.Config           `yaml:"frontend_worker"`
+	Frontend               frontend.CombinedFrontendConfig `yaml:"frontend"`
+	QueryRange             queryrange.Config               `yaml:"query_range"`
+	BlocksStorage          tsdb.BlocksStorageConfig        `yaml:"blocks_storage"`
+	Compactor              compactor.Config                `yaml:"compactor"`
+	StoreGateway           storegateway.Config             `yaml:"store_gateway"`
+	TenantFederation       tenantfederation.Config         `yaml:"tenant_federation"`
+	ExemplarsStorageConfig exemplars.ExemplarStoreConfig   `yaml:"exemplars_storage"`
 
 	Ruler               ruler.Config                               `yaml:"ruler"`
 	RulerStorage        rulestore.Config                           `yaml:"ruler_storage"`
@@ -301,6 +303,7 @@ type Cortex struct {
 	Frontend                 *frontendv1.Frontend
 	RuntimeConfig            *runtimeconfig.Manager
 	TombstonesLoader         purger.TombstonesLoader
+	ExemplarsStore           exemplars.ExemplarStore
 	QuerierQueryable         prom_storage.SampleAndChunkQueryable
 	ExemplarQueryable        prom_storage.ExemplarQueryable
 	QuerierEngine            v1.QueryEngine

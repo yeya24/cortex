@@ -2,6 +2,8 @@ package querier
 
 import (
 	"context"
+	"github.com/cortexproject/cortex/pkg/storage/exemplars"
+	"github.com/cortexproject/cortex/pkg/tenant"
 	"sort"
 	"time"
 
@@ -286,41 +288,127 @@ func (q *distributorQuerier) Close() error {
 }
 
 type distributorExemplarQueryable struct {
-	distributor Distributor
+	distributor   Distributor
+	exemplarStore exemplars.ExemplarStore
 }
 
-func newDistributorExemplarQueryable(d Distributor) storage.ExemplarQueryable {
+func newDistributorExemplarQueryable(d Distributor, e exemplars.ExemplarStore) storage.ExemplarQueryable {
 	return &distributorExemplarQueryable{
-		distributor: d,
+		distributor:   d,
+		exemplarStore: e,
 	}
 }
 
 func (d distributorExemplarQueryable) ExemplarQuerier(ctx context.Context) (storage.ExemplarQuerier, error) {
 	return &distributorExemplarQuerier{
-		distributor: d.distributor,
-		ctx:         ctx,
+		distributor:   d.distributor,
+		exemplarStore: d.exemplarStore,
+		ctx:           ctx,
 	}, nil
 }
 
 type distributorExemplarQuerier struct {
-	distributor Distributor
-	ctx         context.Context
+	distributor   Distributor
+	exemplarStore exemplars.ExemplarStore
+	ctx           context.Context
 }
 
 // Select querys for exemplars, prometheus' storage.ExemplarQuerier's Select function takes the time range as two int64 values.
 func (q *distributorExemplarQuerier) Select(start, end int64, matchers ...[]*labels.Matcher) ([]exemplar.QueryResult, error) {
 	allResults, err := q.distributor.QueryExemplars(q.ctx, model.Time(start), model.Time(end), matchers...)
-
 	if err != nil {
 		return nil, err
 	}
 
+	ret := make([]exemplar.QueryResult, 0, len(allResults.Timeseries))
 	var e exemplar.QueryResult
-	ret := make([]exemplar.QueryResult, len(allResults.Timeseries))
-	for i, ts := range allResults.Timeseries {
+	for _, ts := range allResults.Timeseries {
 		e.SeriesLabels = cortexpb.FromLabelAdaptersToLabels(ts.Labels)
 		e.Exemplars = cortexpb.FromExemplarProtosToExemplars(ts.Exemplars)
-		ret[i] = e
+		ret = append(ret, e)
+	}
+	if q.exemplarStore == nil {
+		return ret, nil
+	}
+
+	userID, err := tenant.TenantID(q.ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Remote exemplar storage.
+	res, err := q.exemplarStore.Select(q.ctx, userID, start, end, matchers...)
+	if err != nil {
+		return nil, err
+	}
+	if len(res) == 0 {
+		return ret, nil
+	}
+
+	keys := make([]string, 0, len(allResults.Timeseries))
+	buf := make([]byte, 0, 1024)
+	dedupMap := make(map[string]exemplar.QueryResult, len(allResults.Timeseries))
+	for _, ts := range allResults.Timeseries {
+		key := string(cortexpb.FromLabelAdaptersToLabels(ts.Labels).Bytes(buf))
+		if _, ok := dedupMap[key]; !ok {
+			dedupMap[key] = exemplar.QueryResult{
+				SeriesLabels: cortexpb.FromLabelAdaptersToLabels(ts.Labels),
+				Exemplars:    cortexpb.FromExemplarProtosToExemplars(ts.Exemplars),
+			}
+			keys = append(keys, key)
+		}
+	}
+	for _, ts := range res {
+		key := string(ts.SeriesLabels.Bytes(buf))
+		if qr, ok := dedupMap[key]; !ok {
+			dedupMap[key] = exemplar.QueryResult{
+				SeriesLabels: ts.SeriesLabels,
+				Exemplars:    ts.Exemplars,
+			}
+			keys = append(keys, key)
+		} else {
+			qr.Exemplars = mergeExemplars(dedupMap[key].Exemplars, ts.Exemplars)
+		}
+	}
+	sort.Strings(keys)
+
+	ret = make([]exemplar.QueryResult, 0, len(dedupMap))
+	for i, k := range keys {
+		ret[i] = dedupMap[k]
 	}
 	return ret, nil
+}
+
+func mergeExemplars(exemplarsA, exemplarsB []exemplar.Exemplar) []exemplar.Exemplar {
+	output := make([]exemplar.Exemplar, 0, len(exemplarsA)+len(exemplarsB))
+	sort.Slice(exemplarsA, func(i, j int) bool {
+		return exemplarsA[i].Ts < exemplarsA[j].Ts
+	})
+	sort.Slice(exemplarsB, func(i, j int) bool {
+		return exemplarsB[i].Ts < exemplarsB[j].Ts
+	})
+	i := 0
+	j := 0
+	for i < len(exemplarsA) && j < len(exemplarsB) {
+		t1 := exemplarsA[i].Ts
+		t2 := exemplarsB[j].Ts
+		if t1 == t2 {
+			if exemplarsA[i].Equals(exemplarsB[j]) {
+				// pick t1.
+				output = append(output, exemplarsA[i])
+			} else {
+				// pick both
+				output = append(output, exemplarsA[i])
+				output = append(output, exemplarsB[j])
+			}
+			i++
+			j++
+		} else if t1 < t2 {
+			output = append(output, exemplarsA[i])
+			i++
+		} else {
+			output = append(output, exemplarsB[j])
+			j++
+		}
+	}
+	return output
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/storage/exemplars"
+	"go.opentelemetry.io/otel"
 	"io"
 	"math"
 	"net/http"
@@ -105,6 +107,9 @@ type Config struct {
 	// Use blocks storage.
 	BlocksStorageConfig cortex_tsdb.BlocksStorageConfig `yaml:"-"`
 
+	// Exemplars storage.
+	ExemplarsStorageConfig exemplars.ExemplarStoreConfig `yaml:"-"`
+
 	// Injected at runtime and read from the distributor config, required
 	// to accurately apply global limits.
 	DistributorShardingStrategy string `yaml:"-"`
@@ -187,7 +192,8 @@ type Ingester struct {
 	usersMetadata    map[string]*userMetricsMetadata
 
 	// Prometheus block storage
-	TSDBState TSDBState
+	TSDBState     TSDBState
+	exemplarStore exemplars.ExemplarStore
 
 	// Rate of pushed samples. Only used by V2-ingester to limit global samples push rate.
 	ingestionRate        *util_math.EwmaRate
@@ -598,7 +604,7 @@ func newTSDBState(bucketClient objstore.Bucket, registerer prometheus.Registerer
 	}
 }
 
-// NewV2 returns a new Ingester that uses Cortex block storage instead of chunks storage.
+// New returns a new Ingester that uses Cortex block storage instead of chunks storage.
 func New(cfg Config, limits *validation.Overrides, registerer prometheus.Registerer, logger log.Logger) (*Ingester, error) {
 	defaultInstanceLimits = &cfg.DefaultLimits
 	if cfg.ingesterClientFactory == nil {
@@ -617,6 +623,12 @@ func New(cfg Config, limits *validation.Overrides, registerer prometheus.Registe
 		TSDBState:     newTSDBState(bucketClient, registerer),
 		logger:        logger,
 		ingestionRate: util_math.NewEWMARate(0.2, instanceIngestionRateTickInterval),
+	}
+	if len(cfg.ExemplarsStorageConfig.Backend) > 0 {
+		i.exemplarStore, err = exemplars.NewExemplarStore(cfg.ExemplarsStorageConfig, logger, otel.GetTracerProvider().Tracer("exemplars"), registerer, true)
+		if err != nil {
+			return nil, errors.Wrap(err, "create exemplar store")
+		}
 	}
 	i.metrics = newIngesterMetrics(registerer, false, cfg.ActiveSeriesMetricsEnabled, i.getInstanceLimits, i.ingestionRate, &i.inflightPushRequests)
 
@@ -1101,15 +1113,7 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 
 		maxExemplarsForUser := i.getMaxExemplars(userID)
 		if maxExemplarsForUser > 0 {
-			// app.AppendExemplar currently doesn't create the series, it must
-			// already exist.  If it does not then drop.
-			if ref == 0 && len(ts.Exemplars) > 0 {
-				updateFirstPartial(func() error {
-					return wrappedTSDBIngestExemplarErr(errExemplarRef,
-						model.Time(ts.Exemplars[0].TimestampMs), ts.Labels, ts.Exemplars[0].Labels)
-				})
-				failedExemplarsCount += len(ts.Exemplars)
-			} else { // Note that else is explicit, rather than a continue in the above if, in case of additional logic post exemplar processing.
+			if i.exemplarStore != nil {
 				for _, ex := range ts.Exemplars {
 					e := exemplar.Exemplar{
 						Value:  ex.Value,
@@ -1117,17 +1121,9 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 						HasTs:  true,
 						Labels: cortexpb.FromLabelAdaptersToLabelsWithCopy(ex.Labels),
 					}
-
-					if _, err = app.AppendExemplar(ref, nil, e); err == nil {
-						succeededExemplarsCount++
-						continue
+					if err := i.exemplarStore.AppendExemplar(ctx, userID, tsLabels, e); err != nil {
+						return nil, wrapWithUser(err, userID)
 					}
-
-					// Error adding exemplar
-					updateFirstPartial(func() error {
-						return wrappedTSDBIngestExemplarErr(err, model.Time(ex.TimestampMs), ts.Labels, ex.Labels)
-					})
-					failedExemplarsCount++
 				}
 			}
 		}
@@ -1295,7 +1291,7 @@ func (i *Ingester) Query(ctx context.Context, req *client.QueryRequest) (*client
 	return result, ss.Err()
 }
 
-// Query implements service.IngesterServer
+// QueryExemplars implements service.IngesterServer
 func (i *Ingester) QueryExemplars(ctx context.Context, req *client.ExemplarQueryRequest) (*client.ExemplarQueryResponse, error) {
 	if err := i.checkRunning(); err != nil {
 		return nil, err
@@ -1306,29 +1302,19 @@ func (i *Ingester) QueryExemplars(ctx context.Context, req *client.ExemplarQuery
 		return nil, err
 	}
 
+	if i.exemplarStore == nil {
+		return nil, nil
+	}
+
+	i.metrics.queries.Inc()
 	from, through, matchers, err := client.FromExemplarQueryRequest(req)
 	if err != nil {
 		return nil, err
 	}
-
-	i.metrics.queries.Inc()
-
-	db := i.getTSDB(userID)
-	if db == nil {
-		return &client.ExemplarQueryResponse{}, nil
-	}
-
-	q, err := db.ExemplarQuerier(ctx)
+	res, err := i.exemplarStore.Select(ctx, userID, from, through, matchers...)
 	if err != nil {
 		return nil, err
 	}
-
-	// It's not required to sort series from a single ingester because series are sorted by the Exemplar Storage before returning from Select.
-	res, err := q.Select(from, through, matchers...)
-	if err != nil {
-		return nil, err
-	}
-
 	numExemplars := 0
 
 	result := &client.ExemplarQueryResponse{}
@@ -1343,7 +1329,6 @@ func (i *Ingester) QueryExemplars(ctx context.Context, req *client.ExemplarQuery
 	}
 
 	i.metrics.queriedExemplars.Observe(float64(numExemplars))
-
 	return result, nil
 }
 
