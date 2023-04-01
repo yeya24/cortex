@@ -726,7 +726,7 @@ github.com/pkg/errors
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/polarsignals/frostdb v0.0.0-20230330172009-8749098e3d00
+# github.com/polarsignals/frostdb v0.0.0-20230330172009-8749098e3d00 => github.com/yeya24/frostdb v0.0.0-20230401072115-f54b175357a8
 ## explicit; go 1.19
 github.com/polarsignals/frostdb
 github.com/polarsignals/frostdb/bufutils
@@ -1525,3 +1525,4 @@ sigs.k8s.io/yaml
 # github.com/google/gnostic => github.com/googleapis/gnostic v0.6.9
 # gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0.20210301060133-17f40c25f497
 # github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
+# github.com/polarsignals/frostdb => github.com/yeya24/frostdb v0.0.0-20230401072115-f54b175357a8

@@ -145,8 +145,8 @@ func (s *FrostDBStore) Select(ctx context.Context, tenant string, start, end int
 				logicalplan.And(
 					logicalplan.Col(ColumnTenant).Eq(logicalplan.Literal(tenant)),
 					logicalplan.And(
-						logicalplan.Col(ColumnTimestamp).Gt(logicalplan.Literal(start)),
-						logicalplan.Col(ColumnTimestamp).Lt(logicalplan.Literal(end)),
+						logicalplan.Col(ColumnTimestamp).GtEq(logicalplan.Literal(start)),
+						logicalplan.Col(ColumnTimestamp).LtEq(logicalplan.Literal(end)),
 					),
 					promMatchersToFrostDBExprs(matcher),
 				),

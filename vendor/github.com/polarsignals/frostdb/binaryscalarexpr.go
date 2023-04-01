@@ -94,6 +94,8 @@ func BinaryScalarOperation(left parquet.ColumnChunk, right parquet.Value, operat
 
 		bloomFilter := left.BloomFilter()
 		if bloomFilter == nil {
+			fmt.Println(right.GoString(), Max(left).GoString(), Min(left).GoString(),
+				compare(right, Max(left)) <= 0, compare(right, Min(left)) >= 0)
 			// If there is no bloom filter then we cannot make a statement about true negative, instead check the min max values of the column chunk
 			return compare(right, Max(left)) <= 0 && compare(right, Min(left)) >= 0, nil
 		}
