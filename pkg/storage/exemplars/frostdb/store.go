@@ -41,13 +41,13 @@ func NewFrostDBStore(cfg Config, logger log.Logger, tracer trace.Tracer, reg pro
 		frostdb.WithLogger(logger),
 		frostdb.WithRegistry(reg),
 		frostdb.WithTracer(tracer),
-		frostdb.WithWAL(),
-		frostdb.WithStoragePath(cfg.Path),
 		frostdb.WithBucketStorage(bucketClient),
 		frostdb.WithActiveMemorySize(cfg.ActiveMemorySize),
 	}
+	// If it is ingester store, we want to enable WAL and read local data only.
+	// For long term storage, we don't need WAL because it is read only.
 	if ingester {
-		opts = append(opts, frostdb.WithIgnoreStorageOnQuery())
+		opts = append(opts, frostdb.WithIgnoreStorageOnQuery(), frostdb.WithWAL(), frostdb.WithStoragePath(cfg.Path))
 	}
 	store, err := frostdb.New(opts...)
 	if err != nil {

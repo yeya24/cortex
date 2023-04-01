@@ -280,4 +280,4 @@ replace gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0
 
 replace github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
 
-replace github.com/polarsignals/frostdb => github.com/yeya24/frostdb v0.0.0-20230401072115-f54b175357a8
+replace github.com/polarsignals/frostdb => github.com/yeya24/frostdb v0.0.0-20230401161029-1f37320fb108

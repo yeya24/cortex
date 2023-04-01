@@ -371,7 +371,7 @@ func (q *distributorExemplarQuerier) Select(start, end int64, matchers ...[]*lab
 	}
 	sort.Strings(keys)
 
-	ret = make([]exemplar.QueryResult, 0, len(dedupMap))
+	ret = make([]exemplar.QueryResult, len(dedupMap))
 	for i, k := range keys {
 		ret[i] = dedupMap[k]
 	}
