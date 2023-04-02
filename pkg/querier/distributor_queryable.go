@@ -367,6 +367,7 @@ func (q *distributorExemplarQuerier) Select(start, end int64, matchers ...[]*lab
 			keys = append(keys, key)
 		} else {
 			qr.Exemplars = mergeExemplars(dedupMap[key].Exemplars, ts.Exemplars)
+			dedupMap[key] = qr
 		}
 	}
 	sort.Strings(keys)
@@ -409,6 +410,14 @@ func mergeExemplars(exemplarsA, exemplarsB []exemplar.Exemplar) []exemplar.Exemp
 			output = append(output, exemplarsB[j])
 			j++
 		}
+	}
+	for i < len(exemplarsA) {
+		output = append(output, exemplarsA[i])
+		i++
+	}
+	for j < len(exemplarsB) {
+		output = append(output, exemplarsB[i])
+		j++
 	}
 	return output
 }
