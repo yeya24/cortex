@@ -181,7 +181,6 @@ func compare(v1, v2 parquet.Value) int {
 	case parquet.Double:
 		return parquet.DoubleType.Compare(v1, v2)
 	case parquet.ByteArray, parquet.FixedLenByteArray:
-		fmt.Println(v1.GoString(), v2.GoString())
 		return parquet.ByteArrayType.Compare(v1, v2)
 	case parquet.Boolean:
 		return parquet.BooleanType.Compare(v1, v2)
