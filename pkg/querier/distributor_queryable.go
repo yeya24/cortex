@@ -416,7 +416,7 @@ func mergeExemplars(exemplarsA, exemplarsB []exemplar.Exemplar) []exemplar.Exemp
 		i++
 	}
 	for j < len(exemplarsB) {
-		output = append(output, exemplarsB[i])
+		output = append(output, exemplarsB[j])
 		j++
 	}
 	return output
