@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/prometheus/prometheus/promql"
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"strings"
 	"time"
 
@@ -99,6 +101,8 @@ type StoreGateway struct {
 	subservicesWatcher *services.FailureWatcher
 
 	bucketSync *prometheus.CounterVec
+
+	engine v1.QueryEngine
 }
 
 func NewStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConfig, limits *validation.Overrides, logLevel logging.Level, logger log.Logger, reg prometheus.Registerer) (*StoreGateway, error) {
@@ -136,6 +140,7 @@ func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 			Help: "Total number of times the bucket sync operation triggered.",
 		}, []string{"reason"}),
 	}
+	g.engine = promql.NewEngine(promql.EngineOpts{})
 
 	// Init metrics.
 	g.bucketSync.WithLabelValues(syncReasonInitial)
