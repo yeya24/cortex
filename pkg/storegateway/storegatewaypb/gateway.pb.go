@@ -11,7 +11,12 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	io "io"
 	math "math"
+	math_bits "math/bits"
+	reflect "reflect"
+	prompb "store/storepb/prompb"
+	strings "strings"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -25,27 +30,693 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
+type QueryRequest struct {
+	Query                string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	TimeSeconds          int64  `protobuf:"varint,2,opt,name=time_seconds,json=timeSeconds,proto3" json:"time_seconds,omitempty"`
+	TimeoutSeconds       int64  `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	LookbackDeltaSeconds int64  `protobuf:"varint,4,opt,name=lookback_delta_seconds,json=lookbackDeltaSeconds,proto3" json:"lookback_delta_seconds,omitempty"`
+}
+
+func (m *QueryRequest) Reset()      { *m = QueryRequest{} }
+func (*QueryRequest) ProtoMessage() {}
+func (*QueryRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f1a937782ebbded5, []int{0}
+}
+func (m *QueryRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryRequest.Merge(m, src)
+}
+func (m *QueryRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryRequest proto.InternalMessageInfo
+
+func (m *QueryRequest) GetQuery() string {
+	if m != nil {
+		return m.Query
+	}
+	return ""
+}
+
+func (m *QueryRequest) GetTimeSeconds() int64 {
+	if m != nil {
+		return m.TimeSeconds
+	}
+	return 0
+}
+
+func (m *QueryRequest) GetTimeoutSeconds() int64 {
+	if m != nil {
+		return m.TimeoutSeconds
+	}
+	return 0
+}
+
+func (m *QueryRequest) GetLookbackDeltaSeconds() int64 {
+	if m != nil {
+		return m.LookbackDeltaSeconds
+	}
+	return 0
+}
+
+type QueryResponse struct {
+	// Types that are valid to be assigned to Result:
+	//	*QueryResponse_Warnings
+	//	*QueryResponse_Timeseries
+	Result isQueryResponse_Result `protobuf_oneof:"result"`
+}
+
+func (m *QueryResponse) Reset()      { *m = QueryResponse{} }
+func (*QueryResponse) ProtoMessage() {}
+func (*QueryResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f1a937782ebbded5, []int{1}
+}
+func (m *QueryResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryResponse.Merge(m, src)
+}
+func (m *QueryResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryResponse proto.InternalMessageInfo
+
+type isQueryResponse_Result interface {
+	isQueryResponse_Result()
+	Equal(interface{}) bool
+	MarshalTo([]byte) (int, error)
+	Size() int
+}
+
+type QueryResponse_Warnings struct {
+	Warnings string `protobuf:"bytes,1,opt,name=warnings,proto3,oneof"`
+}
+type QueryResponse_Timeseries struct {
+	Timeseries *prompb.TimeSeries `protobuf:"bytes,2,opt,name=timeseries,proto3,oneof"`
+}
+
+func (*QueryResponse_Warnings) isQueryResponse_Result()   {}
+func (*QueryResponse_Timeseries) isQueryResponse_Result() {}
+
+func (m *QueryResponse) GetResult() isQueryResponse_Result {
+	if m != nil {
+		return m.Result
+	}
+	return nil
+}
+
+func (m *QueryResponse) GetWarnings() string {
+	if x, ok := m.GetResult().(*QueryResponse_Warnings); ok {
+		return x.Warnings
+	}
+	return ""
+}
+
+func (m *QueryResponse) GetTimeseries() *prompb.TimeSeries {
+	if x, ok := m.GetResult().(*QueryResponse_Timeseries); ok {
+		return x.Timeseries
+	}
+	return nil
+}
+
+// XXX_OneofWrappers is for the internal use of the proto package.
+func (*QueryResponse) XXX_OneofWrappers() []interface{} {
+	return []interface{}{
+		(*QueryResponse_Warnings)(nil),
+		(*QueryResponse_Timeseries)(nil),
+	}
+}
+
+type QueryRangeRequest struct {
+	Query                string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	StartTimeSeconds     int64  `protobuf:"varint,2,opt,name=start_time_seconds,json=startTimeSeconds,proto3" json:"start_time_seconds,omitempty"`
+	EndTimeSeconds       int64  `protobuf:"varint,3,opt,name=end_time_seconds,json=endTimeSeconds,proto3" json:"end_time_seconds,omitempty"`
+	IntervalSeconds      int64  `protobuf:"varint,4,opt,name=interval_seconds,json=intervalSeconds,proto3" json:"interval_seconds,omitempty"`
+	TimeoutSeconds       int64  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	LookbackDeltaSeconds int64  `protobuf:"varint,6,opt,name=lookback_delta_seconds,json=lookbackDeltaSeconds,proto3" json:"lookback_delta_seconds,omitempty"`
+}
+
+func (m *QueryRangeRequest) Reset()      { *m = QueryRangeRequest{} }
+func (*QueryRangeRequest) ProtoMessage() {}
+func (*QueryRangeRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f1a937782ebbded5, []int{2}
+}
+func (m *QueryRangeRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryRangeRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryRangeRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryRangeRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryRangeRequest.Merge(m, src)
+}
+func (m *QueryRangeRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryRangeRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryRangeRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryRangeRequest proto.InternalMessageInfo
+
+func (m *QueryRangeRequest) GetQuery() string {
+	if m != nil {
+		return m.Query
+	}
+	return ""
+}
+
+func (m *QueryRangeRequest) GetStartTimeSeconds() int64 {
+	if m != nil {
+		return m.StartTimeSeconds
+	}
+	return 0
+}
+
+func (m *QueryRangeRequest) GetEndTimeSeconds() int64 {
+	if m != nil {
+		return m.EndTimeSeconds
+	}
+	return 0
+}
+
+func (m *QueryRangeRequest) GetIntervalSeconds() int64 {
+	if m != nil {
+		return m.IntervalSeconds
+	}
+	return 0
+}
+
+func (m *QueryRangeRequest) GetTimeoutSeconds() int64 {
+	if m != nil {
+		return m.TimeoutSeconds
+	}
+	return 0
+}
+
+func (m *QueryRangeRequest) GetLookbackDeltaSeconds() int64 {
+	if m != nil {
+		return m.LookbackDeltaSeconds
+	}
+	return 0
+}
+
+type QueryRangeResponse struct {
+	// Types that are valid to be assigned to Result:
+	//	*QueryRangeResponse_Warnings
+	//	*QueryRangeResponse_Timeseries
+	Result isQueryRangeResponse_Result `protobuf_oneof:"result"`
+}
+
+func (m *QueryRangeResponse) Reset()      { *m = QueryRangeResponse{} }
+func (*QueryRangeResponse) ProtoMessage() {}
+func (*QueryRangeResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_f1a937782ebbded5, []int{3}
+}
+func (m *QueryRangeResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryRangeResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryRangeResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryRangeResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryRangeResponse.Merge(m, src)
+}
+func (m *QueryRangeResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryRangeResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryRangeResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryRangeResponse proto.InternalMessageInfo
+
+type isQueryRangeResponse_Result interface {
+	isQueryRangeResponse_Result()
+	Equal(interface{}) bool
+	MarshalTo([]byte) (int, error)
+	Size() int
+}
+
+type QueryRangeResponse_Warnings struct {
+	Warnings string `protobuf:"bytes,1,opt,name=warnings,proto3,oneof"`
+}
+type QueryRangeResponse_Timeseries struct {
+	Timeseries *prompb.TimeSeries `protobuf:"bytes,2,opt,name=timeseries,proto3,oneof"`
+}
+
+func (*QueryRangeResponse_Warnings) isQueryRangeResponse_Result()   {}
+func (*QueryRangeResponse_Timeseries) isQueryRangeResponse_Result() {}
+
+func (m *QueryRangeResponse) GetResult() isQueryRangeResponse_Result {
+	if m != nil {
+		return m.Result
+	}
+	return nil
+}
+
+func (m *QueryRangeResponse) GetWarnings() string {
+	if x, ok := m.GetResult().(*QueryRangeResponse_Warnings); ok {
+		return x.Warnings
+	}
+	return ""
+}
+
+func (m *QueryRangeResponse) GetTimeseries() *prompb.TimeSeries {
+	if x, ok := m.GetResult().(*QueryRangeResponse_Timeseries); ok {
+		return x.Timeseries
+	}
+	return nil
+}
+
+// XXX_OneofWrappers is for the internal use of the proto package.
+func (*QueryRangeResponse) XXX_OneofWrappers() []interface{} {
+	return []interface{}{
+		(*QueryRangeResponse_Warnings)(nil),
+		(*QueryRangeResponse_Timeseries)(nil),
+	}
+}
+
+func init() {
+	proto.RegisterType((*QueryRequest)(nil), "gatewaypb.QueryRequest")
+	proto.RegisterType((*QueryResponse)(nil), "gatewaypb.QueryResponse")
+	proto.RegisterType((*QueryRangeRequest)(nil), "gatewaypb.QueryRangeRequest")
+	proto.RegisterType((*QueryRangeResponse)(nil), "gatewaypb.QueryRangeResponse")
+}
+
 func init() { proto.RegisterFile("gateway.proto", fileDescriptor_f1a937782ebbded5) }
 
 var fileDescriptor_f1a937782ebbded5 = []byte{
-	// 257 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0xe2, 0x4d, 0x4f, 0x2c, 0x49,
-	0x2d, 0x4f, 0xac, 0xd4, 0x2b, 0x28, 0xca, 0x2f, 0xc9, 0x17, 0xe2, 0x84, 0x72, 0x0b, 0x92, 0xa4,
-	0xcc, 0xd3, 0x33, 0x4b, 0x32, 0x4a, 0x93, 0xf4, 0x92, 0xf3, 0x73, 0xf5, 0x4b, 0x32, 0x12, 0xf3,
-	0xf2, 0x8b, 0x75, 0x33, 0xf3, 0xa1, 0x2c, 0xfd, 0x82, 0xec, 0x74, 0xfd, 0xe2, 0x92, 0xfc, 0xa2,
-	0x54, 0x08, 0x59, 0x90, 0xa4, 0x5f, 0x54, 0x90, 0x0c, 0x31, 0xc3, 0xe8, 0x1a, 0x23, 0x17, 0x4f,
-	0x30, 0x48, 0xd4, 0x1d, 0x62, 0x96, 0x90, 0x25, 0x17, 0x5b, 0x70, 0x6a, 0x51, 0x66, 0x6a, 0xb1,
-	0x90, 0xa8, 0x1e, 0x44, 0xbf, 0x1e, 0x84, 0x1f, 0x94, 0x5a, 0x58, 0x9a, 0x5a, 0x5c, 0x22, 0x25,
-	0x86, 0x2e, 0x5c, 0x5c, 0x90, 0x9f, 0x57, 0x9c, 0x6a, 0xc0, 0x28, 0xe4, 0xcc, 0xc5, 0xe5, 0x93,
-	0x98, 0x94, 0x9a, 0xe3, 0x97, 0x98, 0x9b, 0x5a, 0x2c, 0x24, 0x09, 0x53, 0x87, 0x10, 0x83, 0x19,
-	0x21, 0x85, 0x4d, 0x0a, 0x62, 0x8c, 0x90, 0x1b, 0x17, 0x37, 0x58, 0x34, 0x2c, 0x31, 0xa7, 0x34,
-	0xb5, 0x58, 0x08, 0x55, 0x29, 0x44, 0x10, 0x66, 0x8c, 0x34, 0x56, 0x39, 0x88, 0x39, 0x4e, 0x2e,
-	0x17, 0x1e, 0xca, 0x31, 0xdc, 0x78, 0x28, 0xc7, 0xf0, 0xe1, 0xa1, 0x1c, 0x63, 0xc3, 0x23, 0x39,
-	0xc6, 0x15, 0x8f, 0xe4, 0x18, 0x4f, 0x3c, 0x92, 0x63, 0xbc, 0xf0, 0x48, 0x8e, 0xf1, 0xc1, 0x23,
-	0x39, 0xc6, 0x17, 0x8f, 0xe4, 0x18, 0x3e, 0x3c, 0x92, 0x63, 0x9c, 0xf0, 0x58, 0x8e, 0xe1, 0xc2,
-	0x63, 0x39, 0x86, 0x1b, 0x8f, 0xe5, 0x18, 0xa2, 0xf8, 0xc0, 0x21, 0x04, 0x0f, 0xd7, 0x24, 0x36,
-	0x70, 0x28, 0x19, 0x03, 0x02, 0x00, 0x00, 0xff, 0xff, 0x1b, 0xec, 0xe6, 0x0a, 0x7a, 0x01, 0x00,
-	0x00,
+	// 554 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xbc, 0x54, 0x4d, 0x6f, 0xd3, 0x40,
+	0x10, 0xf5, 0xb6, 0x34, 0x6a, 0xa7, 0x5f, 0x61, 0x55, 0x4a, 0x70, 0xcb, 0x2a, 0xe4, 0x42, 0x90,
+	0xc0, 0x41, 0x05, 0x09, 0x21, 0xc1, 0xa5, 0x54, 0x50, 0x09, 0x84, 0x44, 0x5a, 0x71, 0xe0, 0x12,
+	0xad, 0x93, 0x51, 0x62, 0xc5, 0xf1, 0xba, 0xde, 0x75, 0xab, 0x88, 0x0b, 0x77, 0x2e, 0xfc, 0x0a,
+	0xc4, 0x4f, 0xe1, 0x98, 0x63, 0x8f, 0xc4, 0xb9, 0x70, 0xec, 0x4f, 0x40, 0xf6, 0xda, 0xae, 0xd3,
+	0x86, 0x48, 0x5c, 0xb8, 0x58, 0x9e, 0xf7, 0xde, 0xce, 0xce, 0xbe, 0xd9, 0x59, 0x58, 0xef, 0x72,
+	0x85, 0x67, 0x7c, 0x68, 0xf9, 0x81, 0x50, 0x82, 0xae, 0xa4, 0xa1, 0x6f, 0x9b, 0xcf, 0xba, 0x8e,
+	0xea, 0x85, 0xb6, 0xd5, 0x16, 0x83, 0x86, 0xea, 0x71, 0x4f, 0xc8, 0x47, 0x8e, 0x48, 0xff, 0x1a,
+	0x7e, 0xbf, 0xdb, 0x90, 0x4a, 0x04, 0xa8, 0xbf, 0xbe, 0xdd, 0x08, 0xfc, 0xb6, 0xce, 0x61, 0x56,
+	0xa7, 0x09, 0x3f, 0x10, 0x03, 0xdf, 0x6e, 0xa8, 0xa1, 0x8f, 0x52, 0x2b, 0x6a, 0xdf, 0x09, 0xac,
+	0x7d, 0x08, 0x31, 0x18, 0x36, 0xf1, 0x24, 0x44, 0xa9, 0xe8, 0x16, 0x2c, 0x9d, 0xc4, 0x71, 0x85,
+	0x54, 0x49, 0x7d, 0xa5, 0xa9, 0x03, 0x7a, 0x0f, 0xd6, 0x94, 0x33, 0xc0, 0x96, 0xc4, 0xb6, 0xf0,
+	0x3a, 0xb2, 0xb2, 0x50, 0x25, 0xf5, 0xc5, 0xe6, 0x6a, 0x8c, 0x1d, 0x69, 0x88, 0xde, 0x87, 0xcd,
+	0x38, 0x14, 0xa1, 0xca, 0x55, 0x8b, 0x89, 0x6a, 0x23, 0x85, 0x33, 0xe1, 0x53, 0xd8, 0x76, 0x85,
+	0xe8, 0xdb, 0xbc, 0xdd, 0x6f, 0x75, 0xd0, 0x55, 0x3c, 0xd7, 0xdf, 0x48, 0xf4, 0x5b, 0x19, 0x7b,
+	0x10, 0x93, 0xe9, 0xaa, 0xda, 0x29, 0xac, 0xa7, 0x75, 0x4a, 0x5f, 0x78, 0x12, 0xe9, 0x2e, 0x2c,
+	0x9f, 0xf1, 0xc0, 0x73, 0xbc, 0xae, 0xd4, 0xb5, 0x1e, 0x1a, 0xcd, 0x1c, 0xa1, 0x2f, 0x01, 0xe2,
+	0x6d, 0x25, 0x06, 0x0e, 0xea, 0x72, 0x57, 0xf7, 0x76, 0xe2, 0x33, 0x0f, 0x50, 0xf5, 0x30, 0x94,
+	0xad, 0xb6, 0xf0, 0x87, 0xd6, 0x71, 0x52, 0x7f, 0x2c, 0x39, 0x34, 0x9a, 0x85, 0x05, 0xfb, 0xcb,
+	0x50, 0x0a, 0x50, 0x86, 0xae, 0xaa, 0x7d, 0x5d, 0x80, 0x9b, 0x7a, 0x63, 0xee, 0x75, 0x71, 0xbe,
+	0x4b, 0x0f, 0x81, 0x4a, 0xc5, 0x03, 0xd5, 0x9a, 0xe1, 0x55, 0x39, 0x61, 0x8e, 0x0b, 0x86, 0xd5,
+	0xa1, 0x8c, 0x5e, 0x67, 0x5a, 0x9b, 0x3a, 0x86, 0x5e, 0xa7, 0xa8, 0x7c, 0x00, 0x65, 0xc7, 0x53,
+	0x18, 0x9c, 0x72, 0xf7, 0x8a, 0x57, 0x9b, 0x19, 0x3e, 0xa7, 0x0b, 0x4b, 0xff, 0xd8, 0x85, 0xd2,
+	0x9c, 0x2e, 0x7c, 0x06, 0x5a, 0x34, 0xe3, 0xbf, 0xb6, 0x62, 0x6f, 0xbc, 0x00, 0x6b, 0x47, 0xf1,
+	0x55, 0x7e, 0xa3, 0x27, 0x83, 0x3e, 0x87, 0x92, 0x5e, 0x42, 0x6f, 0x59, 0x7a, 0x1a, 0x2c, 0x1d,
+	0xa7, 0x6d, 0x32, 0xb7, 0xaf, 0xc2, 0xba, 0xe0, 0xc7, 0x84, 0xbe, 0x02, 0x78, 0xc7, 0x6d, 0x74,
+	0xdf, 0xf3, 0x01, 0x4a, 0x7a, 0x27, 0xd3, 0x5d, 0x62, 0x59, 0x0a, 0x73, 0x16, 0x95, 0x9e, 0xfb,
+	0x35, 0xac, 0x26, 0xe8, 0x47, 0xee, 0x86, 0x28, 0xe9, 0xb4, 0x54, 0x83, 0x59, 0x9a, 0x9d, 0x99,
+	0x5c, 0x9a, 0xe7, 0x05, 0x2c, 0x25, 0xae, 0xd2, 0xdb, 0x56, 0x3e, 0xf4, 0x56, 0x71, 0x2a, 0xcd,
+	0xca, 0x75, 0x22, 0x3f, 0xca, 0x5b, 0x80, 0xcb, 0x9e, 0xd0, 0xdd, 0x6b, 0xca, 0xc2, 0xbd, 0x35,
+	0xef, 0xfe, 0x85, 0xcd, 0x92, 0xed, 0x1f, 0x8c, 0xc6, 0xcc, 0x38, 0x1f, 0x33, 0xe3, 0x62, 0xcc,
+	0xc8, 0x97, 0x88, 0x91, 0x1f, 0x11, 0x23, 0x3f, 0x23, 0x46, 0x46, 0x11, 0x23, 0xbf, 0x22, 0x46,
+	0x7e, 0x47, 0xcc, 0xb8, 0x88, 0x18, 0xf9, 0x36, 0x61, 0xc6, 0x68, 0xc2, 0x8c, 0xf3, 0x09, 0x33,
+	0x3e, 0x6d, 0x24, 0x2f, 0x4c, 0x9e, 0xda, 0x2e, 0x25, 0x8f, 0xcb, 0x93, 0x3f, 0x01, 0x00, 0x00,
+	0xff, 0xff, 0x1b, 0x93, 0x23, 0xa3, 0xd3, 0x04, 0x00, 0x00,
+}
+
+func (this *QueryRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryRequest)
+	if !ok {
+		that2, ok := that.(QueryRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.Query != that1.Query {
+		return false
+	}
+	if this.TimeSeconds != that1.TimeSeconds {
+		return false
+	}
+	if this.TimeoutSeconds != that1.TimeoutSeconds {
+		return false
+	}
+	if this.LookbackDeltaSeconds != that1.LookbackDeltaSeconds {
+		return false
+	}
+	return true
+}
+func (this *QueryResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryResponse)
+	if !ok {
+		that2, ok := that.(QueryResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if that1.Result == nil {
+		if this.Result != nil {
+			return false
+		}
+	} else if this.Result == nil {
+		return false
+	} else if !this.Result.Equal(that1.Result) {
+		return false
+	}
+	return true
+}
+func (this *QueryResponse_Warnings) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryResponse_Warnings)
+	if !ok {
+		that2, ok := that.(QueryResponse_Warnings)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.Warnings != that1.Warnings {
+		return false
+	}
+	return true
+}
+func (this *QueryResponse_Timeseries) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryResponse_Timeseries)
+	if !ok {
+		that2, ok := that.(QueryResponse_Timeseries)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !this.Timeseries.Equal(that1.Timeseries) {
+		return false
+	}
+	return true
+}
+func (this *QueryRangeRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryRangeRequest)
+	if !ok {
+		that2, ok := that.(QueryRangeRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.Query != that1.Query {
+		return false
+	}
+	if this.StartTimeSeconds != that1.StartTimeSeconds {
+		return false
+	}
+	if this.EndTimeSeconds != that1.EndTimeSeconds {
+		return false
+	}
+	if this.IntervalSeconds != that1.IntervalSeconds {
+		return false
+	}
+	if this.TimeoutSeconds != that1.TimeoutSeconds {
+		return false
+	}
+	if this.LookbackDeltaSeconds != that1.LookbackDeltaSeconds {
+		return false
+	}
+	return true
+}
+func (this *QueryRangeResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryRangeResponse)
+	if !ok {
+		that2, ok := that.(QueryRangeResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if that1.Result == nil {
+		if this.Result != nil {
+			return false
+		}
+	} else if this.Result == nil {
+		return false
+	} else if !this.Result.Equal(that1.Result) {
+		return false
+	}
+	return true
+}
+func (this *QueryRangeResponse_Warnings) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryRangeResponse_Warnings)
+	if !ok {
+		that2, ok := that.(QueryRangeResponse_Warnings)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.Warnings != that1.Warnings {
+		return false
+	}
+	return true
+}
+func (this *QueryRangeResponse_Timeseries) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*QueryRangeResponse_Timeseries)
+	if !ok {
+		that2, ok := that.(QueryRangeResponse_Timeseries)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !this.Timeseries.Equal(that1.Timeseries) {
+		return false
+	}
+	return true
+}
+func (this *QueryRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 8)
+	s = append(s, "&storegatewaypb.QueryRequest{")
+	s = append(s, "Query: "+fmt.Sprintf("%#v", this.Query)+",\n")
+	s = append(s, "TimeSeconds: "+fmt.Sprintf("%#v", this.TimeSeconds)+",\n")
+	s = append(s, "TimeoutSeconds: "+fmt.Sprintf("%#v", this.TimeoutSeconds)+",\n")
+	s = append(s, "LookbackDeltaSeconds: "+fmt.Sprintf("%#v", this.LookbackDeltaSeconds)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *QueryResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&storegatewaypb.QueryResponse{")
+	if this.Result != nil {
+		s = append(s, "Result: "+fmt.Sprintf("%#v", this.Result)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *QueryResponse_Warnings) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&storegatewaypb.QueryResponse_Warnings{` +
+		`Warnings:` + fmt.Sprintf("%#v", this.Warnings) + `}`}, ", ")
+	return s
+}
+func (this *QueryResponse_Timeseries) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&storegatewaypb.QueryResponse_Timeseries{` +
+		`Timeseries:` + fmt.Sprintf("%#v", this.Timeseries) + `}`}, ", ")
+	return s
+}
+func (this *QueryRangeRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 10)
+	s = append(s, "&storegatewaypb.QueryRangeRequest{")
+	s = append(s, "Query: "+fmt.Sprintf("%#v", this.Query)+",\n")
+	s = append(s, "StartTimeSeconds: "+fmt.Sprintf("%#v", this.StartTimeSeconds)+",\n")
+	s = append(s, "EndTimeSeconds: "+fmt.Sprintf("%#v", this.EndTimeSeconds)+",\n")
+	s = append(s, "IntervalSeconds: "+fmt.Sprintf("%#v", this.IntervalSeconds)+",\n")
+	s = append(s, "TimeoutSeconds: "+fmt.Sprintf("%#v", this.TimeoutSeconds)+",\n")
+	s = append(s, "LookbackDeltaSeconds: "+fmt.Sprintf("%#v", this.LookbackDeltaSeconds)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *QueryRangeResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&storegatewaypb.QueryRangeResponse{")
+	if this.Result != nil {
+		s = append(s, "Result: "+fmt.Sprintf("%#v", this.Result)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *QueryRangeResponse_Warnings) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&storegatewaypb.QueryRangeResponse_Warnings{` +
+		`Warnings:` + fmt.Sprintf("%#v", this.Warnings) + `}`}, ", ")
+	return s
+}
+func (this *QueryRangeResponse_Timeseries) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&storegatewaypb.QueryRangeResponse_Timeseries{` +
+		`Timeseries:` + fmt.Sprintf("%#v", this.Timeseries) + `}`}, ", ")
+	return s
+}
+func valueToGoStringGateway(v interface{}, typ string) string {
+	rv := reflect.ValueOf(v)
+	if rv.IsNil() {
+		return "nil"
+	}
+	pv := reflect.Indirect(rv).Interface()
+	return fmt.Sprintf("func(v %v) *%v { return &v } ( %#v )", typ, typ, pv)
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -72,6 +743,8 @@ type StoreGatewayClient interface {
 	LabelNames(ctx context.Context, in *storepb.LabelNamesRequest, opts ...grpc.CallOption) (*storepb.LabelNamesResponse, error)
 	// LabelValues returns all label values for given label name.
 	LabelValues(ctx context.Context, in *storepb.LabelValuesRequest, opts ...grpc.CallOption) (*storepb.LabelValuesResponse, error)
+	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (StoreGateway_QueryClient, error)
+	QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (StoreGateway_QueryRangeClient, error)
 }
 
 type storeGatewayClient struct {
@@ -132,6 +805,70 @@ func (c *storeGatewayClient) LabelValues(ctx context.Context, in *storepb.LabelV
 	return out, nil
 }
 
+func (c *storeGatewayClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (StoreGateway_QueryClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_StoreGateway_serviceDesc.Streams[1], "/gatewaypb.StoreGateway/Query", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &storeGatewayQueryClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type StoreGateway_QueryClient interface {
+	Recv() (*QueryResponse, error)
+	grpc.ClientStream
+}
+
+type storeGatewayQueryClient struct {
+	grpc.ClientStream
+}
+
+func (x *storeGatewayQueryClient) Recv() (*QueryResponse, error) {
+	m := new(QueryResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *storeGatewayClient) QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (StoreGateway_QueryRangeClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_StoreGateway_serviceDesc.Streams[2], "/gatewaypb.StoreGateway/QueryRange", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &storeGatewayQueryRangeClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type StoreGateway_QueryRangeClient interface {
+	Recv() (*QueryRangeResponse, error)
+	grpc.ClientStream
+}
+
+type storeGatewayQueryRangeClient struct {
+	grpc.ClientStream
+}
+
+func (x *storeGatewayQueryRangeClient) Recv() (*QueryRangeResponse, error) {
+	m := new(QueryRangeResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // StoreGatewayServer is the server API for StoreGateway service.
 type StoreGatewayServer interface {
 	// Series streams each Series for given label matchers and time range.
@@ -146,6 +883,8 @@ type StoreGatewayServer interface {
 	LabelNames(context.Context, *storepb.LabelNamesRequest) (*storepb.LabelNamesResponse, error)
 	// LabelValues returns all label values for given label name.
 	LabelValues(context.Context, *storepb.LabelValuesRequest) (*storepb.LabelValuesResponse, error)
+	Query(*QueryRequest, StoreGateway_QueryServer) error
+	QueryRange(*QueryRangeRequest, StoreGateway_QueryRangeServer) error
 }
 
 // UnimplementedStoreGatewayServer can be embedded to have forward compatible implementations.
@@ -160,6 +899,12 @@ func (*UnimplementedStoreGatewayServer) LabelNames(ctx context.Context, req *sto
 }
 func (*UnimplementedStoreGatewayServer) LabelValues(ctx context.Context, req *storepb.LabelValuesRequest) (*storepb.LabelValuesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LabelValues not implemented")
+}
+func (*UnimplementedStoreGatewayServer) Query(req *QueryRequest, srv StoreGateway_QueryServer) error {
+	return status.Errorf(codes.Unimplemented, "method Query not implemented")
+}
+func (*UnimplementedStoreGatewayServer) QueryRange(req *QueryRangeRequest, srv StoreGateway_QueryRangeServer) error {
+	return status.Errorf(codes.Unimplemented, "method QueryRange not implemented")
 }
 
 func RegisterStoreGatewayServer(s *grpc.Server, srv StoreGatewayServer) {
@@ -223,6 +968,48 @@ func _StoreGateway_LabelValues_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _StoreGateway_Query_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(QueryRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(StoreGatewayServer).Query(m, &storeGatewayQueryServer{stream})
+}
+
+type StoreGateway_QueryServer interface {
+	Send(*QueryResponse) error
+	grpc.ServerStream
+}
+
+type storeGatewayQueryServer struct {
+	grpc.ServerStream
+}
+
+func (x *storeGatewayQueryServer) Send(m *QueryResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _StoreGateway_QueryRange_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(QueryRangeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(StoreGatewayServer).QueryRange(m, &storeGatewayQueryRangeServer{stream})
+}
+
+type StoreGateway_QueryRangeServer interface {
+	Send(*QueryRangeResponse) error
+	grpc.ServerStream
+}
+
+type storeGatewayQueryRangeServer struct {
+	grpc.ServerStream
+}
+
+func (x *storeGatewayQueryRangeServer) Send(m *QueryRangeResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 var _StoreGateway_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "gatewaypb.StoreGateway",
 	HandlerType: (*StoreGatewayServer)(nil),
@@ -242,6 +1029,1151 @@ var _StoreGateway_serviceDesc = grpc.ServiceDesc{
 			Handler:       _StoreGateway_Series_Handler,
 			ServerStreams: true,
 		},
+		{
+			StreamName:    "Query",
+			Handler:       _StoreGateway_Query_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "QueryRange",
+			Handler:       _StoreGateway_QueryRange_Handler,
+			ServerStreams: true,
+		},
 	},
 	Metadata: "gateway.proto",
 }
+
+func (m *QueryRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.LookbackDeltaSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.LookbackDeltaSeconds))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.TimeoutSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.TimeoutSeconds))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.TimeSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.TimeSeconds))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Query) > 0 {
+		i -= len(m.Query)
+		copy(dAtA[i:], m.Query)
+		i = encodeVarintGateway(dAtA, i, uint64(len(m.Query)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Result != nil {
+		{
+			size := m.Result.Size()
+			i -= size
+			if _, err := m.Result.MarshalTo(dAtA[i:]); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryResponse_Warnings) MarshalTo(dAtA []byte) (int, error) {
+	return m.MarshalToSizedBuffer(dAtA[:m.Size()])
+}
+
+func (m *QueryResponse_Warnings) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	i -= len(m.Warnings)
+	copy(dAtA[i:], m.Warnings)
+	i = encodeVarintGateway(dAtA, i, uint64(len(m.Warnings)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+func (m *QueryResponse_Timeseries) MarshalTo(dAtA []byte) (int, error) {
+	return m.MarshalToSizedBuffer(dAtA[:m.Size()])
+}
+
+func (m *QueryResponse_Timeseries) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.Timeseries != nil {
+		{
+			size, err := m.Timeseries.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGateway(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	return len(dAtA) - i, nil
+}
+func (m *QueryRangeRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryRangeRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryRangeRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.LookbackDeltaSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.LookbackDeltaSeconds))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.TimeoutSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.TimeoutSeconds))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.IntervalSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.IntervalSeconds))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.EndTimeSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.EndTimeSeconds))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.StartTimeSeconds != 0 {
+		i = encodeVarintGateway(dAtA, i, uint64(m.StartTimeSeconds))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Query) > 0 {
+		i -= len(m.Query)
+		copy(dAtA[i:], m.Query)
+		i = encodeVarintGateway(dAtA, i, uint64(len(m.Query)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryRangeResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryRangeResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryRangeResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Result != nil {
+		{
+			size := m.Result.Size()
+			i -= size
+			if _, err := m.Result.MarshalTo(dAtA[i:]); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryRangeResponse_Warnings) MarshalTo(dAtA []byte) (int, error) {
+	return m.MarshalToSizedBuffer(dAtA[:m.Size()])
+}
+
+func (m *QueryRangeResponse_Warnings) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	i -= len(m.Warnings)
+	copy(dAtA[i:], m.Warnings)
+	i = encodeVarintGateway(dAtA, i, uint64(len(m.Warnings)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+func (m *QueryRangeResponse_Timeseries) MarshalTo(dAtA []byte) (int, error) {
+	return m.MarshalToSizedBuffer(dAtA[:m.Size()])
+}
+
+func (m *QueryRangeResponse_Timeseries) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.Timeseries != nil {
+		{
+			size, err := m.Timeseries.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGateway(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	return len(dAtA) - i, nil
+}
+func encodeVarintGateway(dAtA []byte, offset int, v uint64) int {
+	offset -= sovGateway(v)
+	base := offset
+	for v >= 1<<7 {
+		dAtA[offset] = uint8(v&0x7f | 0x80)
+		v >>= 7
+		offset++
+	}
+	dAtA[offset] = uint8(v)
+	return base
+}
+func (m *QueryRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Query)
+	if l > 0 {
+		n += 1 + l + sovGateway(uint64(l))
+	}
+	if m.TimeSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.TimeSeconds))
+	}
+	if m.TimeoutSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.TimeoutSeconds))
+	}
+	if m.LookbackDeltaSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.LookbackDeltaSeconds))
+	}
+	return n
+}
+
+func (m *QueryResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Result != nil {
+		n += m.Result.Size()
+	}
+	return n
+}
+
+func (m *QueryResponse_Warnings) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Warnings)
+	n += 1 + l + sovGateway(uint64(l))
+	return n
+}
+func (m *QueryResponse_Timeseries) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Timeseries != nil {
+		l = m.Timeseries.Size()
+		n += 1 + l + sovGateway(uint64(l))
+	}
+	return n
+}
+func (m *QueryRangeRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Query)
+	if l > 0 {
+		n += 1 + l + sovGateway(uint64(l))
+	}
+	if m.StartTimeSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.StartTimeSeconds))
+	}
+	if m.EndTimeSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.EndTimeSeconds))
+	}
+	if m.IntervalSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.IntervalSeconds))
+	}
+	if m.TimeoutSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.TimeoutSeconds))
+	}
+	if m.LookbackDeltaSeconds != 0 {
+		n += 1 + sovGateway(uint64(m.LookbackDeltaSeconds))
+	}
+	return n
+}
+
+func (m *QueryRangeResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Result != nil {
+		n += m.Result.Size()
+	}
+	return n
+}
+
+func (m *QueryRangeResponse_Warnings) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Warnings)
+	n += 1 + l + sovGateway(uint64(l))
+	return n
+}
+func (m *QueryRangeResponse_Timeseries) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Timeseries != nil {
+		l = m.Timeseries.Size()
+		n += 1 + l + sovGateway(uint64(l))
+	}
+	return n
+}
+
+func sovGateway(x uint64) (n int) {
+	return (math_bits.Len64(x|1) + 6) / 7
+}
+func sozGateway(x uint64) (n int) {
+	return sovGateway(uint64((x << 1) ^ uint64((int64(x) >> 63))))
+}
+func (this *QueryRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryRequest{`,
+		`Query:` + fmt.Sprintf("%v", this.Query) + `,`,
+		`TimeSeconds:` + fmt.Sprintf("%v", this.TimeSeconds) + `,`,
+		`TimeoutSeconds:` + fmt.Sprintf("%v", this.TimeoutSeconds) + `,`,
+		`LookbackDeltaSeconds:` + fmt.Sprintf("%v", this.LookbackDeltaSeconds) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryResponse{`,
+		`Result:` + fmt.Sprintf("%v", this.Result) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryResponse_Warnings) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryResponse_Warnings{`,
+		`Warnings:` + fmt.Sprintf("%v", this.Warnings) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryResponse_Timeseries) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryResponse_Timeseries{`,
+		`Timeseries:` + strings.Replace(fmt.Sprintf("%v", this.Timeseries), "TimeSeries", "prompb.TimeSeries", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryRangeRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryRangeRequest{`,
+		`Query:` + fmt.Sprintf("%v", this.Query) + `,`,
+		`StartTimeSeconds:` + fmt.Sprintf("%v", this.StartTimeSeconds) + `,`,
+		`EndTimeSeconds:` + fmt.Sprintf("%v", this.EndTimeSeconds) + `,`,
+		`IntervalSeconds:` + fmt.Sprintf("%v", this.IntervalSeconds) + `,`,
+		`TimeoutSeconds:` + fmt.Sprintf("%v", this.TimeoutSeconds) + `,`,
+		`LookbackDeltaSeconds:` + fmt.Sprintf("%v", this.LookbackDeltaSeconds) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryRangeResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryRangeResponse{`,
+		`Result:` + fmt.Sprintf("%v", this.Result) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryRangeResponse_Warnings) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryRangeResponse_Warnings{`,
+		`Warnings:` + fmt.Sprintf("%v", this.Warnings) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *QueryRangeResponse_Timeseries) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&QueryRangeResponse_Timeseries{`,
+		`Timeseries:` + strings.Replace(fmt.Sprintf("%v", this.Timeseries), "TimeSeries", "prompb.TimeSeries", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func valueToStringGateway(v interface{}) string {
+	rv := reflect.ValueOf(v)
+	if rv.IsNil() {
+		return "nil"
+	}
+	pv := reflect.Indirect(rv).Interface()
+	return fmt.Sprintf("*%v", pv)
+}
+func (m *QueryRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGateway
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Query", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Query = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TimeSeconds", wireType)
+			}
+			m.TimeSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TimeSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TimeoutSeconds", wireType)
+			}
+			m.TimeoutSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TimeoutSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LookbackDeltaSeconds", wireType)
+			}
+			m.LookbackDeltaSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LookbackDeltaSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGateway(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGateway
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Warnings", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Result = &QueryResponse_Warnings{string(dAtA[iNdEx:postIndex])}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timeseries", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			v := &prompb.TimeSeries{}
+			if err := v.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			m.Result = &QueryResponse_Timeseries{v}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGateway(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryRangeRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGateway
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryRangeRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryRangeRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Query", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Query = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field StartTimeSeconds", wireType)
+			}
+			m.StartTimeSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.StartTimeSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EndTimeSeconds", wireType)
+			}
+			m.EndTimeSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EndTimeSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IntervalSeconds", wireType)
+			}
+			m.IntervalSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.IntervalSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TimeoutSeconds", wireType)
+			}
+			m.TimeoutSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TimeoutSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LookbackDeltaSeconds", wireType)
+			}
+			m.LookbackDeltaSeconds = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LookbackDeltaSeconds |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGateway(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryRangeResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGateway
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryRangeResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryRangeResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Warnings", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Result = &QueryRangeResponse_Warnings{string(dAtA[iNdEx:postIndex])}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timeseries", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			v := &prompb.TimeSeries{}
+			if err := v.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			m.Result = &QueryRangeResponse_Timeseries{v}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGateway(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func skipGateway(dAtA []byte) (n int, err error) {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return 0, ErrIntOverflowGateway
+			}
+			if iNdEx >= l {
+				return 0, io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= (uint64(b) & 0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		wireType := int(wire & 0x7)
+		switch wireType {
+		case 0:
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return 0, ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return 0, io.ErrUnexpectedEOF
+				}
+				iNdEx++
+				if dAtA[iNdEx-1] < 0x80 {
+					break
+				}
+			}
+			return iNdEx, nil
+		case 1:
+			iNdEx += 8
+			return iNdEx, nil
+		case 2:
+			var length int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return 0, ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return 0, io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				length |= (int(b) & 0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if length < 0 {
+				return 0, ErrInvalidLengthGateway
+			}
+			iNdEx += length
+			if iNdEx < 0 {
+				return 0, ErrInvalidLengthGateway
+			}
+			return iNdEx, nil
+		case 3:
+			for {
+				var innerWire uint64
+				var start int = iNdEx
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return 0, ErrIntOverflowGateway
+					}
+					if iNdEx >= l {
+						return 0, io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					innerWire |= (uint64(b) & 0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				innerWireType := int(innerWire & 0x7)
+				if innerWireType == 4 {
+					break
+				}
+				next, err := skipGateway(dAtA[start:])
+				if err != nil {
+					return 0, err
+				}
+				iNdEx = start + next
+				if iNdEx < 0 {
+					return 0, ErrInvalidLengthGateway
+				}
+			}
+			return iNdEx, nil
+		case 4:
+			return iNdEx, nil
+		case 5:
+			iNdEx += 4
+			return iNdEx, nil
+		default:
+			return 0, fmt.Errorf("proto: illegal wireType %d", wireType)
+		}
+	}
+	panic("unreachable")
+}
+
+var (
+	ErrInvalidLengthGateway = fmt.Errorf("proto: negative length found during unmarshaling")
+	ErrIntOverflowGateway   = fmt.Errorf("proto: integer overflow")
+)
