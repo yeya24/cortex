@@ -379,3 +379,6 @@ func createBucketClient(cfg cortex_tsdb.BlocksStorageConfig, logger log.Logger, 
 
 	return bucketClient, nil
 }
+
+func (g *StoreGateway) Query(req *storegatewaypb.QueryRequest, srv storegatewaypb.StoreGateway_QueryServer) error {
+}

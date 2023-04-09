@@ -22,9 +22,9 @@ service StoreGateway {
     // LabelValues returns all label values for given label name.
     rpc LabelValues(thanos.LabelValuesRequest) returns (thanos.LabelValuesResponse);
 
-    rpc Query(QueryRequest) returns (stream QueryResponse);
+    rpc Query(QueryRequest) returns (QueryResponse);
 
-    rpc QueryRange(QueryRangeRequest) returns (stream QueryRangeResponse);
+    rpc QueryRange(QueryRangeRequest) returns (QueryRangeResponse);
 }
 
 message QueryRequest {
