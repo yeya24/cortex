@@ -32,6 +32,8 @@ message QueryRequest {
 
     int64 time_seconds = 2;
     int64 timeout_seconds = 3;
+
+    int64 lookback_delta_seconds = 4;
 }
 
 message QueryResponse {
