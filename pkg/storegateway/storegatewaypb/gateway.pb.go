@@ -15,7 +15,7 @@ import (
 	math "math"
 	math_bits "math/bits"
 	reflect "reflect"
-	prompb "store/storepb/prompb"
+	prompb "github.com/thanos-io/thanos/pkg/store/storepb/prompb"
 	strings "strings"
 )
 

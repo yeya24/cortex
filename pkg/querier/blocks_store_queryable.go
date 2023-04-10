@@ -585,7 +585,7 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 		return nil, nil, nil, 0, err
 
 	}
-	convertedMatchers := convertMatchersToLabelMatcher(matchers)
+	convertedMatchers := storegateway.ConvertMatchersToLabelMatcher(matchers)
 
 	// Concurrently fetch series from all clients.
 	for c, blockIDs := range clients {
@@ -714,7 +714,7 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 			// Store the result.
 			mtx.Lock()
-			seriesSets = append(seriesSets, &blockQuerierSeriesSet{series: mySeries})
+			seriesSets = append(seriesSets, storegateway.NewBlockQuerierSeriesSet(mySeries, nil))
 			warnings = append(warnings, myWarnings...)
 			queriedBlocks = append(queriedBlocks, myQueriedBlocks...)
 			mtx.Unlock()

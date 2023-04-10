@@ -4,8 +4,20 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/util/spanlogger"
+	"github.com/gogo/protobuf/types"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql"
+	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/thanos-io/thanos/pkg/block"
+	"github.com/thanos-io/thanos/pkg/store/hintspb"
+	"github.com/thanos-io/thanos/pkg/store/labelpb"
+	"github.com/thanos-io/thanos/pkg/store/storepb/prompb"
+	"google.golang.org/grpc/codes"
+	grpc_metadata "google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+	"io"
 	"strings"
 	"time"
 
@@ -380,5 +392,229 @@ func createBucketClient(cfg cortex_tsdb.BlocksStorageConfig, logger log.Logger, 
 	return bucketClient, nil
 }
 
-func (g *StoreGateway) Query(req *storegatewaypb.QueryRequest, srv storegatewaypb.StoreGateway_QueryServer) error {
+func (g *StoreGateway) Query(ctx context.Context, req *storegatewaypb.QueryRequest) (*storegatewaypb.QueryResponse, error) {
+	spanLog, spanCtx := spanlogger.New(ctx, "BucketStores.Query")
+	defer spanLog.Span.Finish()
+
+	userID := getUserIDFromGRPCContext(spanCtx)
+	if userID == "" {
+		return nil, fmt.Errorf("no userID")
+	}
+
+	store := g.stores.getStore(userID)
+	if store == nil {
+		return &storegatewaypb.QueryResponse{}, nil
+	}
+
+	queryable := NewQueryable(store, userID, nil)
+	lookback := time.Duration(req.LookbackDeltaSeconds) * time.Second
+	qry, err := g.engine.NewInstantQuery(queryable, &promql.QueryOpts{LookbackDelta: lookback}, req.Query, req.TimeSeconds)
+	if err != nil {
+
+	}
+
+	result := qry.Exec(ctx)
+	if result.Err != nil {
+		return status.Error(codes.Aborted, result.Err.Error())
+	}
+
+	if len(result.Warnings) != 0 {
+		if err := server.Send(querypb.NewQueryWarningsResponse(result.Warnings...)); err != nil {
+			return err
+		}
+	}
+
+	switch vector := result.Value.(type) {
+	case promql.Scalar:
+		series := &prompb.TimeSeries{
+			Samples: []prompb.Sample{{Value: vector.V, Timestamp: vector.T}},
+		}
+		return &storegatewaypb.QueryResponse{
+			Result: &storegatewaypb.QueryResponse_Timeseries{
+				Timeseries: series,
+			},
+		}, nil
+	case promql.Vector:
+		for _, sample := range vector {
+			floats, histograms := prompb.SamplesFromPromqlPoints(sample.Point)
+			series := &prompb.TimeSeries{
+				Labels:     labelpb.ZLabelsFromPromLabels(sample.Metric),
+				Samples:    floats,
+				Histograms: histograms,
+			}
+		}
+		return &storegatewaypb.QueryResponse{
+			Result: &storegatewaypb.QueryResponse_Timeseries{
+				Timeseries: series,
+			},
+		}, nil
+	}
+}
+
+func (g *StoreGateway) QueryRange(ctx context.Context, req *storegatewaypb.QueryRangeRequest) (*storegatewaypb.QueryRangeResponse, error) {
+	spanLog, spanCtx := spanlogger.New(ctx, "BucketStores.QueryRange")
+	defer spanLog.Span.Finish()
+
+	userID := getUserIDFromGRPCContext(spanCtx)
+	if userID == "" {
+		return nil, fmt.Errorf("no userID")
+	}
+
+	store := g.stores.getStore(userID)
+	if store == nil {
+		return &storegatewaypb.QueryRangeResponse{}, nil
+	}
+
+	queryable := NewQueryable(store, userID, nil)
+	lookback := time.Duration(req.LookbackDeltaSeconds) * time.Second
+	step := time.Duration(req.IntervalSeconds) * time.Second
+	start := time.Unix(req.StartTimeSeconds, 0)
+	end := time.Unix(req.EndTimeSeconds, 0)
+	q, err := g.engine.NewRangeQuery(queryable, &promql.QueryOpts{LookbackDelta: lookback}, req.Query, start, end, step)
+	if err != nil {
+		return nil, err
+	}
+	result := q.Exec(ctx)
+	if result.Err != nil {
+		return status.Error(codes.Aborted, result.Err.Error())
+	}
+
+	if len(result.Warnings) != 0 {
+		if err := srv.Send(querypb.NewQueryRangeWarningsResponse(result.Warnings...)); err != nil {
+			return err
+		}
+	}
+
+	switch value := result.Value.(type) {
+	case promql.Matrix:
+		for _, series := range value {
+			floats, histograms := prompb.SamplesFromPromqlPoints(series.Points...)
+			series := &prompb.TimeSeries{
+				Labels:     labelpb.ZLabelsFromPromLabels(series.Metric),
+				Samples:    floats,
+				Histograms: histograms,
+			}
+			if err := srv.Send(querypb.NewQueryRangeResponse(series)); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+type Queryable struct {
+	userID   string
+	srv      storepb.StoreServer
+	blockIDs []string
+}
+
+func (g *Queryable) Querier(ctx context.Context, _, _ int64) (storage.Querier, error) {
+	return &Querier{
+		ctx:      ctx,
+		userID:   g.userID,
+		srv:      g.srv,
+		blockIDs: g.blockIDs,
+	}, nil
+}
+
+func NewQueryable(srv storepb.StoreServer, userID string, blockIDs []string) storage.Queryable {
+	return &Queryable{
+		userID:   userID,
+		srv:      srv,
+		blockIDs: blockIDs,
+	}
+}
+
+type Querier struct {
+	ctx      context.Context
+	userID   string
+	srv      storepb.StoreServer
+	blockIDs []string
+}
+
+func (q *Querier) Select(_ bool, sp *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
+	c := storegatewaypb.NewServerAsClient(q.srv, 1000)
+	convertedMatchers := ConvertMatchersToLabelMatcher(matchers)
+	req, err := createSeriesRequest(sp.Start, sp.End, convertedMatchers, nil, q.blockIDs)
+	if err != nil {
+
+	}
+	reqCtx := grpc_metadata.AppendToOutgoingContext(q.ctx, cortex_tsdb.TenantIDExternalLabel, q.userID)
+
+	stream, err := c.Series(reqCtx, req)
+	if err != nil {
+
+	}
+
+	mySeries := []*storepb.Series(nil)
+	myWarnings := storage.Warnings(nil)
+
+	for {
+		// Ensure the context hasn't been canceled in the meanwhile (eg. an error occurred
+		// in another goroutine).
+		if err := reqCtx.Err(); err != nil {
+			return storage.ErrSeriesSet(err)
+		}
+
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+
+		//if isRetryableError(err) {
+		//	level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to receive series from %s due to retryable error", c.RemoteAddress()))
+		//	return nil
+		//}
+
+		if err != nil {
+			return storage.ErrSeriesSet(err)
+		}
+
+		// Response may either contain series, warning or hints.
+		if s := resp.GetSeries(); s != nil {
+			mySeries = append(mySeries, s)
+		}
+
+		if w := resp.GetWarning(); w != "" {
+			myWarnings = append(myWarnings, errors.New(w))
+		}
+	}
+	return NewBlockQuerierSeriesSet(mySeries, myWarnings)
+}
+
+func (q *Querier) LabelNames(_ ...*labels.Matcher) ([]string, storage.Warnings, error) {
+	return nil, nil, nil
+}
+
+func (q *Querier) LabelValues(_ string, _ ...*labels.Matcher) ([]string, storage.Warnings, error) {
+	return nil, nil, nil
+}
+
+func (q *Querier) Close() error { return nil }
+
+func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shardingInfo *storepb.ShardInfo, blockIDs []string) (*storepb.SeriesRequest, error) {
+	// Selectively query only specific blocks.
+	hints := &hintspb.SeriesRequestHints{
+		BlockMatchers: []storepb.LabelMatcher{
+			{
+				Type:  storepb.LabelMatcher_RE,
+				Name:  block.BlockIDLabel,
+				Value: strings.Join(blockIDs, "|"),
+			},
+		},
+	}
+
+	anyHints, err := types.MarshalAny(hints)
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to marshal series request hints")
+	}
+
+	return &storepb.SeriesRequest{
+		MinTime:                 minT,
+		MaxTime:                 maxT,
+		Matchers:                matchers,
+		PartialResponseStrategy: storepb.PartialResponseStrategy_ABORT,
+		Hints:                   anyHints,
+		SkipChunks:              false,
+		ShardInfo:               shardingInfo,
+	}, nil
 }
