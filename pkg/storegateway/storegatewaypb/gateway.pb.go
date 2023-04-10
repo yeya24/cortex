@@ -15,7 +15,7 @@ import (
 	math "math"
 	math_bits "math/bits"
 	reflect "reflect"
-	prompb "github.com/thanos-io/thanos/pkg/store/storepb/prompb"
+	prompb "store/storepb/prompb"
 	strings "strings"
 )
 
@@ -31,10 +31,11 @@ var _ = math.Inf
 const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 type QueryRequest struct {
-	Query                string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	TimeSeconds          int64  `protobuf:"varint,2,opt,name=time_seconds,json=timeSeconds,proto3" json:"time_seconds,omitempty"`
-	TimeoutSeconds       int64  `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
-	LookbackDeltaSeconds int64  `protobuf:"varint,4,opt,name=lookback_delta_seconds,json=lookbackDeltaSeconds,proto3" json:"lookback_delta_seconds,omitempty"`
+	Query                string   `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	TimeSeconds          int64    `protobuf:"varint,2,opt,name=time_seconds,json=timeSeconds,proto3" json:"time_seconds,omitempty"`
+	TimeoutSeconds       int64    `protobuf:"varint,3,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	LookbackDeltaSeconds int64    `protobuf:"varint,4,opt,name=lookback_delta_seconds,json=lookbackDeltaSeconds,proto3" json:"lookback_delta_seconds,omitempty"`
+	BlockIDs             []string `protobuf:"bytes,5,rep,name=blockIDs,proto3" json:"blockIDs,omitempty"`
 }
 
 func (m *QueryRequest) Reset()      { *m = QueryRequest{} }
@@ -95,6 +96,13 @@ func (m *QueryRequest) GetLookbackDeltaSeconds() int64 {
 		return m.LookbackDeltaSeconds
 	}
 	return 0
+}
+
+func (m *QueryRequest) GetBlockIDs() []string {
+	if m != nil {
+		return m.BlockIDs
+	}
+	return nil
 }
 
 type QueryResponse struct {
@@ -183,12 +191,13 @@ func (*QueryResponse) XXX_OneofWrappers() []interface{} {
 }
 
 type QueryRangeRequest struct {
-	Query                string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	StartTimeSeconds     int64  `protobuf:"varint,2,opt,name=start_time_seconds,json=startTimeSeconds,proto3" json:"start_time_seconds,omitempty"`
-	EndTimeSeconds       int64  `protobuf:"varint,3,opt,name=end_time_seconds,json=endTimeSeconds,proto3" json:"end_time_seconds,omitempty"`
-	IntervalSeconds      int64  `protobuf:"varint,4,opt,name=interval_seconds,json=intervalSeconds,proto3" json:"interval_seconds,omitempty"`
-	TimeoutSeconds       int64  `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
-	LookbackDeltaSeconds int64  `protobuf:"varint,6,opt,name=lookback_delta_seconds,json=lookbackDeltaSeconds,proto3" json:"lookback_delta_seconds,omitempty"`
+	Query                string   `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	StartTimeSeconds     int64    `protobuf:"varint,2,opt,name=start_time_seconds,json=startTimeSeconds,proto3" json:"start_time_seconds,omitempty"`
+	EndTimeSeconds       int64    `protobuf:"varint,3,opt,name=end_time_seconds,json=endTimeSeconds,proto3" json:"end_time_seconds,omitempty"`
+	IntervalSeconds      int64    `protobuf:"varint,4,opt,name=interval_seconds,json=intervalSeconds,proto3" json:"interval_seconds,omitempty"`
+	TimeoutSeconds       int64    `protobuf:"varint,5,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	LookbackDeltaSeconds int64    `protobuf:"varint,6,opt,name=lookback_delta_seconds,json=lookbackDeltaSeconds,proto3" json:"lookback_delta_seconds,omitempty"`
+	BlockIDs             []string `protobuf:"bytes,7,rep,name=blockIDs,proto3" json:"blockIDs,omitempty"`
 }
 
 func (m *QueryRangeRequest) Reset()      { *m = QueryRangeRequest{} }
@@ -263,6 +272,13 @@ func (m *QueryRangeRequest) GetLookbackDeltaSeconds() int64 {
 		return m.LookbackDeltaSeconds
 	}
 	return 0
+}
+
+func (m *QueryRangeRequest) GetBlockIDs() []string {
+	if m != nil {
+		return m.BlockIDs
+	}
+	return nil
 }
 
 type QueryRangeResponse struct {
@@ -360,42 +376,43 @@ func init() {
 func init() { proto.RegisterFile("gateway.proto", fileDescriptor_f1a937782ebbded5) }
 
 var fileDescriptor_f1a937782ebbded5 = []byte{
-	// 556 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xbc, 0x54, 0x41, 0x6f, 0xd3, 0x4c,
-	0x10, 0xf5, 0xb6, 0x5f, 0xa3, 0x76, 0x92, 0xb6, 0xf9, 0x56, 0xa5, 0x04, 0xb7, 0xac, 0x42, 0x2e,
-	0x04, 0x09, 0x1c, 0x54, 0x90, 0x10, 0x48, 0x5c, 0x4a, 0x05, 0x45, 0x42, 0x48, 0xa4, 0x15, 0x07,
-	0x2e, 0xd1, 0x3a, 0x19, 0x25, 0x56, 0x1c, 0xaf, 0xeb, 0x5d, 0xb7, 0x8a, 0xb8, 0x70, 0xe7, 0xc2,
-	0xaf, 0x40, 0xfc, 0x14, 0x8e, 0x39, 0xf6, 0x82, 0x44, 0x9c, 0x0b, 0xc7, 0xfe, 0x04, 0x64, 0xaf,
-	0x9d, 0x3a, 0x6d, 0x88, 0xc4, 0x85, 0x4b, 0x94, 0x79, 0xef, 0xcd, 0x78, 0xf6, 0xcd, 0xce, 0xc2,
-	0x7a, 0x97, 0x2b, 0x3c, 0xe3, 0x43, 0xcb, 0x0f, 0x84, 0x12, 0x74, 0x2d, 0x0d, 0x7d, 0xdb, 0x7c,
-	0xd2, 0x75, 0x54, 0x2f, 0xb4, 0xad, 0xb6, 0x18, 0x34, 0x54, 0x8f, 0x7b, 0x42, 0x3e, 0x70, 0x44,
-	0xfa, 0xaf, 0xe1, 0xf7, 0xbb, 0x0d, 0xa9, 0x44, 0x80, 0xfa, 0xd7, 0xb7, 0x1b, 0x81, 0xdf, 0xd6,
-	0x35, 0xcc, 0xea, 0x2c, 0xe1, 0x07, 0x62, 0xe0, 0xdb, 0x0d, 0x35, 0xf4, 0x51, 0x6a, 0x45, 0xed,
-	0x2b, 0x81, 0xd2, 0xbb, 0x10, 0x83, 0x61, 0x13, 0x4f, 0x42, 0x94, 0x8a, 0x6e, 0xc1, 0xca, 0x49,
-	0x1c, 0x57, 0x48, 0x95, 0xd4, 0xd7, 0x9a, 0x3a, 0xa0, 0x77, 0xa0, 0xa4, 0x9c, 0x01, 0xb6, 0x24,
-	0xb6, 0x85, 0xd7, 0x91, 0x95, 0xa5, 0x2a, 0xa9, 0x2f, 0x37, 0x8b, 0x31, 0x76, 0xa4, 0x21, 0x7a,
-	0x17, 0x36, 0xe3, 0x50, 0x84, 0x6a, 0xaa, 0x5a, 0x4e, 0x54, 0x1b, 0x29, 0x9c, 0x09, 0x1f, 0xc3,
-	0xb6, 0x2b, 0x44, 0xdf, 0xe6, 0xed, 0x7e, 0xab, 0x83, 0xae, 0xe2, 0x53, 0xfd, 0x7f, 0x89, 0x7e,
-	0x2b, 0x63, 0x0f, 0x62, 0x32, 0xcd, 0xaa, 0x9d, 0xc2, 0x7a, 0xda, 0xa7, 0xf4, 0x85, 0x27, 0x91,
-	0xee, 0xc2, 0xea, 0x19, 0x0f, 0x3c, 0xc7, 0xeb, 0x4a, 0xdd, 0xeb, 0xa1, 0xd1, 0x9c, 0x22, 0xf4,
-	0x39, 0x40, 0xfc, 0x59, 0x89, 0x81, 0x83, 0xba, 0xdd, 0xe2, 0xde, 0x4e, 0x7c, 0xe6, 0x01, 0xaa,
-	0x1e, 0x86, 0xb2, 0xd5, 0x16, 0xfe, 0xd0, 0x3a, 0x4e, 0xfa, 0x8f, 0x25, 0x87, 0x46, 0x33, 0x97,
-	0xb0, 0xbf, 0x0a, 0x85, 0x00, 0x65, 0xe8, 0xaa, 0xda, 0xe7, 0x25, 0xf8, 0x5f, 0x7f, 0x98, 0x7b,
-	0x5d, 0x5c, 0xec, 0xd2, 0x7d, 0xa0, 0x52, 0xf1, 0x40, 0xb5, 0xe6, 0x78, 0x55, 0x4e, 0x98, 0xe3,
-	0x9c, 0x61, 0x75, 0x28, 0xa3, 0xd7, 0x99, 0xd5, 0xa6, 0x8e, 0xa1, 0xd7, 0xc9, 0x2b, 0xef, 0x41,
-	0xd9, 0xf1, 0x14, 0x06, 0xa7, 0xdc, 0xbd, 0xe2, 0xd5, 0x66, 0x86, 0x2f, 0x98, 0xc2, 0xca, 0x5f,
-	0x4e, 0xa1, 0xb0, 0x60, 0x0a, 0x1f, 0x81, 0xe6, 0xcd, 0xf8, 0xa7, 0xa3, 0xd8, 0xfb, 0xb1, 0x04,
-	0xa5, 0xa3, 0xf8, 0x2a, 0xbf, 0xd2, 0x9b, 0x41, 0x9f, 0x42, 0x41, 0xa7, 0xd0, 0x1b, 0x96, 0xde,
-	0x06, 0x4b, 0xc7, 0xe9, 0x98, 0xcc, 0xed, 0xab, 0xb0, 0x6e, 0xf8, 0x21, 0xa1, 0x2f, 0x00, 0xde,
-	0x70, 0x1b, 0xdd, 0xb7, 0x7c, 0x80, 0x92, 0xde, 0xca, 0x74, 0x97, 0x58, 0x56, 0xc2, 0x9c, 0x47,
-	0xa5, 0xe7, 0x7e, 0x09, 0xc5, 0x04, 0x7d, 0xcf, 0xdd, 0x10, 0x25, 0x9d, 0x95, 0x6a, 0x30, 0x2b,
-	0xb3, 0x33, 0x97, 0x4b, 0xeb, 0x3c, 0x83, 0x95, 0xc4, 0x55, 0x7a, 0xd3, 0x9a, 0x2e, 0xbd, 0x95,
-	0xdf, 0x4a, 0xb3, 0x72, 0x9d, 0x48, 0x73, 0x5f, 0x03, 0x5c, 0x4e, 0x84, 0xee, 0x5e, 0xd3, 0xe5,
-	0x6e, 0xad, 0x79, 0xfb, 0x0f, 0xac, 0x2e, 0xb5, 0x7f, 0x30, 0x1a, 0x33, 0xe3, 0x7c, 0xcc, 0x8c,
-	0x8b, 0x31, 0x23, 0x9f, 0x22, 0x46, 0xbe, 0x45, 0x8c, 0x7c, 0x8f, 0x18, 0x19, 0x45, 0x8c, 0xfc,
-	0x8c, 0x18, 0xf9, 0x15, 0x31, 0xe3, 0x22, 0x62, 0xe4, 0xcb, 0x84, 0x19, 0xa3, 0x09, 0x33, 0xce,
-	0x27, 0xcc, 0xf8, 0xb0, 0x91, 0xbc, 0x2e, 0xd3, 0xc2, 0x76, 0x21, 0x79, 0x58, 0x1e, 0xfd, 0x0e,
-	0x00, 0x00, 0xff, 0xff, 0x49, 0xf6, 0x17, 0x5a, 0xcf, 0x04, 0x00, 0x00,
+	// 576 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xbc, 0x54, 0xc1, 0x6e, 0xd3, 0x4a,
+	0x14, 0xf5, 0xb4, 0x2f, 0x79, 0xed, 0x6d, 0xda, 0x86, 0x51, 0x29, 0xc1, 0x2d, 0xa3, 0x90, 0x0d,
+	0x41, 0x02, 0x07, 0x15, 0x24, 0x84, 0x04, 0x9b, 0x12, 0x41, 0x11, 0x08, 0x09, 0xb7, 0x62, 0xc1,
+	0x26, 0x1a, 0x3b, 0xa3, 0xc4, 0x8a, 0xe3, 0x71, 0x3d, 0xe3, 0x56, 0x11, 0x1b, 0x3e, 0x81, 0xbf,
+	0x80, 0xef, 0x60, 0xc5, 0x32, 0xcb, 0x2e, 0x89, 0xb3, 0x61, 0xd9, 0x4f, 0x40, 0xf6, 0xd8, 0xae,
+	0x93, 0x86, 0x0a, 0x36, 0x6c, 0xa2, 0xdc, 0x73, 0xce, 0xdc, 0xcc, 0x3d, 0x27, 0x77, 0x60, 0xbd,
+	0x47, 0x25, 0x3b, 0xa5, 0x23, 0xc3, 0x0f, 0xb8, 0xe4, 0x78, 0x35, 0x2d, 0x7d, 0x4b, 0x7f, 0xdc,
+	0x73, 0x64, 0x3f, 0xb4, 0x0c, 0x9b, 0x0f, 0x5b, 0xb2, 0x4f, 0x3d, 0x2e, 0xee, 0x3b, 0x3c, 0xfd,
+	0xd6, 0xf2, 0x07, 0xbd, 0x96, 0x90, 0x3c, 0x60, 0xea, 0xd3, 0xb7, 0x5a, 0x81, 0x6f, 0xab, 0x1e,
+	0x7a, 0x7d, 0x96, 0xf0, 0x03, 0x3e, 0xf4, 0xad, 0x96, 0x1c, 0xf9, 0x4c, 0x28, 0x45, 0xe3, 0x1b,
+	0x82, 0xca, 0xbb, 0x90, 0x05, 0x23, 0x93, 0x1d, 0x87, 0x4c, 0x48, 0xbc, 0x05, 0xa5, 0xe3, 0xb8,
+	0xae, 0xa1, 0x3a, 0x6a, 0xae, 0x9a, 0xaa, 0xc0, 0xb7, 0xa1, 0x22, 0x9d, 0x21, 0xeb, 0x08, 0x66,
+	0x73, 0xaf, 0x2b, 0x6a, 0x4b, 0x75, 0xd4, 0x5c, 0x36, 0xd7, 0x62, 0xec, 0x50, 0x41, 0xf8, 0x0e,
+	0x6c, 0xc6, 0x25, 0x0f, 0x65, 0xae, 0x5a, 0x4e, 0x54, 0x1b, 0x29, 0x9c, 0x09, 0x1f, 0xc1, 0xb6,
+	0xcb, 0xf9, 0xc0, 0xa2, 0xf6, 0xa0, 0xd3, 0x65, 0xae, 0xa4, 0xb9, 0xfe, 0xbf, 0x44, 0xbf, 0x95,
+	0xb1, 0xed, 0x98, 0xcc, 0x4e, 0xe9, 0xb0, 0x62, 0xb9, 0xdc, 0x1e, 0xbc, 0x6a, 0x8b, 0x5a, 0xa9,
+	0xbe, 0xdc, 0x5c, 0x35, 0xf3, 0xba, 0x71, 0x02, 0xeb, 0xe9, 0x0c, 0xc2, 0xe7, 0x9e, 0x60, 0x78,
+	0x17, 0x56, 0x4e, 0x69, 0xe0, 0x39, 0x5e, 0x4f, 0xa8, 0x39, 0x0e, 0x34, 0x33, 0x47, 0xf0, 0x33,
+	0x80, 0xf8, 0x4a, 0x82, 0x05, 0x0e, 0x53, 0xa3, 0xac, 0xed, 0xed, 0xc4, 0x7e, 0x0c, 0x99, 0xec,
+	0xb3, 0x50, 0x74, 0x6c, 0xee, 0x8f, 0x8c, 0xa3, 0x64, 0xb6, 0x58, 0x72, 0xa0, 0x99, 0x85, 0x03,
+	0xfb, 0x2b, 0x50, 0x0e, 0x98, 0x08, 0x5d, 0xd9, 0xf8, 0xb2, 0x04, 0xd7, 0xd4, 0x0f, 0x53, 0xaf,
+	0xc7, 0xae, 0x76, 0xf0, 0x1e, 0x60, 0x21, 0x69, 0x20, 0x3b, 0x0b, 0x7c, 0xac, 0x26, 0xcc, 0x51,
+	0xc1, 0xcc, 0x26, 0x54, 0x99, 0xd7, 0x9d, 0xd5, 0xa6, 0x6e, 0x32, 0xaf, 0x5b, 0x54, 0xde, 0x85,
+	0xaa, 0xe3, 0x49, 0x16, 0x9c, 0x50, 0x77, 0xce, 0xc7, 0xcd, 0x0c, 0xbf, 0x22, 0xa1, 0xd2, 0x5f,
+	0x26, 0x54, 0xfe, 0xc3, 0x84, 0xfe, 0x9f, 0x4b, 0xe8, 0x23, 0xe0, 0xa2, 0x51, 0xff, 0x34, 0xa6,
+	0xbd, 0xc9, 0x12, 0x54, 0x0e, 0xe3, 0x15, 0x78, 0xa9, 0x36, 0x0a, 0x3f, 0x81, 0xb2, 0x3a, 0x82,
+	0xaf, 0x1b, 0x6a, 0x8b, 0x0c, 0x55, 0xa7, 0x11, 0xea, 0xdb, 0xf3, 0xb0, 0xba, 0xf0, 0x03, 0x84,
+	0x9f, 0x03, 0xbc, 0xa1, 0x16, 0x73, 0xdf, 0xd2, 0x21, 0x13, 0xf8, 0x66, 0xa6, 0xbb, 0xc0, 0xb2,
+	0x16, 0xfa, 0x22, 0x2a, 0x9d, 0xfb, 0x05, 0xac, 0x25, 0xe8, 0x7b, 0xea, 0x86, 0x4c, 0xe0, 0x59,
+	0xa9, 0x02, 0xb3, 0x36, 0x3b, 0x0b, 0xb9, 0xb4, 0xcf, 0x53, 0x28, 0x25, 0xae, 0xe2, 0x1b, 0x46,
+	0xfe, 0x58, 0x18, 0xc5, 0x6d, 0xd6, 0x6b, 0x97, 0x89, 0x7c, 0x94, 0xd7, 0x00, 0x17, 0x99, 0xe0,
+	0xdd, 0x4b, 0xca, 0xc2, 0x7f, 0x5a, 0xbf, 0xf5, 0x1b, 0x36, 0x6b, 0xb6, 0xdf, 0x1e, 0x4f, 0x88,
+	0x76, 0x36, 0x21, 0xda, 0xf9, 0x84, 0xa0, 0x4f, 0x11, 0x41, 0x5f, 0x23, 0x82, 0xbe, 0x47, 0x04,
+	0x8d, 0x23, 0x82, 0x7e, 0x44, 0x04, 0xfd, 0x8c, 0x88, 0x76, 0x1e, 0x11, 0xf4, 0x79, 0x4a, 0xb4,
+	0xf1, 0x94, 0x68, 0x67, 0x53, 0xa2, 0x7d, 0xd8, 0x48, 0x5e, 0xa6, 0xbc, 0xb5, 0x55, 0x4e, 0x1e,
+	0xa5, 0x87, 0xbf, 0x02, 0x00, 0x00, 0xff, 0xff, 0x76, 0x3a, 0x58, 0x45, 0x0b, 0x05, 0x00, 0x00,
 }
 
 func (this *QueryRequest) Equal(that interface{}) bool {
@@ -428,6 +445,14 @@ func (this *QueryRequest) Equal(that interface{}) bool {
 	}
 	if this.LookbackDeltaSeconds != that1.LookbackDeltaSeconds {
 		return false
+	}
+	if len(this.BlockIDs) != len(that1.BlockIDs) {
+		return false
+	}
+	for i := range this.BlockIDs {
+		if this.BlockIDs[i] != that1.BlockIDs[i] {
+			return false
+		}
 	}
 	return true
 }
@@ -546,6 +571,14 @@ func (this *QueryRangeRequest) Equal(that interface{}) bool {
 	if this.LookbackDeltaSeconds != that1.LookbackDeltaSeconds {
 		return false
 	}
+	if len(this.BlockIDs) != len(that1.BlockIDs) {
+		return false
+	}
+	for i := range this.BlockIDs {
+		if this.BlockIDs[i] != that1.BlockIDs[i] {
+			return false
+		}
+	}
 	return true
 }
 func (this *QueryRangeResponse) Equal(that interface{}) bool {
@@ -630,12 +663,13 @@ func (this *QueryRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 8)
+	s := make([]string, 0, 9)
 	s = append(s, "&storegatewaypb.QueryRequest{")
 	s = append(s, "Query: "+fmt.Sprintf("%#v", this.Query)+",\n")
 	s = append(s, "TimeSeconds: "+fmt.Sprintf("%#v", this.TimeSeconds)+",\n")
 	s = append(s, "TimeoutSeconds: "+fmt.Sprintf("%#v", this.TimeoutSeconds)+",\n")
 	s = append(s, "LookbackDeltaSeconds: "+fmt.Sprintf("%#v", this.LookbackDeltaSeconds)+",\n")
+	s = append(s, "BlockIDs: "+fmt.Sprintf("%#v", this.BlockIDs)+",\n")
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -671,7 +705,7 @@ func (this *QueryRangeRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 10)
+	s := make([]string, 0, 11)
 	s = append(s, "&storegatewaypb.QueryRangeRequest{")
 	s = append(s, "Query: "+fmt.Sprintf("%#v", this.Query)+",\n")
 	s = append(s, "StartTimeSeconds: "+fmt.Sprintf("%#v", this.StartTimeSeconds)+",\n")
@@ -679,6 +713,7 @@ func (this *QueryRangeRequest) GoString() string {
 	s = append(s, "IntervalSeconds: "+fmt.Sprintf("%#v", this.IntervalSeconds)+",\n")
 	s = append(s, "TimeoutSeconds: "+fmt.Sprintf("%#v", this.TimeoutSeconds)+",\n")
 	s = append(s, "LookbackDeltaSeconds: "+fmt.Sprintf("%#v", this.LookbackDeltaSeconds)+",\n")
+	s = append(s, "BlockIDs: "+fmt.Sprintf("%#v", this.BlockIDs)+",\n")
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -743,8 +778,8 @@ type StoreGatewayClient interface {
 	LabelNames(ctx context.Context, in *storepb.LabelNamesRequest, opts ...grpc.CallOption) (*storepb.LabelNamesResponse, error)
 	// LabelValues returns all label values for given label name.
 	LabelValues(ctx context.Context, in *storepb.LabelValuesRequest, opts ...grpc.CallOption) (*storepb.LabelValuesResponse, error)
-	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error)
-	QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (*QueryRangeResponse, error)
+	Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (StoreGateway_QueryClient, error)
+	QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (StoreGateway_QueryRangeClient, error)
 }
 
 type storeGatewayClient struct {
@@ -805,22 +840,68 @@ func (c *storeGatewayClient) LabelValues(ctx context.Context, in *storepb.LabelV
 	return out, nil
 }
 
-func (c *storeGatewayClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error) {
-	out := new(QueryResponse)
-	err := c.cc.Invoke(ctx, "/gatewaypb.StoreGateway/Query", in, out, opts...)
+func (c *storeGatewayClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (StoreGateway_QueryClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_StoreGateway_serviceDesc.Streams[1], "/gatewaypb.StoreGateway/Query", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &storeGatewayQueryClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
 }
 
-func (c *storeGatewayClient) QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (*QueryRangeResponse, error) {
-	out := new(QueryRangeResponse)
-	err := c.cc.Invoke(ctx, "/gatewaypb.StoreGateway/QueryRange", in, out, opts...)
+type StoreGateway_QueryClient interface {
+	Recv() (*QueryResponse, error)
+	grpc.ClientStream
+}
+
+type storeGatewayQueryClient struct {
+	grpc.ClientStream
+}
+
+func (x *storeGatewayQueryClient) Recv() (*QueryResponse, error) {
+	m := new(QueryResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *storeGatewayClient) QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (StoreGateway_QueryRangeClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_StoreGateway_serviceDesc.Streams[2], "/gatewaypb.StoreGateway/QueryRange", opts...)
 	if err != nil {
 		return nil, err
 	}
-	return out, nil
+	x := &storeGatewayQueryRangeClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type StoreGateway_QueryRangeClient interface {
+	Recv() (*QueryRangeResponse, error)
+	grpc.ClientStream
+}
+
+type storeGatewayQueryRangeClient struct {
+	grpc.ClientStream
+}
+
+func (x *storeGatewayQueryRangeClient) Recv() (*QueryRangeResponse, error) {
+	m := new(QueryRangeResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 // StoreGatewayServer is the server API for StoreGateway service.
@@ -837,8 +918,8 @@ type StoreGatewayServer interface {
 	LabelNames(context.Context, *storepb.LabelNamesRequest) (*storepb.LabelNamesResponse, error)
 	// LabelValues returns all label values for given label name.
 	LabelValues(context.Context, *storepb.LabelValuesRequest) (*storepb.LabelValuesResponse, error)
-	Query(context.Context, *QueryRequest) (*QueryResponse, error)
-	QueryRange(context.Context, *QueryRangeRequest) (*QueryRangeResponse, error)
+	Query(*QueryRequest, StoreGateway_QueryServer) error
+	QueryRange(*QueryRangeRequest, StoreGateway_QueryRangeServer) error
 }
 
 // UnimplementedStoreGatewayServer can be embedded to have forward compatible implementations.
@@ -854,11 +935,11 @@ func (*UnimplementedStoreGatewayServer) LabelNames(ctx context.Context, req *sto
 func (*UnimplementedStoreGatewayServer) LabelValues(ctx context.Context, req *storepb.LabelValuesRequest) (*storepb.LabelValuesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LabelValues not implemented")
 }
-func (*UnimplementedStoreGatewayServer) Query(ctx context.Context, req *QueryRequest) (*QueryResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Query not implemented")
+func (*UnimplementedStoreGatewayServer) Query(req *QueryRequest, srv StoreGateway_QueryServer) error {
+	return status.Errorf(codes.Unimplemented, "method Query not implemented")
 }
-func (*UnimplementedStoreGatewayServer) QueryRange(ctx context.Context, req *QueryRangeRequest) (*QueryRangeResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method QueryRange not implemented")
+func (*UnimplementedStoreGatewayServer) QueryRange(req *QueryRangeRequest, srv StoreGateway_QueryRangeServer) error {
+	return status.Errorf(codes.Unimplemented, "method QueryRange not implemented")
 }
 
 func RegisterStoreGatewayServer(s *grpc.Server, srv StoreGatewayServer) {
@@ -922,40 +1003,46 @@ func _StoreGateway_LabelValues_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _StoreGateway_Query_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QueryRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+func _StoreGateway_Query_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(QueryRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(StoreGatewayServer).Query(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gatewaypb.StoreGateway/Query",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StoreGatewayServer).Query(ctx, req.(*QueryRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(StoreGatewayServer).Query(m, &storeGatewayQueryServer{stream})
 }
 
-func _StoreGateway_QueryRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(QueryRangeRequest)
-	if err := dec(in); err != nil {
-		return nil, err
+type StoreGateway_QueryServer interface {
+	Send(*QueryResponse) error
+	grpc.ServerStream
+}
+
+type storeGatewayQueryServer struct {
+	grpc.ServerStream
+}
+
+func (x *storeGatewayQueryServer) Send(m *QueryResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func _StoreGateway_QueryRange_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(QueryRangeRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
 	}
-	if interceptor == nil {
-		return srv.(StoreGatewayServer).QueryRange(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gatewaypb.StoreGateway/QueryRange",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(StoreGatewayServer).QueryRange(ctx, req.(*QueryRangeRequest))
-	}
-	return interceptor(ctx, in, info, handler)
+	return srv.(StoreGatewayServer).QueryRange(m, &storeGatewayQueryRangeServer{stream})
+}
+
+type StoreGateway_QueryRangeServer interface {
+	Send(*QueryRangeResponse) error
+	grpc.ServerStream
+}
+
+type storeGatewayQueryRangeServer struct {
+	grpc.ServerStream
+}
+
+func (x *storeGatewayQueryRangeServer) Send(m *QueryRangeResponse) error {
+	return x.ServerStream.SendMsg(m)
 }
 
 var _StoreGateway_serviceDesc = grpc.ServiceDesc{
@@ -970,19 +1057,21 @@ var _StoreGateway_serviceDesc = grpc.ServiceDesc{
 			MethodName: "LabelValues",
 			Handler:    _StoreGateway_LabelValues_Handler,
 		},
-		{
-			MethodName: "Query",
-			Handler:    _StoreGateway_Query_Handler,
-		},
-		{
-			MethodName: "QueryRange",
-			Handler:    _StoreGateway_QueryRange_Handler,
-		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Series",
 			Handler:       _StoreGateway_Series_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Query",
+			Handler:       _StoreGateway_Query_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "QueryRange",
+			Handler:       _StoreGateway_QueryRange_Handler,
 			ServerStreams: true,
 		},
 	},
@@ -1009,6 +1098,15 @@ func (m *QueryRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.BlockIDs) > 0 {
+		for iNdEx := len(m.BlockIDs) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.BlockIDs[iNdEx])
+			copy(dAtA[i:], m.BlockIDs[iNdEx])
+			i = encodeVarintGateway(dAtA, i, uint64(len(m.BlockIDs[iNdEx])))
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
 	if m.LookbackDeltaSeconds != 0 {
 		i = encodeVarintGateway(dAtA, i, uint64(m.LookbackDeltaSeconds))
 		i--
@@ -1119,6 +1217,15 @@ func (m *QueryRangeRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.BlockIDs) > 0 {
+		for iNdEx := len(m.BlockIDs) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.BlockIDs[iNdEx])
+			copy(dAtA[i:], m.BlockIDs[iNdEx])
+			i = encodeVarintGateway(dAtA, i, uint64(len(m.BlockIDs[iNdEx])))
+			i--
+			dAtA[i] = 0x3a
+		}
+	}
 	if m.LookbackDeltaSeconds != 0 {
 		i = encodeVarintGateway(dAtA, i, uint64(m.LookbackDeltaSeconds))
 		i--
@@ -1249,6 +1356,12 @@ func (m *QueryRequest) Size() (n int) {
 	if m.LookbackDeltaSeconds != 0 {
 		n += 1 + sovGateway(uint64(m.LookbackDeltaSeconds))
 	}
+	if len(m.BlockIDs) > 0 {
+		for _, s := range m.BlockIDs {
+			l = len(s)
+			n += 1 + l + sovGateway(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -1311,6 +1424,12 @@ func (m *QueryRangeRequest) Size() (n int) {
 	if m.LookbackDeltaSeconds != 0 {
 		n += 1 + sovGateway(uint64(m.LookbackDeltaSeconds))
 	}
+	if len(m.BlockIDs) > 0 {
+		for _, s := range m.BlockIDs {
+			l = len(s)
+			n += 1 + l + sovGateway(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -1364,6 +1483,7 @@ func (this *QueryRequest) String() string {
 		`TimeSeconds:` + fmt.Sprintf("%v", this.TimeSeconds) + `,`,
 		`TimeoutSeconds:` + fmt.Sprintf("%v", this.TimeoutSeconds) + `,`,
 		`LookbackDeltaSeconds:` + fmt.Sprintf("%v", this.LookbackDeltaSeconds) + `,`,
+		`BlockIDs:` + fmt.Sprintf("%v", this.BlockIDs) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1409,6 +1529,7 @@ func (this *QueryRangeRequest) String() string {
 		`IntervalSeconds:` + fmt.Sprintf("%v", this.IntervalSeconds) + `,`,
 		`TimeoutSeconds:` + fmt.Sprintf("%v", this.TimeoutSeconds) + `,`,
 		`LookbackDeltaSeconds:` + fmt.Sprintf("%v", this.LookbackDeltaSeconds) + `,`,
+		`BlockIDs:` + fmt.Sprintf("%v", this.BlockIDs) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1569,6 +1690,38 @@ func (m *QueryRequest) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BlockIDs", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BlockIDs = append(m.BlockIDs, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGateway(dAtA[iNdEx:])
@@ -1869,6 +2022,38 @@ func (m *QueryRangeRequest) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BlockIDs", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGateway
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGateway
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGateway
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BlockIDs = append(m.BlockIDs, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGateway(dAtA[iNdEx:])
