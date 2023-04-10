@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/thanos-io/thanos/pkg/api"
 	"html/template"
 	"net/http"
 	"path"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -165,6 +167,7 @@ func NewQuerierHandler(
 	tombstonesLoader purger.TombstonesLoader,
 	reg prometheus.Registerer,
 	logger log.Logger,
+	queryStoreAfter time.Duration,
 ) http.Handler {
 	// Prometheus histograms for requests to the querier.
 	querierRequestDuration := promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
@@ -194,7 +197,7 @@ func NewQuerierHandler(
 		Help:      "Current number of inflight requests to the querier.",
 	}, []string{"method", "route"})
 
-	api := v1.NewAPI(
+	v1api := v1.NewAPI(
 		engine,
 		querier.NewErrorTranslateSampleAndChunkQueryable(queryable), // Translate errors to errors expected by API.
 		nil, // No remote write support.
@@ -249,10 +252,31 @@ func NewQuerierHandler(
 	legacyPrefix := path.Join(cfg.ServerPrefix, cfg.LegacyHTTPPrefix)
 
 	promRouter := route.New().WithPrefix(path.Join(prefix, "/api/v1"))
-	api.Register(promRouter)
+	v1api.Register(promRouter)
 
 	legacyPromRouter := route.New().WithPrefix(path.Join(legacyPrefix, "/api/v1"))
-	api.Register(legacyPromRouter)
+	v1api.Register(legacyPromRouter)
+
+	wrap := func(f api.ApiFunc) http.HandlerFunc {
+		hf := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if data, warnings, err, releaseResources := f(r); err != nil {
+				RespondError(w, err, data)
+				releaseResources()
+			} else if data != nil {
+				Respond(w, data, warnings)
+				releaseResources()
+			} else {
+				w.WriteHeader(http.StatusNoContent)
+				releaseResources()
+			}
+		})
+		return hf
+	}
+	qapi := querier.API{
+		Queryable:       queryable,
+		QueryEngine:     engine,
+		QueryStoreAfter: queryStoreAfter,
+	}
 
 	// TODO(gotjosh): This custom handler is temporary until we're able to vendor the changes in:
 	// https://github.com/prometheus/prometheus/pull/7125/files
@@ -260,7 +284,7 @@ func NewQuerierHandler(
 	router.Path(path.Join(prefix, "/api/v1/read")).Handler(querier.RemoteReadHandler(queryable, logger))
 	router.Path(path.Join(prefix, "/api/v1/read")).Methods("POST").Handler(promRouter)
 	router.Path(path.Join(prefix, "/api/v1/query")).Methods("GET", "POST").Handler(promRouter)
-	router.Path(path.Join(prefix, "/api/v1/query_range")).Methods("GET", "POST").Handler(promRouter)
+	router.Path(path.Join(prefix, "/api/v1/query_range")).Methods("GET", "POST").Handler(wrap(qapi.QueryRange))
 	router.Path(path.Join(prefix, "/api/v1/query_exemplars")).Methods("GET", "POST").Handler(promRouter)
 	router.Path(path.Join(prefix, "/api/v1/labels")).Methods("GET", "POST").Handler(promRouter)
 	router.Path(path.Join(prefix, "/api/v1/label/{name}/values")).Methods("GET").Handler(promRouter)
@@ -318,3 +342,62 @@ func (h *buildInfoHandler) ServeHTTP(writer http.ResponseWriter, _ *http.Request
 		level.Error(h.logger).Log("msg", "write build info response", "error", err)
 	}
 }
+
+func Respond(w http.ResponseWriter, data interface{}, warnings []error) {
+	w.Header().Set("Content-Type", "application/json")
+	if len(warnings) > 0 {
+		w.Header().Set("Cache-Control", "no-store")
+	}
+	w.WriteHeader(http.StatusOK)
+
+	resp := &response{
+		Status: StatusSuccess,
+		Data:   data,
+	}
+	for _, warn := range warnings {
+		resp.Warnings = append(resp.Warnings, warn.Error())
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func RespondError(w http.ResponseWriter, apiErr *api.ApiError, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+
+	var code int
+	switch apiErr.Typ {
+	case api.ErrorBadData:
+		code = http.StatusBadRequest
+	case api.ErrorExec:
+		code = 422
+	case api.ErrorCanceled, api.ErrorTimeout:
+		code = http.StatusServiceUnavailable
+	case api.ErrorInternal:
+		code = http.StatusInternalServerError
+	default:
+		code = http.StatusInternalServerError
+	}
+	w.WriteHeader(code)
+
+	_ = json.NewEncoder(w).Encode(&response{
+		Status:    StatusError,
+		ErrorType: apiErr.Typ,
+		Error:     apiErr.Err.Error(),
+		Data:      data,
+	})
+}
+
+type response struct {
+	Status    status        `json:"status"`
+	Data      interface{}   `json:"data,omitempty"`
+	ErrorType api.ErrorType `json:"errorType,omitempty"`
+	Error     string        `json:"error,omitempty"`
+	Warnings  []string      `json:"warnings,omitempty"`
+}
+
+type status string
+
+const (
+	StatusSuccess status = "success"
+	StatusError   status = "error"
+)

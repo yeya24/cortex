@@ -152,7 +152,11 @@ func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 			Help: "Total number of times the bucket sync operation triggered.",
 		}, []string{"reason"}),
 	}
-	g.engine = promql.NewEngine(promql.EngineOpts{})
+	g.engine = promql.NewEngine(promql.EngineOpts{
+		LookbackDelta:        time.Minute * 5,
+		EnableAtModifier:     true,
+		EnableNegativeOffset: true,
+	})
 
 	// Init metrics.
 	g.bucketSync.WithLabelValues(syncReasonInitial)
@@ -392,25 +396,27 @@ func createBucketClient(cfg cortex_tsdb.BlocksStorageConfig, logger log.Logger, 
 	return bucketClient, nil
 }
 
-func (g *StoreGateway) Query(ctx context.Context, req *storegatewaypb.QueryRequest) (*storegatewaypb.QueryResponse, error) {
+func (g *StoreGateway) Query(req *storegatewaypb.QueryRequest, server storegatewaypb.StoreGateway_QueryServer) error {
+	ctx := server.Context()
 	spanLog, spanCtx := spanlogger.New(ctx, "BucketStores.Query")
 	defer spanLog.Span.Finish()
 
 	userID := getUserIDFromGRPCContext(spanCtx)
 	if userID == "" {
-		return nil, fmt.Errorf("no userID")
+		return fmt.Errorf("no userID")
 	}
 
 	store := g.stores.getStore(userID)
 	if store == nil {
-		return &storegatewaypb.QueryResponse{}, nil
+		return fmt.Errorf("no store")
 	}
 
 	queryable := NewQueryable(store, userID, nil)
 	lookback := time.Duration(req.LookbackDeltaSeconds) * time.Second
-	qry, err := g.engine.NewInstantQuery(queryable, &promql.QueryOpts{LookbackDelta: lookback}, req.Query, req.TimeSeconds)
+	t := time.Unix(req.TimeSeconds, 0)
+	qry, err := g.engine.NewInstantQuery(queryable, &promql.QueryOpts{LookbackDelta: lookback}, req.Query, t)
 	if err != nil {
-
+		return errors.Wrapf(err, "new instant query")
 	}
 
 	result := qry.Exec(ctx)
@@ -419,9 +425,10 @@ func (g *StoreGateway) Query(ctx context.Context, req *storegatewaypb.QueryReque
 	}
 
 	if len(result.Warnings) != 0 {
-		if err := server.Send(querypb.NewQueryWarningsResponse(result.Warnings...)); err != nil {
+		if err := server.Send(storegatewaypb.NewQueryWarningsResponse(result.Warnings...)); err != nil {
 			return err
 		}
+		return nil
 	}
 
 	switch vector := result.Value.(type) {
@@ -429,11 +436,9 @@ func (g *StoreGateway) Query(ctx context.Context, req *storegatewaypb.QueryReque
 		series := &prompb.TimeSeries{
 			Samples: []prompb.Sample{{Value: vector.V, Timestamp: vector.T}},
 		}
-		return &storegatewaypb.QueryResponse{
-			Result: &storegatewaypb.QueryResponse_Timeseries{
-				Timeseries: series,
-			},
-		}, nil
+		if err := server.Send(storegatewaypb.NewQueryResponse(series)); err != nil {
+			return err
+		}
 	case promql.Vector:
 		for _, sample := range vector {
 			floats, histograms := prompb.SamplesFromPromqlPoints(sample.Point)
@@ -442,27 +447,30 @@ func (g *StoreGateway) Query(ctx context.Context, req *storegatewaypb.QueryReque
 				Samples:    floats,
 				Histograms: histograms,
 			}
+			if err := server.Send(storegatewaypb.NewQueryResponse(series)); err != nil {
+				return err
+			}
 		}
-		return &storegatewaypb.QueryResponse{
-			Result: &storegatewaypb.QueryResponse_Timeseries{
-				Timeseries: series,
-			},
-		}, nil
+		return nil
+	default:
+		return fmt.Errorf("unexpected result type: %s", vector.Type())
 	}
+	return nil
 }
 
-func (g *StoreGateway) QueryRange(ctx context.Context, req *storegatewaypb.QueryRangeRequest) (*storegatewaypb.QueryRangeResponse, error) {
+func (g *StoreGateway) QueryRange(req *storegatewaypb.QueryRangeRequest, server storegatewaypb.StoreGateway_QueryRangeServer) error {
+	ctx := server.Context()
 	spanLog, spanCtx := spanlogger.New(ctx, "BucketStores.QueryRange")
 	defer spanLog.Span.Finish()
 
 	userID := getUserIDFromGRPCContext(spanCtx)
 	if userID == "" {
-		return nil, fmt.Errorf("no userID")
+		return fmt.Errorf("no userID")
 	}
 
 	store := g.stores.getStore(userID)
 	if store == nil {
-		return &storegatewaypb.QueryRangeResponse{}, nil
+		return nil
 	}
 
 	queryable := NewQueryable(store, userID, nil)
@@ -472,7 +480,7 @@ func (g *StoreGateway) QueryRange(ctx context.Context, req *storegatewaypb.Query
 	end := time.Unix(req.EndTimeSeconds, 0)
 	q, err := g.engine.NewRangeQuery(queryable, &promql.QueryOpts{LookbackDelta: lookback}, req.Query, start, end, step)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	result := q.Exec(ctx)
 	if result.Err != nil {
@@ -480,9 +488,10 @@ func (g *StoreGateway) QueryRange(ctx context.Context, req *storegatewaypb.Query
 	}
 
 	if len(result.Warnings) != 0 {
-		if err := srv.Send(querypb.NewQueryRangeWarningsResponse(result.Warnings...)); err != nil {
+		if err := server.Send(storegatewaypb.NewQueryRangeWarningsResponse(result.Warnings...)); err != nil {
 			return err
 		}
+		return nil
 	}
 
 	switch value := result.Value.(type) {
@@ -494,11 +503,15 @@ func (g *StoreGateway) QueryRange(ctx context.Context, req *storegatewaypb.Query
 				Samples:    floats,
 				Histograms: histograms,
 			}
-			if err := srv.Send(querypb.NewQueryRangeResponse(series)); err != nil {
+
+			if err := server.Send(storegatewaypb.NewQueryRangeResponse(series)); err != nil {
 				return err
 			}
 		}
+	default:
+		return fmt.Errorf("unexpected result type: %s", value.Type())
 	}
+	return nil
 }
 
 type Queryable struct {

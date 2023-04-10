@@ -303,6 +303,7 @@ func (t *Cortex) initQuerier() (serv services.Service, err error) {
 		t.TombstonesLoader,
 		prometheus.DefaultRegisterer,
 		util_log.Logger,
+		t.Cfg.Querier.QueryStoreAfter,
 	)
 
 	// If the querier is running standalone without the query-frontend or query-scheduler, we must register it's internal

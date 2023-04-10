@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/prometheus/promql/parser"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"math"
 	"net/http"
@@ -19,8 +20,9 @@ import (
 )
 
 type API struct {
-	QueryEngine v1.QueryEngine
-	Queryable   storage.Queryable
+	QueryEngine     v1.QueryEngine
+	Queryable       storage.Queryable
+	QueryStoreAfter time.Duration
 }
 
 func invalidParamError(err error, parameter string) (interface{}, []error, *api.ApiError, func()) {
@@ -76,14 +78,6 @@ func (qapi *API) QueryRange(r *http.Request) (interface{}, []error, *api.ApiErro
 	if err != nil {
 		return nil, nil, &api.ApiError{Typ: api.ErrorBadData, Err: err}, func() {}
 	}
-	// From now on, we must only return with a finalizer in the result (to
-	// be called by the caller) or call qry.Close ourselves (which is
-	// required in the case of a panic).
-	defer func() {
-		if result.finalizer == nil {
-			qry.Close()
-		}
-	}()
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
@@ -93,16 +87,24 @@ func (qapi *API) QueryRange(r *http.Request) (interface{}, []error, *api.ApiErro
 		return nil, res.Warnings, &api.ApiError{Typ: api.ErrorBadData, Err: err}, qry.Close
 	}
 
-	if r.FormValue("stats") != "" {
-		stats.NewQueryStats(stats.NewQueryStats(qry.Stats()))
-	}
-	qs := sr(ctx, qry.Stats(), r.FormValue("stats"))
-
-	return apiFuncResult{&queryData{
+	qapi.QueryStoreAfter
+	data := &queryData{
 		ResultType: res.Value.Type(),
 		Result:     res.Value,
-		Stats:      qs,
-	}, nil, res.Warnings, qry.Close}
+	}
+	if r.FormValue("stats") != "" {
+		data.Stats = stats.NewQueryStats(qry.Stats())
+	}
+
+	return data, res.Warnings, nil, qry.Close
+}
+
+type queryData struct {
+	ResultType parser.ValueType `json:"resultType"`
+	Result     parser.Value     `json:"result"`
+	Stats      stats.QueryStats `json:"stats,omitempty"`
+	// Additional Thanos Response field.
+	Warnings []error `json:"warnings,omitempty"`
 }
 
 var (

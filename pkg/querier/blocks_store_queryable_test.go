@@ -1535,6 +1535,14 @@ func (m *storeGatewayClientMock) LabelValues(context.Context, *storepb.LabelValu
 	return m.mockedLabelValuesResponse, m.mockedLabelValuesErr
 }
 
+func (m *storeGatewayClientMock) Query(ctx context.Context, in *storegatewaypb.QueryRequest, opts ...grpc.CallOption) (storegatewaypb.StoreGateway_QueryClient, error) {
+	return nil, nil
+}
+
+func (m *storeGatewayClientMock) QueryRange(ctx context.Context, in *storegatewaypb.QueryRangeRequest, opts ...grpc.CallOption) (storegatewaypb.StoreGateway_QueryRangeClient, error) {
+	return nil, nil
+}
+
 func (m *storeGatewayClientMock) RemoteAddress() string {
 	return m.remoteAddr
 }
