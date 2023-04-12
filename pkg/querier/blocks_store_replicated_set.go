@@ -94,6 +94,38 @@ func (s *blocksStoreReplicationSet) stopping(_ error) error {
 	return services.StopManagerAndAwaitStopped(context.Background(), s.subservices)
 }
 
+func (s *blocksStoreReplicationSet) GetBlocksLocations(userID string, blockIDs []ulid.ULID) (map[string][]ulid.ULID, error) {
+	// If shuffle sharding is enabled, we should build a subring for the user,
+	// otherwise we just use the full ring.
+	var userRing ring.ReadRing
+	if s.shardingStrategy == util.ShardingStrategyShuffle {
+		userRing = storegateway.GetShuffleShardingSubring(s.storesRing, userID, s.limits)
+	} else {
+		userRing = s.storesRing
+	}
+
+	res := make(map[string][]ulid.ULID, 0)
+	// Find the replication set of each block we need to query.
+	for _, blockID := range blockIDs {
+		// Do not reuse the same buffer across multiple Get() calls because we do retain the
+		// returned replication set.
+		bufDescs, bufHosts, bufZones := ring.MakeBuffersForGet()
+
+		set, err := userRing.Get(cortex_tsdb.HashBlockID(blockID), storegateway.BlocksRead, bufDescs, bufHosts, bufZones)
+		if err != nil {
+			return nil, errors.Wrapf(err, "failed to get store-gateway replication set owning the block %s", blockID.String())
+		}
+		for _, addr := range set.GetAddresses() {
+			if _, ok := res[addr]; ok {
+				res[addr] = append(res[addr], blockID)
+			} else {
+				res[addr] = []ulid.ULID{blockID}
+			}
+		}
+	}
+	return res, nil
+}
+
 func (s *blocksStoreReplicationSet) GetClientsFor(userID string, blockIDs []ulid.ULID, exclude map[ulid.ULID][]string) (map[BlocksStoreClient][]ulid.ULID, error) {
 	shards := map[string][]ulid.ULID{}
 

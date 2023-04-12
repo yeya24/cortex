@@ -60,6 +60,19 @@ func (s *blocksStoreBalancedSet) resolve(ctx context.Context) error {
 	return nil
 }
 
+func (s *blocksStoreBalancedSet) GetBlocksLocations(_ string, blockIDs []ulid.ULID) (map[string][]ulid.ULID, error) {
+	addresses := s.dnsProvider.Addresses()
+	if len(addresses) == 0 {
+		return nil, fmt.Errorf("no address resolved for the store-gateway service addresses %s", strings.Join(s.serviceAddresses, ","))
+	}
+
+	res := make(map[string][]ulid.ULID, len(blockIDs))
+	for _, address := range addresses {
+		res[address] = blockIDs
+	}
+	return res, nil
+}
+
 func (s *blocksStoreBalancedSet) GetClientsFor(_ string, blockIDs []ulid.ULID, exclude map[ulid.ULID][]string) (map[BlocksStoreClient][]ulid.ULID, error) {
 	addresses := s.dnsProvider.Addresses()
 	if len(addresses) == 0 {

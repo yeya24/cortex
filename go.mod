@@ -52,7 +52,7 @@ require (
 	github.com/sony/gobreaker v0.5.0
 	github.com/spf13/afero v1.9.3
 	github.com/stretchr/testify v1.8.2
-	github.com/thanos-community/promql-engine v0.0.0-20230224075812-ae04bbea7613
+	github.com/thanos-community/promql-engine v0.0.0-20230408100057-190e5c3be03f
 	github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204
 	github.com/thanos-io/thanos v0.31.1-0.20230407155446-1f16d0810b83
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
@@ -252,3 +252,5 @@ replace github.com/google/gnostic => github.com/googleapis/gnostic v0.6.9
 replace gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0.20210301060133-17f40c25f497
 
 replace github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
+
+replace github.com/thanos-community/promql-engine => github.com/yeya24/promql-engine v0.0.0-20230412064048-0bc98a614a94

@@ -12,7 +12,8 @@ import (
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql"
-	"github.com/prometheus/prometheus/promql/parser"
+
+	"github.com/thanos-community/promql-engine/internal/prometheus/parser"
 
 	"github.com/thanos-community/promql-engine/execution/parse"
 )
@@ -47,6 +48,7 @@ func simpleFunc(f func(float64) float64) FunctionCall {
 
 }
 
+// The engine handles sort and sort_desc when presenting the results. They are not needed here.
 var Funcs = map[string]FunctionCall{
 	"abs":   simpleFunc(math.Abs),
 	"ceil":  simpleFunc(math.Ceil),
@@ -81,13 +83,25 @@ var Funcs = map[string]FunctionCall{
 		} else if v < 0 {
 			sign = -1
 		}
+		if math.IsNaN(v) {
+			sign = math.NaN()
+		}
 		return sign
 	}),
-	"timestamp": func(f FunctionArgs) promql.Sample {
+	"round": func(f FunctionArgs) promql.Sample {
+		if len(f.Points) != 1 || len(f.ScalarPoints) > 1 {
+			return InvalidSample
+		}
+
+		toNearest := 1.0
+		if len(f.ScalarPoints) > 0 {
+			toNearest = f.ScalarPoints[0]
+		}
+		toNearestInverse := 1.0 / toNearest
 		return promql.Sample{
 			Point: promql.Point{
 				T: f.StepTime,
-				V: float64(f.Points[0].T) / 1000,
+				V: math.Floor(f.Points[0].V*toNearestInverse+0.5) / toNearestInverse,
 			},
 		}
 	},
@@ -341,6 +355,48 @@ var Funcs = map[string]FunctionCall{
 			},
 		}
 	},
+	"xrate": func(f FunctionArgs) promql.Sample {
+		if len(f.Points) == 0 {
+			return InvalidSample
+		}
+		v, h := extendedRate(f.Points, true, true, f.StepTime, f.SelectRange, f.Offset)
+		return promql.Sample{
+			Metric: f.Labels,
+			Point: promql.Point{
+				T: f.StepTime,
+				V: v,
+				H: h,
+			},
+		}
+	},
+	"xdelta": func(f FunctionArgs) promql.Sample {
+		if len(f.Points) == 0 {
+			return InvalidSample
+		}
+		v, h := extendedRate(f.Points, false, false, f.StepTime, f.SelectRange, f.Offset)
+		return promql.Sample{
+			Metric: f.Labels,
+			Point: promql.Point{
+				T: f.StepTime,
+				V: v,
+				H: h,
+			},
+		}
+	},
+	"xincrease": func(f FunctionArgs) promql.Sample {
+		if len(f.Points) == 0 {
+			return InvalidSample
+		}
+		v, h := extendedRate(f.Points, true, false, f.StepTime, f.SelectRange, f.Offset)
+		return promql.Sample{
+			Metric: f.Labels,
+			Point: promql.Point{
+				T: f.StepTime,
+				V: v,
+				H: h,
+			},
+		}
+	},
 	"clamp": func(f FunctionArgs) promql.Sample {
 		if len(f.Points) == 0 || len(f.ScalarPoints) < 2 {
 			return InvalidSample
@@ -562,6 +618,93 @@ func extrapolatedRate(samples []promql.Point, isCounter, isRate bool, stepTime i
 	}
 
 	return resultValue, resultHistogram
+}
+
+// extendedRate is a utility function for xrate/xincrease/xdelta.
+// It calculates the rate (allowing for counter resets if isCounter is true),
+// taking into account the last sample before the range start, and returns
+// the result as either per-second (if isRate is true) or overall.
+func extendedRate(samples []promql.Point, isCounter, isRate bool, stepTime int64, selectRange int64, offset int64) (float64, *histogram.FloatHistogram) {
+	var (
+		rangeStart      = stepTime - (selectRange + offset)
+		rangeEnd        = stepTime - offset
+		resultValue     float64
+		resultHistogram *histogram.FloatHistogram
+	)
+
+	if samples[0].H != nil {
+		// TODO - support extended rate for histograms
+		resultHistogram = histogramRate(samples, isCounter)
+		return resultValue, resultHistogram
+	}
+
+	sameVals := true
+	for i := range samples {
+		if i > 0 && samples[i-1].V != samples[i].V {
+			sameVals = false
+			break
+		}
+	}
+
+	// This effectively injects a "zero" series for xincrease if we only have one sample.
+	until := selectRange
+	if isCounter && !isRate && sameVals {
+		// Make sure we are not at the end of the range
+		if stepTime-offset <= until {
+			return samples[0].V, nil
+		}
+	}
+
+	sampledInterval := float64(samples[len(samples)-1].T - samples[0].T)
+	averageDurationBetweenSamples := sampledInterval / float64(len(samples)-1)
+
+	firstPoint := 0
+	// Only do this for not xincrease
+	if !(isCounter && !isRate) {
+		// If the point before the range is too far from rangeStart, drop it.
+		if float64(rangeStart-samples[0].T) > averageDurationBetweenSamples {
+			if len(samples) < 3 {
+				return resultValue, nil
+			}
+			firstPoint = 1
+			sampledInterval = float64(samples[len(samples)-1].T - samples[1].T)
+			averageDurationBetweenSamples = sampledInterval / float64(len(samples)-2)
+		}
+	}
+
+	var (
+		counterCorrection float64
+		lastValue         float64
+	)
+	if isCounter {
+		for i := firstPoint; i < len(samples); i++ {
+			sample := samples[i]
+			if sample.V < lastValue {
+				counterCorrection += lastValue
+			}
+			lastValue = sample.V
+		}
+	}
+	resultValue = samples[len(samples)-1].V - samples[firstPoint].V + counterCorrection
+
+	// Duration between last sample and boundary of range.
+	durationToEnd := float64(rangeEnd - samples[len(samples)-1].T)
+	// If the points cover the whole range (i.e. they start just before the
+	// range start and end just before the range end) adjust the value from
+	// the sampled range to the requested range.
+	// Only do this for not xincrease.
+	if !(isCounter && !isRate) {
+		if samples[firstPoint].T <= rangeStart && durationToEnd < averageDurationBetweenSamples {
+			adjustToRange := float64(selectRange / 1000)
+			resultValue = resultValue * (adjustToRange / (sampledInterval / 1000))
+		}
+	}
+
+	if isRate {
+		resultValue = resultValue / float64(selectRange/1000)
+	}
+
+	return resultValue, nil
 }
 
 // histogramRate is a helper function for extrapolatedRate. It requires
@@ -833,4 +976,9 @@ func dateWrapper(fa FunctionArgs, f func(time.Time) float64) promql.Sample {
 		Metric: lbls,
 		Point:  promql.Point{V: f(t)},
 	}
+}
+
+// IsExtFunction is a convenience function to determine whether extended range calculations are required.
+func IsExtFunction(functionName string) bool {
+	return functionName == "xincrease" || functionName == "xrate" || functionName == "xdelta"
 }

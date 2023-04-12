@@ -12,7 +12,8 @@ import (
 	"github.com/efficientgo/core/errors"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql"
-	"github.com/prometheus/prometheus/promql/parser"
+
+	"github.com/thanos-community/promql-engine/internal/prometheus/parser"
 
 	"github.com/thanos-community/promql-engine/execution/model"
 	"github.com/thanos-community/promql-engine/execution/parse"
@@ -222,6 +223,7 @@ func (o *functionOperator) Next(ctx context.Context) ([]model.StepVector, error)
 
 		i := 0
 		for i < len(vectors[batchIndex].Samples) {
+			o.pointBuf[0].H = nil
 			o.pointBuf[0].V = vector.Samples[i]
 			result := o.call(o.newFunctionArgs(vector, batchIndex))
 
@@ -285,10 +287,11 @@ func (o *functionOperator) loadSeries(ctx context.Context) error {
 		o.series = make([]labels.Labels, len(series))
 		for i, s := range series {
 			lbls := s
-			if o.funcExpr.Func.Name != "last_over_time" {
+			switch o.funcExpr.Func.Name {
+			case "last_over_time":
+			default:
 				lbls, _ = DropMetricName(s.Copy())
 			}
-
 			o.series[i] = lbls
 		}
 	})

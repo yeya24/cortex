@@ -12,7 +12,8 @@ import (
 
 	"github.com/efficientgo/core/errors"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/promql/parser"
+
+	"github.com/thanos-community/promql-engine/internal/prometheus/parser"
 
 	"github.com/thanos-community/promql-engine/execution/function"
 	"github.com/thanos-community/promql-engine/execution/model"
@@ -109,6 +110,7 @@ func hashMetric(metric labels.Labels, without bool, grouping []string, buf []byt
 	if without {
 		lb := labels.NewBuilder(metric)
 		lb.Del(grouping...)
+		lb.Del(labels.MetricName)
 		key, bytes := metric.HashWithoutLabels(buf, grouping...)
 		return key, string(bytes), lb.Labels(nil)
 	}
@@ -149,11 +151,10 @@ func makeAccumulatorFunc(expr parser.ItemType) (newAccumulatorFunc, error) {
 						return
 					}
 					if histSum == nil {
-						histSum = h
+						histSum = h.Copy()
 						return
 					}
-					// The histogram being added must have
-					// an equal or larger schema.
+					// The histogram being added must have an equal or larger schema.
 					// https://github.com/prometheus/prometheus/blob/57bcbf18880f7554ae34c5b341d52fc53f059a97/promql/engine.go#L2448-L2456
 					if h.Schema >= histSum.Schema {
 						histSum = histSum.Add(h)
@@ -170,6 +171,7 @@ func makeAccumulatorFunc(expr parser.ItemType) (newAccumulatorFunc, error) {
 				// Sum returns an empty result when floats are histograms are aggregated.
 				HasValue: func() bool { return hasFloatVal != (histSum != nil) },
 				Reset: func(_ float64) {
+					histSum = nil
 					hasFloatVal = false
 					value = 0
 				},
@@ -296,6 +298,9 @@ func makeAccumulatorFunc(expr parser.ItemType) (newAccumulatorFunc, error) {
 					aux, cAux = function.KahanSumInc(delta*(v-(mean+cMean)), aux, cAux)
 				},
 				ValueFunc: func() (float64, *histogram.FloatHistogram) {
+					if count == 1 {
+						return 0, nil
+					}
 					return math.Sqrt((aux + cAux) / count), nil
 				},
 				HasValue: func() bool { return hasValue },
@@ -324,6 +329,9 @@ func makeAccumulatorFunc(expr parser.ItemType) (newAccumulatorFunc, error) {
 					aux, cAux = function.KahanSumInc(delta*(v-(mean+cMean)), aux, cAux)
 				},
 				ValueFunc: func() (float64, *histogram.FloatHistogram) {
+					if count == 1 {
+						return 0, nil
+					}
 					return (aux + cAux) / count, nil
 				},
 				HasValue: func() bool { return hasValue },

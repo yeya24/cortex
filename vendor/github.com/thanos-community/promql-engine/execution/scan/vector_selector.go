@@ -23,8 +23,6 @@ import (
 	"github.com/prometheus/prometheus/storage"
 )
 
-var ErrNativeHistogramsUnsupported = errors.Newf("querying native histograms is not supported")
-
 type vectorScanner struct {
 	labels    labels.Labels
 	signature uint64
@@ -171,7 +169,7 @@ func selectPoint(it *storage.MemoizedSeriesIterator, ts, lookbackDelta, offset i
 	refTime := ts - offset
 	var t int64
 	var v float64
-	var h *histogram.FloatHistogram
+	var fh *histogram.FloatHistogram
 
 	valueType := it.Seek(refTime)
 	switch valueType {
@@ -180,9 +178,11 @@ func selectPoint(it *storage.MemoizedSeriesIterator, ts, lookbackDelta, offset i
 			return 0, 0, nil, false, it.Err()
 		}
 	case chunkenc.ValFloatHistogram:
-		return 0, 0, nil, false, ErrNativeHistogramsUnsupported
+		t, fh = it.AtFloatHistogram()
 	case chunkenc.ValHistogram:
-		t, h = it.AtFloatHistogram()
+		var h *histogram.Histogram
+		t, h = it.AtHistogram()
+		fh = h.ToFloat()
 	case chunkenc.ValFloat:
 		t, v = it.At()
 	default:
@@ -190,13 +190,14 @@ func selectPoint(it *storage.MemoizedSeriesIterator, ts, lookbackDelta, offset i
 	}
 	if valueType == chunkenc.ValNone || t > refTime {
 		var ok bool
-		t, v, _, h, ok = it.PeekPrev()
+		t, v, _, fh, ok = it.PeekPrev()
 		if !ok || t < refTime-lookbackDelta {
 			return 0, 0, nil, false, nil
 		}
 	}
-	if value.IsStaleNaN(v) {
+	if value.IsStaleNaN(v) || (fh != nil && value.IsStaleNaN(fh.Sum)) {
 		return 0, 0, nil, false, nil
 	}
-	return t, v, h, true, nil
+
+	return t, v, fh, true, nil
 }

@@ -1861,14 +1861,8 @@ github.com/tchap/go-patricia v2.2.6+incompatible/go.mod h1:bmLyhP68RS6kStMGxByiQ
 github.com/tencentyun/cos-go-sdk-v5 v0.7.40 h1:W6vDGKCHe4wBACI1d2UgE6+50sJFhRWU4O8IB2ozzxM=
 github.com/thanos-community/galaxycache v0.0.0-20211122094458-3a32041a1f1e h1:f1Zsv7OAU9iQhZwigp50Yl38W10g/vd5NC8Rdk1Jzng=
 github.com/thanos-community/galaxycache v0.0.0-20211122094458-3a32041a1f1e/go.mod h1:jXcofnrSln/cLI6/dhlBxPQZEEQHVPCcFaH75M+nSzM=
-github.com/thanos-community/promql-engine v0.0.0-20230224075812-ae04bbea7613 h1:ANPnp+Z81Y/RPlY1T3+YYHwGnT0Ea5oEowGamE2rWh0=
-github.com/thanos-community/promql-engine v0.0.0-20230224075812-ae04bbea7613/go.mod h1:gREn4JarQ2DZdWirOtqZQd3p+c1xH+UVpGRjGKVoWx8=
 github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204 h1:W4w5Iph7j32Sf1QFWLJDCqvO0WgZS0jHGID+qnq3wV0=
 github.com/thanos-io/objstore v0.0.0-20230201072718-11ffbc490204/go.mod h1:STSgpY8M6EKF2G/raUFdbIMf2U9GgYlEjAEHJxjvpAo=
-github.com/thanos-io/thanos v0.29.1-0.20230314065129-06d9da40244f h1:zp6JvrGDrUb6FNUXF++7EGg9JpETUY6GdLNuKRZbIK4=
-github.com/thanos-io/thanos v0.29.1-0.20230314065129-06d9da40244f/go.mod h1:AARtONvIIYyIm7w452siKssMT71kTAe4E3cORnLBj2g=
-github.com/thanos-io/thanos v0.31.0 h1:jOCmaiIXwpByWXoVtHnktLm3YDB9xDQQzmZvd1XG5oY=
-github.com/thanos-io/thanos v0.31.0/go.mod h1:5ux+jb2oKr59+3XsCC0mX+JuAbPGJEMijjhcmnL/PMo=
 github.com/thanos-io/thanos v0.31.1-0.20230407155446-1f16d0810b83 h1:Xw2e5ey82f/C6oxuKWrYyLEsRsHafGihEbJivKCZfzM=
 github.com/thanos-io/thanos v0.31.1-0.20230407155446-1f16d0810b83/go.mod h1:oIoBeQRuOET2fuIvalpm+LxLe1HYG5cXiLgfwlTH+ug=
 github.com/themihai/gomemcache v0.0.0-20180902122335-24332e2d58ab h1:7ZR3hmisBWw77ZpO1/o86g+JV3VKlk3d48jopJxzTjU=
@@ -1917,6 +1911,8 @@ github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415/go.mod h1:
 github.com/xeipuuv/gojsonschema v0.0.0-20180618132009-1d523034197f/go.mod h1:5yf86TLmAcydyeJq5YvxkGPE2fm/u4myDekKRoLuqhs=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
+github.com/yeya24/promql-engine v0.0.0-20230412064048-0bc98a614a94 h1:VOgsEnuQ3h+lsYlwxQuzvx2NspUKK+TFvIHcX00T7LM=
+github.com/yeya24/promql-engine v0.0.0-20230412064048-0bc98a614a94/go.mod h1:S8AAs4c5yPtp7PecQgQWE/MhSx1LMbRil6HqvKq9pBo=
 github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d/go.mod h1:rHwXgn7JulP+udvsHwJoVG1YGAP6VLg4y9I5dyZdqmA=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
