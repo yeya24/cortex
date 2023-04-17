@@ -43,6 +43,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/querier/tripperware/queryrange"
 	querier_worker "github.com/cortexproject/cortex/pkg/querier/worker"
 	"github.com/cortexproject/cortex/pkg/ring"
+	ringclient "github.com/cortexproject/cortex/pkg/ring/client"
 	"github.com/cortexproject/cortex/pkg/ring/kv/memberlist"
 	"github.com/cortexproject/cortex/pkg/ruler"
 	"github.com/cortexproject/cortex/pkg/ruler/rulestore"
@@ -305,6 +306,10 @@ type Cortex struct {
 	ExemplarQueryable        prom_storage.ExemplarQueryable
 	QuerierEngine            v1.QueryEngine
 	QueryFrontendTripperware tripperware.Tripperware
+
+	Store  querier.BlocksStoreSet
+	Finder querier.BlocksFinder
+	Pool   *ringclient.Pool
 
 	Ruler        *ruler.Ruler
 	RulerStorage rulestore.RuleStore

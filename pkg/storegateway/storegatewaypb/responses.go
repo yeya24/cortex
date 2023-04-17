@@ -1,11 +1,12 @@
 package storegatewaypb
 
 import (
-	"github.com/thanos-io/thanos/pkg/store/storepb/prompb"
 	"strings"
+
+	"github.com/cortexproject/cortex/pkg/cortexpb"
 )
 
-func NewQueryResponse(series *prompb.TimeSeries) *QueryResponse {
+func NewQueryResponse(series *cortexpb.TimeSeries) *QueryResponse {
 	return &QueryResponse{
 		Result: &QueryResponse_Timeseries{
 			Timeseries: series,
@@ -25,7 +26,7 @@ func NewQueryWarningsResponse(errs ...error) *QueryResponse {
 	}
 }
 
-func NewQueryRangeResponse(series *prompb.TimeSeries) *QueryRangeResponse {
+func NewQueryRangeResponse(series *cortexpb.TimeSeries) *QueryRangeResponse {
 	return &QueryRangeResponse{
 		Result: &QueryRangeResponse_Timeseries{
 			Timeseries: series,

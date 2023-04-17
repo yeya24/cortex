@@ -32,7 +32,7 @@ type blocksStoreBalancedSet struct {
 	logger log.Logger
 }
 
-func newBlocksStoreBalancedSet(serviceAddresses []string, clientConfig ClientConfig, logger log.Logger, reg prometheus.Registerer) *blocksStoreBalancedSet {
+func newBlocksStoreBalancedSet(serviceAddresses []string, clientConfig ClientConfig, logger log.Logger, reg prometheus.Registerer, pool *client.Pool) *blocksStoreBalancedSet {
 	const dnsResolveInterval = 10 * time.Second
 
 	dnsProviderReg := extprom.WrapRegistererWithPrefix("cortex_storegateway_client_", reg)
@@ -40,7 +40,7 @@ func newBlocksStoreBalancedSet(serviceAddresses []string, clientConfig ClientCon
 	s := &blocksStoreBalancedSet{
 		serviceAddresses: serviceAddresses,
 		dnsProvider:      dns.NewProvider(logger, dnsProviderReg, dns.GolangResolverType),
-		clientsPool:      newStoreGatewayClientPool(nil, clientConfig, logger, reg),
+		clientsPool:      pool,
 		logger:           logger,
 	}
 

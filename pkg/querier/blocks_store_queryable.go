@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/ring/client"
 	"io"
 	"sort"
 	"strings"
@@ -169,27 +170,27 @@ func NewBlocksStoreQueryable(
 	}
 
 	q.Service = services.NewBasicService(q.starting, q.running, q.stopping)
-
 	return q, nil
 }
 
-func NewBlocksStoreQueryableFromConfig(querierCfg Config, gatewayCfg storegateway.Config, storageCfg cortex_tsdb.BlocksStorageConfig, limits BlocksStoreLimits, logger log.Logger, reg prometheus.Registerer) (*BlocksStoreQueryable, error) {
+func NewBlocksStoreQueryableFromConfig(querierCfg Config, gatewayCfg storegateway.Config, storageCfg cortex_tsdb.BlocksStorageConfig, limits BlocksStoreLimits, logger log.Logger, reg prometheus.Registerer) (*BlocksStoreQueryable, BlocksStoreSet, BlocksFinder, *client.Pool, error) {
 	var stores BlocksStoreSet
 
 	bucketClient, err := bucket.NewClient(context.Background(), storageCfg.Bucket, "querier", logger, reg)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create bucket client")
+		return nil, nil, nil, nil, errors.Wrap(err, "failed to create bucket client")
 	}
 
 	// Blocks finder doesn't use chunks, but we pass config for consistency.
 	cachingBucket, err := cortex_tsdb.CreateCachingBucket(storageCfg.BucketStore.ChunksCache, storageCfg.BucketStore.MetadataCache, bucketClient, logger, extprom.WrapRegistererWith(prometheus.Labels{"component": "querier"}, reg))
 	if err != nil {
-		return nil, errors.Wrap(err, "create caching bucket")
+		return nil, nil, nil, nil, errors.Wrap(err, "create caching bucket")
 	}
 	bucketClient = cachingBucket
 
 	// Create the blocks finder.
 	var finder BlocksFinder
+	var pool *client.Pool
 	if storageCfg.BucketStore.BucketIndex.Enabled {
 		finder = NewBucketIndexBlocksFinder(BucketIndexBlocksFinderConfig{
 			IndexLoader: bucketindex.LoaderConfig{
@@ -222,24 +223,26 @@ func NewBlocksStoreQueryableFromConfig(querierCfg Config, gatewayCfg storegatewa
 			logger,
 		)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create store-gateway ring backend")
+			return nil, nil, nil, nil, errors.Wrap(err, "failed to create store-gateway ring backend")
 		}
 
 		storesRing, err := ring.NewWithStoreClientAndStrategy(storesRingCfg, storegateway.RingNameForClient, storegateway.RingKey, storesRingBackend, ring.NewIgnoreUnhealthyInstancesReplicationStrategy(), prometheus.WrapRegistererWithPrefix("cortex_", reg), logger)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create store-gateway ring client")
+			return nil, nil, nil, nil, errors.Wrap(err, "failed to create store-gateway ring client")
 		}
 
-		stores, err = newBlocksStoreReplicationSet(storesRing, gatewayCfg.ShardingStrategy, randomLoadBalancing, limits, querierCfg.StoreGatewayClient, logger, reg)
+		pool = newStoreGatewayClientPool(client.NewRingServiceDiscovery(storesRing), querierCfg.StoreGatewayClient, logger, reg)
+		stores, err = newBlocksStoreReplicationSet(storesRing, gatewayCfg.ShardingStrategy, randomLoadBalancing, limits, querierCfg.StoreGatewayClient, logger, reg, pool)
 		if err != nil {
-			return nil, errors.Wrap(err, "failed to create store set")
+			return nil, nil, nil, nil, errors.Wrap(err, "failed to create store set")
 		}
 	} else {
 		if len(querierCfg.GetStoreGatewayAddresses()) == 0 {
-			return nil, errNoStoreGatewayAddress
+			return nil, nil, nil, nil, errNoStoreGatewayAddress
 		}
 
-		stores = newBlocksStoreBalancedSet(querierCfg.GetStoreGatewayAddresses(), querierCfg.StoreGatewayClient, logger, reg)
+		pool = newStoreGatewayClientPool(nil, querierCfg.StoreGatewayClient, logger, reg)
+		stores = newBlocksStoreBalancedSet(querierCfg.GetStoreGatewayAddresses(), querierCfg.StoreGatewayClient, logger, reg, pool)
 	}
 
 	consistency := NewBlocksConsistencyChecker(
@@ -254,7 +257,11 @@ func NewBlocksStoreQueryableFromConfig(querierCfg Config, gatewayCfg storegatewa
 		reg,
 	)
 
-	return NewBlocksStoreQueryable(stores, finder, consistency, limits, querierCfg.QueryStoreAfter, logger, reg)
+	b, err := NewBlocksStoreQueryable(stores, finder, consistency, limits, querierCfg.QueryStoreAfter, logger, reg)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return b, stores, finder, pool, nil
 }
 
 func (q *BlocksStoreQueryable) starting(ctx context.Context) error {

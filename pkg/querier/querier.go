@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	ringclient "github.com/cortexproject/cortex/pkg/ring/client"
 	"strings"
 	"sync"
 	"time"
@@ -152,7 +153,7 @@ func getChunksIteratorFunction(cfg Config) chunkIteratorFunc {
 }
 
 // New builds a queryable and promql engine.
-func New(cfg Config, limits *validation.Overrides, distributor Distributor, stores []QueryableWithFilter, tombstonesLoader purger.TombstonesLoader, reg prometheus.Registerer, logger log.Logger) (storage.SampleAndChunkQueryable, storage.ExemplarQueryable, v1.QueryEngine) {
+func New(cfg Config, limits *validation.Overrides, distributor Distributor, stores []QueryableWithFilter, tombstonesLoader purger.TombstonesLoader, reg prometheus.Registerer, logger log.Logger, store BlocksStoreSet, finder BlocksFinder, pool *ringclient.Pool) (storage.SampleAndChunkQueryable, storage.ExemplarQueryable, v1.QueryEngine) {
 	iteratorFunc := getChunksIteratorFunction(cfg)
 
 	distributorQueryable := newDistributorQueryable(distributor, cfg.IngesterStreaming, cfg.IngesterMetadataStreaming, iteratorFunc, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
@@ -192,7 +193,7 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 	}
 	if cfg.ThanosEngine {
 		if cfg.StoreGatewayPushdown {
-			endpoints := NewTenantStoreGatewayEngines(nil, nil, nil)
+			endpoints := NewTenantStoreGatewayEngines(finder, store, pool)
 			queryEngine = engine.NewDistributedEngine(engine.Opts{
 				EngineOpts: opts,
 				LogicalOptimizers: append(logicalplan.AllOptimizers, logicalplan.DistributedPushDownOptimizer{

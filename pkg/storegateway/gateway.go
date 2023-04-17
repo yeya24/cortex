@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
 	"github.com/gogo/protobuf/types"
 	"github.com/prometheus/prometheus/model/labels"
@@ -12,7 +13,6 @@ import (
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/store/hintspb"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	"github.com/thanos-io/thanos/pkg/store/storepb/prompb"
 	"google.golang.org/grpc/codes"
 	grpc_metadata "google.golang.org/grpc/metadata"
@@ -433,19 +433,22 @@ func (g *StoreGateway) Query(req *storegatewaypb.QueryRequest, server storegatew
 
 	switch vector := result.Value.(type) {
 	case promql.Scalar:
-		series := &prompb.TimeSeries{
-			Samples: []prompb.Sample{{Value: vector.V, Timestamp: vector.T}},
+		series := &cortexpb.TimeSeries{
+			Samples: []cortexpb.Sample{{Value: vector.V, TimestampMs: vector.T}},
 		}
 		if err := server.Send(storegatewaypb.NewQueryResponse(series)); err != nil {
 			return err
 		}
 	case promql.Vector:
 		for _, sample := range vector {
-			floats, histograms := prompb.SamplesFromPromqlPoints(sample.Point)
-			series := &prompb.TimeSeries{
-				Labels:     labelpb.ZLabelsFromPromLabels(sample.Metric),
-				Samples:    floats,
-				Histograms: histograms,
+			floats, _ := prompb.SamplesFromPromqlPoints(sample.Point)
+			samples := make([]cortexpb.Sample, len(floats))
+			for i, f := range floats {
+				samples[i] = cortexpb.Sample{Value: f.Value, TimestampMs: f.Timestamp}
+			}
+			series := &cortexpb.TimeSeries{
+				Labels:  cortexpb.FromLabelsToLabelAdapters(sample.Metric),
+				Samples: samples,
 			}
 			if err := server.Send(storegatewaypb.NewQueryResponse(series)); err != nil {
 				return err
@@ -497,11 +500,14 @@ func (g *StoreGateway) QueryRange(req *storegatewaypb.QueryRangeRequest, server 
 	switch value := result.Value.(type) {
 	case promql.Matrix:
 		for _, series := range value {
-			floats, histograms := prompb.SamplesFromPromqlPoints(series.Points...)
-			series := &prompb.TimeSeries{
-				Labels:     labelpb.ZLabelsFromPromLabels(series.Metric),
-				Samples:    floats,
-				Histograms: histograms,
+			floats, _ := prompb.SamplesFromPromqlPoints(series.Points...)
+			samples := make([]cortexpb.Sample, len(floats))
+			for i, f := range floats {
+				samples[i] = cortexpb.Sample{Value: f.Value, TimestampMs: f.Timestamp}
+			}
+			series := &cortexpb.TimeSeries{
+				Labels:  cortexpb.FromLabelsToLabelAdapters(series.Metric),
+				Samples: samples,
 			}
 
 			if err := server.Send(storegatewaypb.NewQueryRangeResponse(series)); err != nil {

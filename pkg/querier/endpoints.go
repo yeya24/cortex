@@ -2,9 +2,12 @@ package querier
 
 import (
 	"context"
+	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"io"
 	"time"
 
+	"github.com/cortexproject/cortex/pkg/ring/client"
+	"github.com/cortexproject/cortex/pkg/storegateway/storegatewaypb"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
@@ -14,10 +17,6 @@ import (
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/util/stats"
 	"github.com/thanos-community/promql-engine/api"
-	"github.com/thanos-io/thanos/pkg/store/labelpb"
-
-	"github.com/cortexproject/cortex/pkg/ring/client"
-	"github.com/cortexproject/cortex/pkg/storegateway/storegatewaypb"
 )
 
 type TenantStoreGatewayEngines struct {
@@ -35,6 +34,7 @@ func NewTenantStoreGatewayEngines(finder BlocksFinder, stores BlocksStoreSet, cl
 }
 
 func (m *TenantStoreGatewayEngines) Engines(userID string, _ string, start, end time.Time) []api.RemoteEngine {
+	// TODO: add time check.
 	knownBlocks, _, err := m.finder.GetBlocks(context.Background(), userID, start.UnixMilli(), end.UnixMilli())
 	if err != nil {
 
@@ -150,12 +150,12 @@ func (r *remoteQuery) Exec(ctx context.Context) *promql.Result {
 			continue
 		}
 		series := promql.Series{
-			Metric: labelpb.ZLabelsToPromLabels(ts.Labels),
+			Metric: cortexpb.FromLabelAdaptersToLabels(ts.Labels),
 			Points: make([]promql.Point, 0, len(ts.Samples)),
 		}
 		for _, s := range ts.Samples {
 			series.Points = append(series.Points, promql.Point{
-				T: s.Timestamp,
+				T: s.TimestampMs,
 				V: s.Value,
 			})
 		}
