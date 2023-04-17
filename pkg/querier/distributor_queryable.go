@@ -2,6 +2,7 @@ package querier
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"time"
 
@@ -202,10 +203,10 @@ func (q *distributorQuerier) streamingSelect(ctx context.Context, sortSeries boo
 		return storage.EmptySeriesSet()
 	}
 	if len(sets) == 1 {
-		return sets[0]
+		return series.NewSeriesSetWithWarnings(sets[0], []error{fmt.Errorf("failed to return all data")})
 	}
 	// Sets need to be sorted. Both series.NewConcreteSeriesSet and newTimeSeriesSeriesSet take care of that.
-	return storage.NewMergeSeriesSet(sets, storage.ChainedSeriesMerge)
+	return series.NewSeriesSetWithWarnings(storage.NewMergeSeriesSet(sets, storage.ChainedSeriesMerge), []error{fmt.Errorf("failed to return all data")})
 }
 
 func (q *distributorQuerier) LabelValues(name string, matchers ...*labels.Matcher) ([]string, storage.Warnings, error) {

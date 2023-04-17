@@ -545,7 +545,7 @@ func (q querier) mergeSeriesSets(sets []storage.SeriesSet) storage.SeriesSet {
 	}
 
 	otherSets = append(otherSets, chunksSet)
-	return storage.NewMergeSeriesSet(otherSets, storage.ChainedSeriesMerge)
+	return series.NewSeriesSetWithWarnings(storage.NewMergeSeriesSet(otherSets, storage.ChainedSeriesMerge), []error{fmt.Errorf("failed to return")})
 }
 
 type sliceSeriesSet struct {

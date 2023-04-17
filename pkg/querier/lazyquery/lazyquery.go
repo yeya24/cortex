@@ -1,6 +1,7 @@
 package lazyquery
 
 import (
+	"fmt"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 )
@@ -76,5 +77,8 @@ func (s *lazySeriesSet) Err() error {
 
 // Warnings implements storage.SeriesSet.
 func (s *lazySeriesSet) Warnings() storage.Warnings {
-	return nil
+	if s.next == nil {
+		s.next = <-s.future
+	}
+	return []error{fmt.Errorf("returned partial data only, please query less data")}
 }

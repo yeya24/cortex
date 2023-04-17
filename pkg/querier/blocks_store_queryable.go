@@ -445,7 +445,7 @@ func (q *blocksStoreQuerier) selectSorted(sp *storage.SelectHints, matchers ...*
 
 	err := q.queryWithConsistencyCheck(spanCtx, spanLog, minT, maxT, queryFunc)
 	if err != nil {
-		return storage.ErrSeriesSet(err)
+		//return storage.ErrSeriesSet(err)
 	}
 
 	if len(resSeriesSets) == 0 {

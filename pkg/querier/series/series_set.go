@@ -17,6 +17,7 @@
 package series
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
@@ -175,7 +176,7 @@ func MetricsToSeriesSet(sortSeries bool, ms []metric.Metric) storage.SeriesSet {
 			samples: nil,
 		})
 	}
-	return NewConcreteSeriesSet(sortSeries, series)
+	return NewSeriesSetWithWarnings(NewConcreteSeriesSet(sortSeries, series), []error{fmt.Errorf("failed to return 1000000 series, capped to 100 series")})
 }
 
 func metricToLabels(m model.Metric) labels.Labels {
