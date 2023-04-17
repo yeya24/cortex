@@ -11,7 +11,7 @@ import (
 )
 
 type RemoteEndpoints interface {
-	Engines(query string, start, end time.Time) []RemoteEngine
+	Engines(userID string, query string, start, end time.Time) []RemoteEngine
 }
 
 type RemoteEngine interface {
@@ -25,7 +25,7 @@ type staticEndpoints struct {
 	engines []RemoteEngine
 }
 
-func (m staticEndpoints) Engines(query string, start, end time.Time) []RemoteEngine {
+func (m staticEndpoints) Engines(userID, query string, start, end time.Time) []RemoteEngine {
 	return m.engines
 }
 

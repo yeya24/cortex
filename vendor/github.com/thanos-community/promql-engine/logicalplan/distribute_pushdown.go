@@ -10,7 +10,7 @@ type DistributedPushDownOptimizer struct {
 }
 
 func (m DistributedPushDownOptimizer) Optimize(plan parser.Expr, opts *Opts) parser.Expr {
-	engines := m.Endpoints.Engines(opts.Query, opts.Start, opts.End)
+	engines := m.Endpoints.Engines(opts.UserID, opts.Query, opts.Start, opts.End)
 	if len(engines) == 1 {
 		return &RemoteExecution{
 			Engine:          engines[0],

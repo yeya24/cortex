@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/prometheus/prometheus/promql/parser"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/weaveworks/common/user"
 	"math"
 	"net/http"
 	"strconv"
@@ -87,7 +88,6 @@ func (qapi *API) QueryRange(r *http.Request) (interface{}, []error, *api.ApiErro
 		return nil, res.Warnings, &api.ApiError{Typ: api.ErrorBadData, Err: err}, qry.Close
 	}
 
-	qapi.QueryStoreAfter
 	data := &queryData{
 		ResultType: res.Value.Type(),
 		Result:     res.Value,
@@ -139,9 +139,15 @@ func parseTime(s string) (time.Time, error) {
 }
 
 func extractQueryOpts(r *http.Request) (*promql.QueryOpts, error) {
+	id, err := user.ExtractOrgID(r.Context())
+	if err != nil {
+		return nil, err
+	}
 	opts := &promql.QueryOpts{
 		EnablePerStepStats: r.FormValue("stats") == "all",
+		UserID:             id,
 	}
+
 	if strDuration := r.FormValue("lookback_delta"); strDuration != "" {
 		duration, err := parseDuration(strDuration)
 		if err != nil {

@@ -2,7 +2,7 @@ syntax = "proto3";
 package gatewaypb;
 
 import "github.com/thanos-io/thanos/pkg/store/storepb/rpc.proto";
-import "store/storepb/prompb/types.proto";
+import "github.com/cortexproject/cortex/pkg/cortexpb/cortex.proto";
 
 option go_package = "storegatewaypb";
 
@@ -43,7 +43,7 @@ message QueryResponse {
         string warnings = 1;
 
         /// timeseries is one series from the result of the executed query.
-        prometheus_copy.TimeSeries timeseries = 2;
+        cortexpb.TimeSeries timeseries = 2;
     }
 }
 
@@ -65,6 +65,6 @@ message QueryRangeResponse {
         string warnings = 1;
 
         /// timeseries is one series from the result of the executed query.
-        prometheus_copy.TimeSeries timeseries = 2;
+        cortexpb.TimeSeries timeseries = 2;
     }
 }

@@ -29,6 +29,7 @@ type Opts struct {
 	End           time.Time
 	Step          time.Duration
 	LookbackDelta time.Duration
+	UserID        string
 }
 
 type Plan interface {

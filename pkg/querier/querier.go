@@ -80,6 +80,8 @@ type Config struct {
 	// Experimental. Use https://github.com/thanos-community/promql-engine rather than
 	// the Prometheus query engine.
 	ThanosEngine bool `yaml:"thanos_engine"`
+
+	StoreGatewayPushdown bool `yaml:"store_gateway_pushdown"`
 }
 
 var (
@@ -189,10 +191,20 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 		},
 	}
 	if cfg.ThanosEngine {
-		queryEngine = engine.New(engine.Opts{
-			EngineOpts:        opts,
-			LogicalOptimizers: logicalplan.AllOptimizers,
-		})
+		if cfg.StoreGatewayPushdown {
+			endpoints := NewTenantStoreGatewayEngines(nil, nil, nil)
+			queryEngine = engine.NewDistributedEngine(engine.Opts{
+				EngineOpts: opts,
+				LogicalOptimizers: append(logicalplan.AllOptimizers, logicalplan.DistributedPushDownOptimizer{
+					Endpoints: endpoints,
+				}),
+			}, endpoints)
+		} else {
+			queryEngine = engine.New(engine.Opts{
+				EngineOpts:        opts,
+				LogicalOptimizers: logicalplan.AllOptimizers,
+			})
+		}
 	} else {
 		queryEngine = promql.NewEngine(opts)
 	}

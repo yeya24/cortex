@@ -276,18 +276,16 @@ type OOOCompactionHead struct {
 // All the above together have a bit of CPU and memory overhead, and can have a bit of impact
 // on the sample append latency. So call NewOOOCompactionHead only right before compaction.
 func NewOOOCompactionHead(head *Head) (*OOOCompactionHead, error) {
-	ch := &OOOCompactionHead{
-		chunkRange: head.chunkRange.Load(),
-		mint:       math.MaxInt64,
-		maxt:       math.MinInt64,
+	newWBLFile, err := head.wbl.NextSegmentSync()
+	if err != nil {
+		return nil, err
 	}
 
-	if head.wbl != nil {
-		lastWBLFile, err := head.wbl.NextSegmentSync()
-		if err != nil {
-			return nil, err
-		}
-		ch.lastWBLFile = lastWBLFile
+	ch := &OOOCompactionHead{
+		chunkRange:  head.chunkRange.Load(),
+		mint:        math.MaxInt64,
+		maxt:        math.MinInt64,
+		lastWBLFile: newWBLFile,
 	}
 
 	ch.oooIR = NewOOOHeadIndexReader(head, math.MinInt64, math.MaxInt64)

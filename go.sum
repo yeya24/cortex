@@ -1737,8 +1737,6 @@ github.com/prometheus/procfs v0.7.3/go.mod h1:cz+aTbrPOrUb4q7XlbU9ygM+/jj0fzG6c1
 github.com/prometheus/procfs v0.8.0/go.mod h1:z7EfXMXOkbkqb9IINtpCn86r/to3BnA0uaxHdg830/4=
 github.com/prometheus/procfs v0.9.0 h1:wzCHvIvM5SxWqYvwgVL7yJY8Lz3PKn49KQtpgMYJfhI=
 github.com/prometheus/procfs v0.9.0/go.mod h1:+pB4zwohETzFnmlpe6yd2lSc+0/46IYZRB/chUwxUZY=
-github.com/prometheus/prometheus v0.43.1-0.20230327151049-211ae4f1f0a2 h1:i5hmbBzR+VeL5pPl1ZncsJ1bpg3SO66bwkE1msJBsMA=
-github.com/prometheus/prometheus v0.43.1-0.20230327151049-211ae4f1f0a2/go.mod h1:Mm42Acga98xgA+u5yTaC3ki3i0rJEJWFpbdHN7q2trk=
 github.com/prometheus/tsdb v0.7.1/go.mod h1:qhTCs0VvXwvX/y3TZrWD7rabWM+ijKTux40TwIPHuXU=
 github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
 github.com/remyoudompheng/bigfft v0.0.0-20190728182440-6a916e37a237/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
@@ -1911,8 +1909,10 @@ github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415/go.mod h1:
 github.com/xeipuuv/gojsonschema v0.0.0-20180618132009-1d523034197f/go.mod h1:5yf86TLmAcydyeJq5YvxkGPE2fm/u4myDekKRoLuqhs=
 github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q53MR2AWcXfiuqkDkRtnGDLqkBTpCHuJHxtU=
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
-github.com/yeya24/promql-engine v0.0.0-20230412064048-0bc98a614a94 h1:VOgsEnuQ3h+lsYlwxQuzvx2NspUKK+TFvIHcX00T7LM=
-github.com/yeya24/promql-engine v0.0.0-20230412064048-0bc98a614a94/go.mod h1:S8AAs4c5yPtp7PecQgQWE/MhSx1LMbRil6HqvKq9pBo=
+github.com/yeya24/prometheus v1.8.2-0.20230417051106-e865cf991499 h1:ng7r8BiMf4l8ZRLdwB1PqlrOUsREblt8NfOEtuCXOaY=
+github.com/yeya24/prometheus v1.8.2-0.20230417051106-e865cf991499/go.mod h1:2BA14LgBeqlPuzObSEbh+Y+JwLH2GcqDlJKbF2sA6FM=
+github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee h1:1uAS68dlGjFERThks2UgrEq6jsZWNtu+OYhCGuMJaCw=
+github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee/go.mod h1:PAm7SpqyoTUFjkkaqed8IQCaFmhOlpu2UKLY7m8zgfM=
 github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d/go.mod h1:rHwXgn7JulP+udvsHwJoVG1YGAP6VLg4y9I5dyZdqmA=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

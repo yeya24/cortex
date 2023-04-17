@@ -784,9 +784,10 @@ func (h *Head) loadMmappedChunks(refSeries map[chunks.HeadSeriesRef]*memSeries) 
 	mmappedChunks := map[chunks.HeadSeriesRef][]*mmappedChunk{}
 	oooMmappedChunks := map[chunks.HeadSeriesRef][]*mmappedChunk{}
 	var lastRef, secondLastRef chunks.ChunkDiskMapperRef
-	if err := h.chunkDiskMapper.IterateAllChunks(func(seriesRef chunks.HeadSeriesRef, chunkRef chunks.ChunkDiskMapperRef, mint, maxt int64, numSamples uint16, encoding chunkenc.Encoding, isOOO bool) error {
+	if err := h.chunkDiskMapper.IterateAllChunks(func(seriesRef chunks.HeadSeriesRef, chunkRef chunks.ChunkDiskMapperRef, mint, maxt int64, numSamples uint16, encoding chunkenc.Encoding) error {
 		secondLastRef = lastRef
 		lastRef = chunkRef
+		isOOO := chunkenc.IsOutOfOrderChunk(encoding)
 		if !isOOO && maxt < h.minValidTime.Load() {
 			return nil
 		}
@@ -1254,10 +1255,6 @@ func (h *Head) truncateOOO(lastWBLFile int, minOOOMmapRef chunks.ChunkDiskMapper
 		if err := h.truncateSeriesAndChunkDiskMapper("truncateOOO"); err != nil {
 			return err
 		}
-	}
-
-	if h.wbl == nil {
-		return nil
 	}
 
 	return h.wbl.Truncate(lastWBLFile)

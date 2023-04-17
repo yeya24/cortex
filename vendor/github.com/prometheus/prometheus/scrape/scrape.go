@@ -500,12 +500,9 @@ func (sp *scrapePool) Sync(tgs []*targetgroup.Group) {
 		}
 		targetSyncFailed.WithLabelValues(sp.config.JobName).Add(float64(len(failures)))
 		for _, t := range targets {
-			// Replicate .Labels().IsEmpty() with a loop here to avoid generating garbage.
-			nonEmpty := false
-			t.LabelsRange(func(l labels.Label) { nonEmpty = true })
-			if nonEmpty {
+			if !t.Labels().IsEmpty() {
 				all = append(all, t)
-			} else if !t.discoveredLabels.IsEmpty() {
+			} else if !t.DiscoveredLabels().IsEmpty() {
 				sp.droppedTargets = append(sp.droppedTargets, t)
 			}
 		}
@@ -669,16 +666,17 @@ func verifyLabelLimits(lset labels.Labels, limits *labelLimits) error {
 
 func mutateSampleLabels(lset labels.Labels, target *Target, honor bool, rc []*relabel.Config) labels.Labels {
 	lb := labels.NewBuilder(lset)
+	targetLabels := target.Labels()
 
 	if honor {
-		target.LabelsRange(func(l labels.Label) {
+		targetLabels.Range(func(l labels.Label) {
 			if !lset.Has(l.Name) {
 				lb.Set(l.Name, l.Value)
 			}
 		})
 	} else {
 		var conflictingExposedLabels []labels.Label
-		target.LabelsRange(func(l labels.Label) {
+		targetLabels.Range(func(l labels.Label) {
 			existingValue := lset.Get(l.Name)
 			if existingValue != "" {
 				conflictingExposedLabels = append(conflictingExposedLabels, labels.Label{Name: l.Name, Value: existingValue})
@@ -688,7 +686,7 @@ func mutateSampleLabels(lset labels.Labels, target *Target, honor bool, rc []*re
 		})
 
 		if len(conflictingExposedLabels) > 0 {
-			resolveConflictingExposedLabels(lb, conflictingExposedLabels)
+			resolveConflictingExposedLabels(lb, lset, targetLabels, conflictingExposedLabels)
 		}
 	}
 
@@ -701,27 +699,42 @@ func mutateSampleLabels(lset labels.Labels, target *Target, honor bool, rc []*re
 	return res
 }
 
-func resolveConflictingExposedLabels(lb *labels.Builder, conflictingExposedLabels []labels.Label) {
+func resolveConflictingExposedLabels(lb *labels.Builder, exposedLabels, targetLabels labels.Labels, conflictingExposedLabels []labels.Label) {
 	sort.SliceStable(conflictingExposedLabels, func(i, j int) bool {
 		return len(conflictingExposedLabels[i].Name) < len(conflictingExposedLabels[j].Name)
 	})
 
-	for _, l := range conflictingExposedLabels {
+	for i, l := range conflictingExposedLabels {
 		newName := l.Name
 		for {
 			newName = model.ExportedLabelPrefix + newName
-			if lb.Get(newName) == "" {
-				lb.Set(newName, l.Value)
+			if !exposedLabels.Has(newName) &&
+				!targetLabels.Has(newName) &&
+				!labelSliceHas(conflictingExposedLabels[:i], newName) {
+				conflictingExposedLabels[i].Name = newName
 				break
 			}
 		}
 	}
+
+	for _, l := range conflictingExposedLabels {
+		lb.Set(l.Name, l.Value)
+	}
+}
+
+func labelSliceHas(lbls []labels.Label, name string) bool {
+	for _, l := range lbls {
+		if l.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func mutateReportSampleLabels(lset labels.Labels, target *Target) labels.Labels {
 	lb := labels.NewBuilder(lset)
 
-	target.LabelsRange(func(l labels.Label) {
+	target.Labels().Range(func(l labels.Label) {
 		lb.Set(model.ExportedLabelPrefix+l.Name, lset.Get(l.Name))
 		lb.Set(l.Name, l.Value)
 	})

@@ -257,6 +257,7 @@ func (e *compatibilityEngine) NewInstantQuery(q storage.Queryable, opts *promql.
 		End:           ts,
 		Step:          1,
 		LookbackDelta: opts.LookbackDelta,
+		UserID:        opts.UserID,
 	})
 	lplan = lplan.Optimize(e.logicalOptimizers)
 
@@ -309,6 +310,7 @@ func (e *compatibilityEngine) NewRangeQuery(q storage.Queryable, opts *promql.Qu
 		End:           end,
 		Step:          step,
 		LookbackDelta: opts.LookbackDelta,
+		UserID:        opts.UserID,
 	})
 	lplan = lplan.Optimize(e.logicalOptimizers)
 

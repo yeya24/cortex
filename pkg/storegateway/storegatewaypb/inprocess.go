@@ -31,11 +31,11 @@ func (s ServerAsClient) LabelValues(ctx context.Context, in *storepb.LabelValues
 	return nil, nil
 }
 
-func (s ServerAsClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (*QueryResponse, error) {
+func (s ServerAsClient) Query(ctx context.Context, in *QueryRequest, opts ...grpc.CallOption) (StoreGateway_QueryClient, error) {
 	return nil, nil
 }
 
-func (s ServerAsClient) QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (*QueryRangeResponse, error) {
+func (s ServerAsClient) QueryRange(ctx context.Context, in *QueryRangeRequest, opts ...grpc.CallOption) (StoreGateway_QueryRangeClient, error) {
 	return nil, nil
 }
 
@@ -59,14 +59,6 @@ type inProcessStream struct {
 	cancel context.CancelFunc
 	recv   chan *storepb.SeriesResponse
 	err    chan error
-}
-
-func NewInProcessStream(ctx context.Context, bufferSize int) *inProcessStream {
-	return &inProcessStream{
-		ctx:  ctx,
-		recv: make(chan *storepb.SeriesResponse, bufferSize),
-		err:  make(chan error),
-	}
 }
 
 func (s *inProcessStream) Context() context.Context { return s.ctx }

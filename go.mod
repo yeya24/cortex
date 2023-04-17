@@ -253,4 +253,6 @@ replace gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0
 
 replace github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
 
-replace github.com/thanos-community/promql-engine => github.com/yeya24/promql-engine v0.0.0-20230412064048-0bc98a614a94
+replace github.com/thanos-community/promql-engine => github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee
+
+replace github.com/prometheus/prometheus => github.com/yeya24/prometheus v1.8.2-0.20230417051106-e865cf991499
