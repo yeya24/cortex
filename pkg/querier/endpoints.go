@@ -2,40 +2,170 @@ package querier
 
 import (
 	"context"
-	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"io"
+	"math"
 	"time"
 
-	"github.com/cortexproject/cortex/pkg/ring/client"
-	"github.com/cortexproject/cortex/pkg/storegateway/storegatewaypb"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/util/stats"
 	"github.com/thanos-community/promql-engine/api"
+
+	"github.com/cortexproject/cortex/pkg/cortexpb"
+	"github.com/cortexproject/cortex/pkg/ring/client"
+	cortex_tsdb "github.com/cortexproject/cortex/pkg/storage/tsdb"
+	"github.com/cortexproject/cortex/pkg/storegateway/storegatewaypb"
+	"github.com/cortexproject/cortex/pkg/util"
+	util_log "github.com/cortexproject/cortex/pkg/util/log"
+	grpc_metadata "google.golang.org/grpc/metadata"
 )
 
 type TenantStoreGatewayEngines struct {
-	finder      BlocksFinder
-	stores      BlocksStoreSet
-	clientsPool *client.Pool
+	finder               BlocksFinder
+	stores               BlocksStoreSet
+	clientsPool          *client.Pool
+	queryIngestersWithin time.Duration
+	queryStoreAfter      time.Duration
 }
 
-func NewTenantStoreGatewayEngines(finder BlocksFinder, stores BlocksStoreSet, clientsPool *client.Pool) *TenantStoreGatewayEngines {
+func NewTenantStoreGatewayEngines(finder BlocksFinder, stores BlocksStoreSet, clientsPool *client.Pool, queryIngesterWithin, queryStoreAfter time.Duration) *TenantStoreGatewayEngines {
 	return &TenantStoreGatewayEngines{
-		finder:      finder,
-		stores:      stores,
-		clientsPool: clientsPool,
+		finder:               finder,
+		stores:               stores,
+		clientsPool:          clientsPool,
+		queryIngestersWithin: queryIngesterWithin,
+		queryStoreAfter:      queryStoreAfter,
 	}
 }
 
-func (m *TenantStoreGatewayEngines) Engines(userID string, _ string, start, end time.Time) []api.RemoteEngine {
-	// TODO: add time check.
-	knownBlocks, _, err := m.finder.GetBlocks(context.Background(), userID, start.UnixMilli(), end.UnixMilli())
+func findMinMaxTime(s *parser.EvalStmt) (int64, int64) {
+	var minTimestamp, maxTimestamp int64 = math.MaxInt64, math.MinInt64
+	// Whenever a MatrixSelector is evaluated, evalRange is set to the corresponding range.
+	// The evaluation of the VectorSelector inside then evaluates the given range and unsets
+	// the variable.
+	var evalRange time.Duration
+	parser.Inspect(s.Expr, func(node parser.Node, path []parser.Node) error {
+		switch n := node.(type) {
+		case *parser.VectorSelector:
+			start, end := getTimeRangesForSelector(s, n, path, evalRange)
+			if start < minTimestamp {
+				minTimestamp = start
+			}
+			if end > maxTimestamp {
+				maxTimestamp = end
+			}
+			evalRange = 0
+
+		case *parser.MatrixSelector:
+			evalRange = n.Range
+		}
+		return nil
+	})
+
+	if maxTimestamp == math.MinInt64 {
+		// This happens when there was no selector. Hence no time range to select.
+		minTimestamp = 0
+		maxTimestamp = 0
+	}
+
+	return minTimestamp, maxTimestamp
+}
+
+func getTimeRangesForSelector(s *parser.EvalStmt, n *parser.VectorSelector, path []parser.Node, evalRange time.Duration) (int64, int64) {
+	start, end := timestamp.FromTime(s.Start), timestamp.FromTime(s.End)
+	subqOffset, subqRange, subqTs := subqueryTimes(path)
+
+	if subqTs != nil {
+		// The timestamp on the subquery overrides the eval statement time ranges.
+		start = *subqTs
+		end = *subqTs
+	}
+
+	if n.Timestamp != nil {
+		// The timestamp on the selector overrides everything.
+		start = *n.Timestamp
+		end = *n.Timestamp
+	} else {
+		offsetMilliseconds := durationMilliseconds(subqOffset)
+		start = start - offsetMilliseconds - durationMilliseconds(subqRange)
+		end = end - offsetMilliseconds
+	}
+
+	if evalRange == 0 {
+		start = start - durationMilliseconds(s.LookbackDelta)
+	} else {
+		// For all matrix queries we want to ensure that we have (end-start) + range selected
+		// this way we have `range` data before the start time
+		start = start - durationMilliseconds(evalRange)
+	}
+
+	offsetMilliseconds := durationMilliseconds(n.OriginalOffset)
+	start = start - offsetMilliseconds
+	end = end - offsetMilliseconds
+
+	return start, end
+}
+
+func durationMilliseconds(d time.Duration) int64 {
+	return int64(d / (time.Millisecond / time.Nanosecond))
+}
+
+func subqueryTimes(path []parser.Node) (time.Duration, time.Duration, *int64) {
+	var (
+		subqOffset, subqRange time.Duration
+		ts                    int64 = math.MaxInt64
+	)
+	for _, node := range path {
+		switch n := node.(type) {
+		case *parser.SubqueryExpr:
+			subqOffset += n.OriginalOffset
+			subqRange += n.Range
+			if n.Timestamp != nil {
+				// The @ modifier on subquery invalidates all the offset and
+				// range till now. Hence resetting it here.
+				subqOffset = n.OriginalOffset
+				subqRange = n.Range
+				ts = *n.Timestamp
+			}
+		}
+	}
+	var tsp *int64
+	if ts != math.MaxInt64 {
+		tsp = &ts
+	}
+	return subqOffset, subqRange, tsp
+}
+
+func (m *TenantStoreGatewayEngines) Engines(userID string, query string, start, end time.Time, lookbackDelta time.Duration) []api.RemoteEngine {
+	now := time.Now()
+	e, err := parser.ParseExpr(query)
+	if err != nil {
+		return nil
+	}
+	mint, maxt := findMinMaxTime(&parser.EvalStmt{
+		Expr:          e,
+		Start:         start,
+		End:           end,
+		LookbackDelta: lookbackDelta,
+	})
+
+	// Need to query ingesters, skipping pushing down.
+	if m.queryIngestersWithin == 0 || maxt >= util.TimeToMillis(now.Add(-m.queryIngestersWithin)) {
+		return nil
+	}
+
+	// Include this store only if mint is within QueryStoreAfter w.r.t current time.
+	if m.queryStoreAfter != 0 && mint > util.TimeToMillis(now.Add(-m.queryStoreAfter)) {
+		return nil
+	}
+
+	knownBlocks, _, err := m.finder.GetBlocks(context.Background(), userID, mint, maxt)
 	if err != nil {
 
 	}
@@ -52,6 +182,7 @@ func (m *TenantStoreGatewayEngines) Engines(userID string, _ string, start, end 
 				Addr:     addr,
 				BlockIDs: convertULIDToString(blocks),
 				client:   c.(storegatewaypb.StoreGatewayClient),
+				userID:   userID,
 			})
 		}
 	}
@@ -70,6 +201,7 @@ type StoreGatewayRemoteEngine struct {
 	Addr     string
 	BlockIDs []string
 	client   storegatewaypb.StoreGatewayClient
+	userID   string
 }
 
 func (e *StoreGatewayRemoteEngine) MaxT() int64 { return 0 }
@@ -87,6 +219,8 @@ func (e *StoreGatewayRemoteEngine) NewRangeQuery(opts *promql.QueryOpts, qs stri
 		blockIDs:      e.BlockIDs,
 		lookBackDelta: opts.LookbackDelta,
 		client:        e.client,
+		userID:        e.userID,
+		logger:        util_log.Logger,
 	}, nil
 }
 
@@ -107,12 +241,14 @@ type remoteQuery struct {
 
 	blockIDs []string
 	cancel   context.CancelFunc
+	userID   string
 }
 
 func (r *remoteQuery) Exec(ctx context.Context) *promql.Result {
 	start := time.Now()
 
-	qctx, cancel := context.WithCancel(ctx)
+	reqCtx := grpc_metadata.AppendToOutgoingContext(ctx, cortex_tsdb.TenantIDExternalLabel, r.userID)
+	qctx, cancel := context.WithCancel(reqCtx)
 	r.cancel = cancel
 	defer cancel()
 

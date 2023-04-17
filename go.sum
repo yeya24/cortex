@@ -1911,8 +1911,8 @@ github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2/go.mod h1:UETIi67q
 github.com/xordataexchange/crypt v0.0.3-0.20170626215501-b2862e3d0a77/go.mod h1:aYKd//L2LvnjZzWKhF00oedf4jCCReLcmhLdhm1A27Q=
 github.com/yeya24/prometheus v1.8.2-0.20230417051106-e865cf991499 h1:ng7r8BiMf4l8ZRLdwB1PqlrOUsREblt8NfOEtuCXOaY=
 github.com/yeya24/prometheus v1.8.2-0.20230417051106-e865cf991499/go.mod h1:2BA14LgBeqlPuzObSEbh+Y+JwLH2GcqDlJKbF2sA6FM=
-github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee h1:1uAS68dlGjFERThks2UgrEq6jsZWNtu+OYhCGuMJaCw=
-github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee/go.mod h1:PAm7SpqyoTUFjkkaqed8IQCaFmhOlpu2UKLY7m8zgfM=
+github.com/yeya24/promql-engine v0.0.0-20230417171707-8066cd8e36c2 h1:9aFLLjE1e/TA6Vsphi8fx9ZRBZy3iwLmZ7JbJTDPSz4=
+github.com/yeya24/promql-engine v0.0.0-20230417171707-8066cd8e36c2/go.mod h1:PAm7SpqyoTUFjkkaqed8IQCaFmhOlpu2UKLY7m8zgfM=
 github.com/youmark/pkcs8 v0.0.0-20181117223130-1be2e3e5546d/go.mod h1:rHwXgn7JulP+udvsHwJoVG1YGAP6VLg4y9I5dyZdqmA=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

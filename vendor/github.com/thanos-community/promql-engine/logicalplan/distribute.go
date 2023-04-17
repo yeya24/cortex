@@ -97,7 +97,7 @@ type DistributedExecutionOptimizer struct {
 }
 
 func (m DistributedExecutionOptimizer) Optimize(plan parser.Expr, opts *Opts) parser.Expr {
-	engines := m.Endpoints.Engines(opts.UserID, opts.Query, opts.Start, opts.End)
+	engines := m.Endpoints.Engines(opts.UserID, opts.Query, opts.Start, opts.End, opts.LookbackDelta)
 	traverseBottomUp(nil, &plan, func(parent, current *parser.Expr) (stop bool) {
 		// If the current operation is not distributive, stop the traversal.
 		if !isDistributive(current) {

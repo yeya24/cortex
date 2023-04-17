@@ -22,6 +22,7 @@ import (
 
 type API struct {
 	QueryEngine     v1.QueryEngine
+	PromqlEngine    v1.QueryEngine
 	Queryable       storage.Queryable
 	QueryStoreAfter time.Duration
 }
@@ -75,7 +76,19 @@ func (qapi *API) QueryRange(r *http.Request) (interface{}, []error, *api.ApiErro
 	if err != nil {
 		return nil, nil, &api.ApiError{Typ: api.ErrorBadData, Err: err}, func() {}
 	}
-	qry, err := qapi.QueryEngine.NewRangeQuery(qapi.Queryable, opts, r.FormValue("query"), start, end, step)
+	engineToUse := qapi.QueryEngine
+	val := r.FormValue("pushdown")
+	if val != "" {
+		pushdown, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, nil, &api.ApiError{Typ: api.ErrorBadData, Err: err}, func() {}
+		}
+		if pushdown {
+			engineToUse = qapi.PromqlEngine
+		}
+	}
+
+	qry, err := engineToUse.NewRangeQuery(qapi.Queryable, opts, r.FormValue("query"), start, end, step)
 	if err != nil {
 		return nil, nil, &api.ApiError{Typ: api.ErrorBadData, Err: err}, func() {}
 	}
@@ -85,7 +98,7 @@ func (qapi *API) QueryRange(r *http.Request) (interface{}, []error, *api.ApiErro
 	res := qry.Exec(ctx)
 	if res.Err != nil {
 		// TODO: change type
-		return nil, res.Warnings, &api.ApiError{Typ: api.ErrorBadData, Err: err}, qry.Close
+		return nil, res.Warnings, &api.ApiError{Typ: api.ErrorExec, Err: res.Err}, qry.Close
 	}
 
 	data := &queryData{

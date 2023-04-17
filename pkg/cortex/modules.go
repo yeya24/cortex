@@ -222,7 +222,7 @@ func (t *Cortex) initQueryable() (serv services.Service, err error) {
 	querierRegisterer := prometheus.WrapRegistererWith(prometheus.Labels{"engine": "querier"}, prometheus.DefaultRegisterer)
 
 	// Create a querier queryable and PromQL engine
-	t.QuerierQueryable, t.ExemplarQueryable, t.QuerierEngine = querier.New(t.Cfg.Querier, t.Overrides, t.Distributor, t.StoreQueryables, t.TombstonesLoader, querierRegisterer, util_log.Logger, t.Store, t.Finder, t.Pool)
+	t.QuerierQueryable, t.ExemplarQueryable, t.QuerierEngine, t.NewPromqlEngine = querier.New(t.Cfg.Querier, t.Overrides, t.Distributor, t.StoreQueryables, t.TombstonesLoader, querierRegisterer, util_log.Logger, t.Store, t.Finder, t.Pool)
 
 	// Register the default endpoints that are always enabled for the querier module
 	t.API.RegisterQueryable(t.QuerierQueryable, t.Distributor)
@@ -296,14 +296,15 @@ func (t *Cortex) initQuerier() (serv services.Service, err error) {
 	// to a Prometheus API struct instantiated with the Cortex Queryable.
 	internalQuerierRouter := api.NewQuerierHandler(
 		t.Cfg.API,
+		t.Cfg.Querier,
 		t.QuerierQueryable,
 		t.ExemplarQueryable,
 		t.QuerierEngine,
+		t.NewPromqlEngine,
 		t.Distributor,
 		t.TombstonesLoader,
 		prometheus.DefaultRegisterer,
 		util_log.Logger,
-		t.Cfg.Querier.QueryStoreAfter,
 	)
 
 	// If the querier is running standalone without the query-frontend or query-scheduler, we must register it's internal
@@ -579,7 +580,7 @@ func (t *Cortex) initRuler() (serv services.Service, err error) {
 	} else {
 		rulerRegisterer := prometheus.WrapRegistererWith(prometheus.Labels{"engine": "ruler"}, prometheus.DefaultRegisterer)
 		// TODO: Consider wrapping logger to differentiate from querier module logger
-		queryable, _, engine := querier.New(t.Cfg.Querier, t.Overrides, t.Distributor, t.StoreQueryables, t.TombstonesLoader, rulerRegisterer, util_log.Logger, t.Store, t.Finder, t.Pool)
+		queryable, _, engine, _ := querier.New(t.Cfg.Querier, t.Overrides, t.Distributor, t.StoreQueryables, t.TombstonesLoader, rulerRegisterer, util_log.Logger, t.Store, t.Finder, t.Pool)
 
 		managerFactory := ruler.DefaultTenantManagerFactory(t.Cfg.Ruler, t.Distributor, queryable, engine, t.Overrides, prometheus.DefaultRegisterer)
 		manager, err = ruler.NewDefaultMultiTenantManager(t.Cfg.Ruler, managerFactory, prometheus.DefaultRegisterer, util_log.Logger)
@@ -660,7 +661,7 @@ func (t *Cortex) initCompactor() (serv services.Service, err error) {
 func (t *Cortex) initStoreGateway() (serv services.Service, err error) {
 	t.Cfg.StoreGateway.ShardingRing.ListenPort = t.Cfg.Server.GRPCListenPort
 
-	t.StoreGateway, err = storegateway.NewStoreGateway(t.Cfg.StoreGateway, t.Cfg.BlocksStorage, t.Overrides, t.Cfg.Server.LogLevel, util_log.Logger, prometheus.DefaultRegisterer)
+	t.StoreGateway, err = storegateway.NewStoreGateway(t.Cfg.StoreGateway, t.Cfg.BlocksStorage, t.Overrides, t.Cfg.Server.LogLevel, util_log.Logger, prometheus.DefaultRegisterer, t.Cfg.Querier.MaxSamples, t.Cfg.Querier.Timeout, t.Cfg.Querier.LookbackDelta)
 	if err != nil {
 		return nil, err
 	}

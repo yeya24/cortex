@@ -305,6 +305,7 @@ type Cortex struct {
 	QuerierQueryable         prom_storage.SampleAndChunkQueryable
 	ExemplarQueryable        prom_storage.ExemplarQueryable
 	QuerierEngine            v1.QueryEngine
+	NewPromqlEngine          v1.QueryEngine
 	QueryFrontendTripperware tripperware.Tripperware
 
 	Store  querier.BlocksStoreSet

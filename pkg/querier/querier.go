@@ -153,7 +153,7 @@ func getChunksIteratorFunction(cfg Config) chunkIteratorFunc {
 }
 
 // New builds a queryable and promql engine.
-func New(cfg Config, limits *validation.Overrides, distributor Distributor, stores []QueryableWithFilter, tombstonesLoader purger.TombstonesLoader, reg prometheus.Registerer, logger log.Logger, store BlocksStoreSet, finder BlocksFinder, pool *ringclient.Pool) (storage.SampleAndChunkQueryable, storage.ExemplarQueryable, v1.QueryEngine) {
+func New(cfg Config, limits *validation.Overrides, distributor Distributor, stores []QueryableWithFilter, tombstonesLoader purger.TombstonesLoader, reg prometheus.Registerer, logger log.Logger, store BlocksStoreSet, finder BlocksFinder, pool *ringclient.Pool) (storage.SampleAndChunkQueryable, storage.ExemplarQueryable, v1.QueryEngine, v1.QueryEngine) {
 	iteratorFunc := getChunksIteratorFunction(cfg)
 
 	distributorQueryable := newDistributorQueryable(distributor, cfg.IngesterStreaming, cfg.IngesterMetadataStreaming, iteratorFunc, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
@@ -176,7 +176,9 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 		return lazyquery.NewLazyQuerier(querier), nil
 	})
 
-	var queryEngine v1.QueryEngine
+	var (
+		promqlEngine v1.QueryEngine
+	)
 	opts := promql.EngineOpts{
 		Logger:               logger,
 		Reg:                  reg,
@@ -191,25 +193,24 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 			return cfg.DefaultEvaluationInterval.Milliseconds()
 		},
 	}
-	if cfg.ThanosEngine {
-		if cfg.StoreGatewayPushdown {
-			endpoints := NewTenantStoreGatewayEngines(finder, store, pool)
-			queryEngine = engine.NewDistributedEngine(engine.Opts{
-				EngineOpts: opts,
-				LogicalOptimizers: append(logicalplan.AllOptimizers, logicalplan.DistributedPushDownOptimizer{
-					Endpoints: endpoints,
-				}),
-			}, endpoints)
-		} else {
-			queryEngine = engine.New(engine.Opts{
-				EngineOpts:        opts,
-				LogicalOptimizers: logicalplan.AllOptimizers,
-			})
-		}
+	queryEngine := promql.NewEngine(opts)
+	if cfg.StoreGatewayPushdown {
+		endpoints := NewTenantStoreGatewayEngines(finder, store, pool, cfg.QueryIngestersWithin, cfg.QueryStoreAfter)
+		promqlEngine = engine.NewDistributedEngine(engine.Opts{
+			EngineOpts: opts,
+			LogicalOptimizers: append(logicalplan.AllOptimizers, logicalplan.DistributedPushDownOptimizer{
+				Endpoints: endpoints,
+			}),
+			Engine: queryEngine,
+		}, endpoints)
 	} else {
-		queryEngine = promql.NewEngine(opts)
+		promqlEngine = engine.New(engine.Opts{
+			EngineOpts:        opts,
+			LogicalOptimizers: logicalplan.AllOptimizers,
+			Engine:            queryEngine,
+		})
 	}
-	return NewSampleAndChunkQueryable(lazyQueryable), exemplarQueryable, queryEngine
+	return NewSampleAndChunkQueryable(lazyQueryable), exemplarQueryable, queryEngine, promqlEngine
 }
 
 // NewSampleAndChunkQueryable creates a SampleAndChunkQueryable from a

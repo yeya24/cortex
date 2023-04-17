@@ -815,7 +815,7 @@ github.com/stretchr/objx
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/mock
 github.com/stretchr/testify/require
-# github.com/thanos-community/promql-engine v0.0.0-20230408100057-190e5c3be03f => github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee
+# github.com/thanos-community/promql-engine v0.0.0-20230408100057-190e5c3be03f => github.com/yeya24/promql-engine v0.0.0-20230417171707-8066cd8e36c2
 ## explicit; go 1.19
 github.com/thanos-community/promql-engine/api
 github.com/thanos-community/promql-engine/engine
@@ -1368,5 +1368,5 @@ sigs.k8s.io/yaml
 # github.com/google/gnostic => github.com/googleapis/gnostic v0.6.9
 # gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0.20210301060133-17f40c25f497
 # github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
-# github.com/thanos-community/promql-engine => github.com/yeya24/promql-engine v0.0.0-20230417051519-8ffe0f0245ee
+# github.com/thanos-community/promql-engine => github.com/yeya24/promql-engine v0.0.0-20230417171707-8066cd8e36c2
 # github.com/prometheus/prometheus => github.com/yeya24/prometheus v1.8.2-0.20230417051106-e865cf991499

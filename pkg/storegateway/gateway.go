@@ -117,7 +117,7 @@ type StoreGateway struct {
 	engine v1.QueryEngine
 }
 
-func NewStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConfig, limits *validation.Overrides, logLevel logging.Level, logger log.Logger, reg prometheus.Registerer) (*StoreGateway, error) {
+func NewStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConfig, limits *validation.Overrides, logLevel logging.Level, logger log.Logger, reg prometheus.Registerer, maxSample int, timeout, lookbackDelta time.Duration) (*StoreGateway, error) {
 	var ringStore kv.Client
 
 	bucketClient, err := createBucketClient(storageCfg, logger, reg)
@@ -137,10 +137,10 @@ func NewStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 		}
 	}
 
-	return newStoreGateway(gatewayCfg, storageCfg, bucketClient, ringStore, limits, logLevel, logger, reg)
+	return newStoreGateway(gatewayCfg, storageCfg, bucketClient, ringStore, limits, logLevel, logger, reg, maxSample, timeout, lookbackDelta)
 }
 
-func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConfig, bucketClient objstore.Bucket, ringStore kv.Client, limits *validation.Overrides, logLevel logging.Level, logger log.Logger, reg prometheus.Registerer) (*StoreGateway, error) {
+func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConfig, bucketClient objstore.Bucket, ringStore kv.Client, limits *validation.Overrides, logLevel logging.Level, logger log.Logger, reg prometheus.Registerer, maxSample int, timeout, lookbackDelta time.Duration) (*StoreGateway, error) {
 	var err error
 
 	g := &StoreGateway{
@@ -153,9 +153,11 @@ func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 		}, []string{"reason"}),
 	}
 	g.engine = promql.NewEngine(promql.EngineOpts{
-		LookbackDelta:        time.Minute * 5,
+		LookbackDelta:        lookbackDelta,
 		EnableAtModifier:     true,
 		EnableNegativeOffset: true,
+		Timeout:              timeout,
+		MaxSamples:           maxSample,
 	})
 
 	// Init metrics.
@@ -476,7 +478,7 @@ func (g *StoreGateway) QueryRange(req *storegatewaypb.QueryRangeRequest, server 
 		return nil
 	}
 
-	queryable := NewQueryable(store, userID, nil)
+	queryable := NewQueryable(store, userID, req.BlockIDs)
 	lookback := time.Duration(req.LookbackDeltaSeconds) * time.Second
 	step := time.Duration(req.IntervalSeconds) * time.Second
 	start := time.Unix(req.StartTimeSeconds, 0)
@@ -551,7 +553,7 @@ type Querier struct {
 }
 
 func (q *Querier) Select(_ bool, sp *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
-	c := storegatewaypb.NewServerAsClient(q.srv, 1000)
+	c := storegatewaypb.NewServerAsClient(q.srv, 1000000)
 	convertedMatchers := ConvertMatchersToLabelMatcher(matchers)
 	req, err := createSeriesRequest(sp.Start, sp.End, convertedMatchers, nil, q.blockIDs)
 	if err != nil {

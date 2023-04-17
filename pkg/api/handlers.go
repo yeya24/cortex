@@ -3,13 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"github.com/thanos-io/thanos/pkg/api"
-	"html/template"
-	"net/http"
-	"path"
-	"sync"
-	"time"
-
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/gorilla/mux"
@@ -23,8 +16,13 @@ import (
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/thanos-io/thanos/pkg/api"
 	"github.com/weaveworks/common/instrument"
 	"github.com/weaveworks/common/middleware"
+	"html/template"
+	"net/http"
+	"path"
+	"sync"
 
 	"github.com/cortexproject/cortex/pkg/purger"
 	"github.com/cortexproject/cortex/pkg/querier"
@@ -160,14 +158,15 @@ func DefaultConfigHandler(actualCfg interface{}, defaultCfg interface{}) http.Ha
 // server to fulfill the Prometheus query API.
 func NewQuerierHandler(
 	cfg Config,
+	querierCfg querier.Config,
 	queryable storage.SampleAndChunkQueryable,
 	exemplarQueryable storage.ExemplarQueryable,
 	engine v1.QueryEngine,
+	newEngine v1.QueryEngine,
 	distributor Distributor,
 	tombstonesLoader purger.TombstonesLoader,
 	reg prometheus.Registerer,
 	logger log.Logger,
-	queryStoreAfter time.Duration,
 ) http.Handler {
 	// Prometheus histograms for requests to the querier.
 	querierRequestDuration := promauto.With(reg).NewHistogramVec(prometheus.HistogramOpts{
@@ -273,9 +272,9 @@ func NewQuerierHandler(
 		return hf
 	}
 	qapi := querier.API{
-		Queryable:       queryable,
-		QueryEngine:     engine,
-		QueryStoreAfter: queryStoreAfter,
+		Queryable:    queryable,
+		QueryEngine:  engine,
+		PromqlEngine: newEngine,
 	}
 
 	// TODO(gotjosh): This custom handler is temporary until we're able to vendor the changes in:
