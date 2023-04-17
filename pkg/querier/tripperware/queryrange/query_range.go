@@ -188,6 +188,17 @@ func (prometheusCodec) DecodeRequest(_ context.Context, r *http.Request, forward
 		return nil, decorateWithParamName(err, "step")
 	}
 
+	// Forward pushdown header.
+	if val := r.FormValue("pushdown"); val != "" {
+		pushdown, err := strconv.ParseBool(val)
+		if err != nil {
+			return nil, decorateWithParamName(err, "step")
+		}
+		if pushdown {
+			result.Headers = append(result.Headers, &tripperware.PrometheusRequestHeader{Name: "pushdown", Values: []string{val}})
+		}
+	}
+
 	if result.Step <= 0 {
 		return nil, errNegativeStep
 	}

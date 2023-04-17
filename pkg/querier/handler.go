@@ -77,7 +77,7 @@ func (qapi *API) QueryRange(r *http.Request) (interface{}, []error, *api.ApiErro
 		return nil, nil, &api.ApiError{Typ: api.ErrorBadData, Err: err}, func() {}
 	}
 	engineToUse := qapi.QueryEngine
-	val := r.FormValue("pushdown")
+	val := r.Header.Get("pushdown")
 	if val != "" {
 		pushdown, err := strconv.ParseBool(val)
 		if err != nil {
