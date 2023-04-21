@@ -67,9 +67,10 @@ var (
 
 // Config holds the store gateway config.
 type Config struct {
-	ShardingEnabled  bool       `yaml:"sharding_enabled"`
-	ShardingRing     RingConfig `yaml:"sharding_ring" doc:"description=The hash ring configuration. This option is required only if blocks sharding is enabled."`
-	ShardingStrategy string     `yaml:"sharding_strategy"`
+	ShardingEnabled       bool       `yaml:"sharding_enabled"`
+	ShardingRing          RingConfig `yaml:"sharding_ring" doc:"description=The hash ring configuration. This option is required only if blocks sharding is enabled."`
+	ShardingStrategy      string     `yaml:"sharding_strategy"`
+	StoreGatewayNewEngine bool       `yaml:"store_gateway_new_engine"`
 }
 
 // RegisterFlags registers the Config flags.
@@ -78,6 +79,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 
 	f.BoolVar(&cfg.ShardingEnabled, "store-gateway.sharding-enabled", false, "Shard blocks across multiple store gateway instances."+sharedOptionWithQuerier)
 	f.StringVar(&cfg.ShardingStrategy, "store-gateway.sharding-strategy", util.ShardingStrategyDefault, fmt.Sprintf("The sharding strategy to use. Supported values are: %s.", strings.Join(supportedShardingStrategies, ", ")))
+	f.BoolVar(&cfg.StoreGatewayNewEngine, "store-gateway.new-engine", false, fmt.Sprintf("aaa"))
 }
 
 // Validate the Config.
@@ -162,11 +164,15 @@ func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 		MaxSamples:           maxSample,
 	}
 	e := promql.NewEngine(opts)
-	g.engine = engine.New(engine.Opts{
-		EngineOpts:        opts,
-		LogicalOptimizers: logicalplan.AllOptimizers,
-		Engine:            e,
-	})
+	if gatewayCfg.StoreGatewayNewEngine {
+		g.engine = engine.New(engine.Opts{
+			EngineOpts:        opts,
+			LogicalOptimizers: logicalplan.AllOptimizers,
+			Engine:            e,
+		})
+	} else {
+		g.engine = e
+	}
 
 	// Init metrics.
 	g.bucketSync.WithLabelValues(syncReasonInitial)
