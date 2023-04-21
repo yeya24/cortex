@@ -11,6 +11,8 @@ import (
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
+	"github.com/thanos-community/promql-engine/engine"
+	"github.com/thanos-community/promql-engine/logicalplan"
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/store/hintspb"
 	"github.com/thanos-io/thanos/pkg/store/storepb/prompb"
@@ -152,12 +154,18 @@ func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 			Help: "Total number of times the bucket sync operation triggered.",
 		}, []string{"reason"}),
 	}
-	g.engine = promql.NewEngine(promql.EngineOpts{
+	opts := promql.EngineOpts{
 		LookbackDelta:        lookbackDelta,
 		EnableAtModifier:     true,
 		EnableNegativeOffset: true,
 		Timeout:              timeout,
 		MaxSamples:           maxSample,
+	}
+	e := promql.NewEngine(opts)
+	g.engine = engine.New(engine.Opts{
+		EngineOpts:        opts,
+		LogicalOptimizers: logicalplan.AllOptimizers,
+		Engine:            e,
 	})
 
 	// Init metrics.
