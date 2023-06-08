@@ -481,6 +481,12 @@ func (u *BucketStores) getOrCreateStore(userID string) (*store.BucketStore, erro
 		store.WithQueryGate(u.queryGate),
 		store.WithChunkPool(u.chunksPool),
 		store.WithSeriesBatchSize(store.SeriesBatchSize),
+		store.WithBlockEstimatedMaxSeriesFunc(func(_ thanos_metadata.Meta) uint64 {
+			return u.cfg.BucketStore.EstimatedMaxSeriesSize
+		}),
+		store.WithBlockEstimatedMaxChunkFunc(func(_ thanos_metadata.Meta) uint64 {
+			return u.cfg.BucketStore.EstimatedMaxChunkSize
+		}),
 	}
 	if u.logLevel.String() == "debug" {
 		bucketStoreOpts = append(bucketStoreOpts, store.WithDebugLogging())

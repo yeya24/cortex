@@ -271,6 +271,9 @@ type BucketStoreConfig struct {
 	// On the contrary, smaller value will increase baseline memory usage, but improve latency slightly.
 	// 1 will keep all in memory. Default value is the same as in Prometheus which gives a good balance.
 	PostingOffsetsInMemSampling int `yaml:"postings_offsets_in_mem_sampling" doc:"hidden"`
+
+	EstimatedMaxSeriesSize uint64 `yaml:"estimated_max_series_size"`
+	EstimatedMaxChunkSize  uint64 `yaml:"estimated_max_chunk_size"`
 }
 
 // RegisterFlags registers the BucketStore flags
@@ -298,6 +301,8 @@ func (cfg *BucketStoreConfig) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&cfg.IndexHeaderLazyLoadingEnabled, "blocks-storage.bucket-store.index-header-lazy-loading-enabled", false, "If enabled, store-gateway will lazily memory-map an index-header only once required by a query.")
 	f.DurationVar(&cfg.IndexHeaderLazyLoadingIdleTimeout, "blocks-storage.bucket-store.index-header-lazy-loading-idle-timeout", 20*time.Minute, "If index-header lazy loading is enabled and this setting is > 0, the store-gateway will release memory-mapped index-headers after 'idle timeout' inactivity.")
 	f.Uint64Var(&cfg.PartitionerMaxGapBytes, "blocks-storage.bucket-store.partitioner-max-gap-bytes", store.PartitionerMaxGapSize, "Max size - in bytes - of a gap for which the partitioner aggregates together two bucket GET object requests.")
+	f.Uint64Var(&cfg.EstimatedMaxSeriesSize, "blocks-storage.bucket-store.estimated-max-series-zie", store.EstimatedMaxSeriesSize, "Max Series Size")
+	f.Uint64Var(&cfg.EstimatedMaxChunkSize, "blocks-storage.bucket-store.estimated-max-chunk-zie", store.EstimatedMaxChunkSize, "Max Chunk Size")
 }
 
 // Validate the config.
