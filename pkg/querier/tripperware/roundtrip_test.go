@@ -147,7 +147,7 @@ func TestRoundTrip(t *testing.T) {
 		},
 		{
 			path:        querySubqueryStepSizeTooSmall,
-			expectedErr: httpgrpc.Errorf(http.StatusBadRequest, ErrSubQueryStepTooSmall, 11000),
+			expectedErr: httpgrpc.Errorf(http.StatusBadRequest, ErrSubQueryStepTooSmall, 11000, 30*24*60),
 			limits:      defaultOverrides,
 		},
 	} {
@@ -177,6 +177,7 @@ func TestRoundTrip(t *testing.T) {
 				tc.limits,
 				querysharding.NewQueryAnalyzer(),
 				time.Minute,
+				100000,
 			)
 			resp, err := tw(downstream).RoundTrip(req)
 			if tc.expectedErr == nil {
