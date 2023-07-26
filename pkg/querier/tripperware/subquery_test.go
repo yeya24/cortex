@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
 	"github.com/weaveworks/common/httpgrpc"
 )
@@ -331,6 +332,73 @@ func TestGetSubQueryStepsFromQuery(t *testing.T) {
 			totalSteps, maxStep := GetSubQueryStepsFromQuery(tc.query, defaultStep)
 			require.Equal(t, tc.expectedTotalSteps, totalSteps)
 			require.Equal(t, tc.expectedMaxStep, maxStep)
+		})
+	}
+}
+
+func TestTraverseBottomUp(t *testing.T) {
+	// transform functions return 1 if node is a subquery, otherwise returns 0.
+	transform := func(node *parser.Expr) int {
+		_, ok := (*node).(*parser.SubqueryExpr)
+		if ok {
+			return 1
+		}
+		return 0
+	}
+	for _, tc := range []struct {
+		name  string
+		query string
+		// expectOutput should be total number of subqueries the query has.
+		// But nested subquery will be considered as only 1 because they multiply the result.
+		expectOutput int
+	}{
+		{
+			name:  "number literal",
+			query: "1",
+		},
+		{
+			name:  "vector",
+			query: "metric",
+		},
+		{
+			name:  "matrix",
+			query: "metric[1d]",
+		},
+		{
+			name:  "function",
+			query: "rate(metric[1d])",
+		},
+		{
+			name:         "subquery",
+			query:        "up[1d:1s]",
+			expectOutput: 1,
+		},
+		{
+			name:         "subquery inside function",
+			query:        "increase(metric[1d:10s])",
+			expectOutput: 1,
+		},
+		{
+			name:         "subquery inside aggregate and binary operation",
+			query:        "sum(increase(metric[1d:10s])) + 1",
+			expectOutput: 1,
+		},
+		{
+			name:         "subquery inside aggregate and binary operation plus another subquery",
+			query:        "sum(increase(metric[1d:10s])) + count(increase(bbbbb[1d:10s]))",
+			expectOutput: 2,
+		},
+		{
+			name:         "nested subquery",
+			query:        "avg_over_time(sum(increase(metric[1d:10s]))[1m:10s])",
+			expectOutput: 1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expr, err := parser.ParseExpr(tc.query)
+			require.NoError(t, err)
+			output := traverseBottomUp(&expr, transform)
+			require.Equal(t, tc.expectOutput, output)
 		})
 	}
 }

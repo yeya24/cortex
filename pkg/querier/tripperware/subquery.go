@@ -38,7 +38,7 @@ func GetSubQueryStepsFromQuery(query string, defaultSubQueryInterval time.Durati
 		return 0, 0
 	}
 	var maxSteps int
-	totalSteps := traverseBottomUp(nil, &expr, func(parent *parser.Expr, node *parser.Expr) int {
+	totalSteps := traverseBottomUp(&expr, func(node *parser.Expr) int {
 		e, ok := (*node).(*parser.SubqueryExpr)
 		if ok {
 			step := e.Step
@@ -57,33 +57,33 @@ func GetSubQueryStepsFromQuery(query string, defaultSubQueryInterval time.Durati
 }
 
 // Traverse the syntax tree from bottom up and calculate total subquery steps.
-func traverseBottomUp(parent *parser.Expr, current *parser.Expr, transform func(parent *parser.Expr, node *parser.Expr) int) int {
+func traverseBottomUp(current *parser.Expr, transform func(node *parser.Expr) int) int {
 	switch node := (*current).(type) {
 	case *parser.BinaryExpr:
-		iterLeft := traverseBottomUp(current, &node.LHS, transform)
-		iterRight := traverseBottomUp(current, &node.RHS, transform)
+		iterLeft := traverseBottomUp(&node.LHS, transform)
+		iterRight := traverseBottomUp(&node.RHS, transform)
 		return iterLeft + iterRight
 	case *parser.AggregateExpr:
-		return traverseBottomUp(current, &node.Expr, transform)
+		return traverseBottomUp(&node.Expr, transform)
 	case *parser.Call:
 		iters := 0
 		for i := range node.Args {
-			iters += traverseBottomUp(current, &node.Args[i], transform)
+			iters += traverseBottomUp(&node.Args[i], transform)
 		}
 		return iters
 	case *parser.StepInvariantExpr:
-		return traverseBottomUp(current, &node.Expr, transform)
+		return traverseBottomUp(&node.Expr, transform)
 	case *parser.SubqueryExpr:
-		inner := traverseBottomUp(current, &node.Expr, transform)
-		cur := transform(parent, current)
+		inner := traverseBottomUp(&node.Expr, transform)
+		cur := transform(current)
 		if inner == 0 {
 			return cur
 		}
 		return inner * cur
 	case *parser.ParenExpr:
-		return traverseBottomUp(current, &node.Expr, transform)
+		return traverseBottomUp(&node.Expr, transform)
 	case *parser.UnaryExpr:
-		return traverseBottomUp(current, &node.Expr, transform)
+		return traverseBottomUp(&node.Expr, transform)
 	default:
 		return 0
 	}
