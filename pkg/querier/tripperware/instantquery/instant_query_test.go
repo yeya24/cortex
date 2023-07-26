@@ -23,7 +23,6 @@ import (
 
 func TestRequest(t *testing.T) {
 	t.Parallel()
-	codec := InstantQueryCodec
 
 	for _, tc := range []struct {
 		url         string
@@ -88,14 +87,14 @@ func TestRequest(t *testing.T) {
 				tc.expectedURL = fmt.Sprintf("%s%d", tc.expectedURL, now.Unix())
 				tc.expected.Time = now.Unix() * 1e3
 			}
-			req, err := codec.DecodeRequest(ctx, r, []string{"Test-Header"})
+			req, err := InstantQueryCodec.DecodeRequest(ctx, r, []string{"Test-Header"})
 			if err != nil {
 				require.EqualValues(t, tc.expectedErr, err)
 				return
 			}
 			require.EqualValues(t, tc.expected, req)
 
-			rdash, err := codec.EncodeRequest(context.Background(), req)
+			rdash, err := InstantQueryCodec.EncodeRequest(context.Background(), req)
 			require.NoError(t, err)
 			require.EqualValues(t, tc.expectedURL, rdash.RequestURI)
 		})

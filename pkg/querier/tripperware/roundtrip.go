@@ -103,6 +103,7 @@ func NewQueryTripperware(
 	limits Limits,
 	queryAnalyzer querysharding.Analyzer,
 	defaultSubQueryInterval time.Duration,
+	maxSubQueryTotalSteps int,
 ) Tripperware {
 	// Per tenant query metrics.
 	queriesPerTenant := promauto.With(registerer).NewCounterVec(prometheus.CounterOpts{
@@ -145,7 +146,7 @@ func NewQueryTripperware(
 				if isQuery || isQueryRange {
 					query := r.FormValue("query")
 					// Check subquery step size.
-					if err := SubQueryStepSizeCheck(query, defaultSubQueryInterval, MaxStep); err != nil {
+					if err := SubQueryStepSizeCheck(query, defaultSubQueryInterval, MaxStep, maxSubQueryTotalSteps); err != nil {
 						return nil, err
 					}
 				}

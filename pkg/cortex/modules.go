@@ -486,6 +486,7 @@ func (t *Cortex) initQueryFrontendTripperware() (serv services.Service, err erro
 		t.Overrides,
 		queryAnalyzer,
 		t.Cfg.Querier.DefaultEvaluationInterval,
+		t.Cfg.Querier.MaxSubQueryTotalSteps,
 	)
 
 	return services.NewIdleService(nil, func(_ error) error {
@@ -505,7 +506,7 @@ func (t *Cortex) initQueryFrontend() (serv services.Service, err error) {
 
 	// Wrap roundtripper into Tripperware.
 	roundTripper = t.QueryFrontendTripperware(roundTripper)
-
+	t.Cfg.Frontend.Handler.DefaultEvaluationInterval = t.Cfg.Querier.DefaultEvaluationInterval
 	handler := transport.NewHandler(t.Cfg.Frontend.Handler, roundTripper, util_log.Logger, prometheus.DefaultRegisterer)
 	t.API.RegisterQueryFrontendHandler(handler)
 
