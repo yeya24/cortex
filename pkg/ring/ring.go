@@ -719,6 +719,7 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 
 	var (
 		numInstancesPerZone    int
+		finalInstancePerZone   int
 		actualZones            []string
 		zonesWithExtraInstance int
 	)
@@ -727,8 +728,9 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 		if zoneStableSharding {
 			numInstancesPerZone = size / len(r.ringZones)
 			zonesWithExtraInstance = size % len(r.ringZones)
+			finalInstancePerZone = numInstancesPerZone
 			if zonesWithExtraInstance > 0 {
-				numInstancesPerZone++
+				finalInstancePerZone++
 			}
 		} else {
 			numInstancesPerZone = shardUtil.ShuffleShardExpectedInstancesPerZone(size, len(r.ringZones))
@@ -762,7 +764,7 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 		// To select one more instance while guaranteeing the "consistency" property,
 		// we do pick a random value from the generator and resolve uniqueness collisions
 		// (if any) continuing walking the ring.
-		for i := 0; i < numInstancesPerZone; i++ {
+		for i := 0; i < finalInstancePerZone; i++ {
 			start := searchToken(tokens, random.Uint32())
 			iterations := 0
 			found := false
@@ -808,7 +810,7 @@ func (r *Ring) shuffleShard(identifier string, size int, lookbackPeriod time.Dur
 		if zoneStableSharding && zonesWithExtraInstance > 0 {
 			zonesWithExtraInstance--
 			if zonesWithExtraInstance == 0 {
-				numInstancesPerZone--
+				finalInstancePerZone--
 			}
 		}
 	}
