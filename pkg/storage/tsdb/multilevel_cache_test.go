@@ -41,7 +41,7 @@ func Test_MultiIndexCacheInstantiation(t *testing.T) {
 					Addresses: s.Addr(),
 				},
 			},
-			expectedType: newMultiLevelCache(),
+			expectedType: newMultiLevelIndexCache(),
 		},
 		"instantiate multiples backends - inmemory/memcached": {
 			cfg: IndexCacheConfig{
@@ -51,7 +51,7 @@ func Test_MultiIndexCacheInstantiation(t *testing.T) {
 					MaxAsyncConcurrency: 1000,
 				},
 			},
-			expectedType: newMultiLevelCache(),
+			expectedType: newMultiLevelIndexCache(),
 		},
 		"should not allow duplicate backends": {
 			cfg: IndexCacheConfig{
@@ -252,7 +252,7 @@ func Test_MultiLevelCache(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			m1 := newMockIndexCache(tc.m1MockedCalls)
 			m2 := newMockIndexCache(tc.m2MockedCalls)
-			c := newMultiLevelCache(m1, m2)
+			c := newMultiLevelIndexCache(m1, m2)
 			tc.call(c)
 			require.Equal(t, tc.m1ExpectedCalls, m1.calls)
 			require.Equal(t, tc.m2ExpectedCalls, m2.calls)

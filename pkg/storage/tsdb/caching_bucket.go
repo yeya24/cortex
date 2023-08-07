@@ -22,12 +22,14 @@ import (
 )
 
 const (
+	CacheBackendInMemory  = "inmemory"
 	CacheBackendMemcached = "memcached"
 	CacheBackendRedis     = "redis"
 )
 
 type CacheBackend struct {
 	Backend   string                `yaml:"backend"`
+	InMemory  InMemoryCacheConfig   `yaml:"inmemory"`
 	Memcached MemcachedClientConfig `yaml:"memcached"`
 	Redis     RedisClientConfig     `yaml:"redis"`
 }
@@ -35,6 +37,8 @@ type CacheBackend struct {
 // Validate the config.
 func (cfg *CacheBackend) Validate() error {
 	switch cfg.Backend {
+	case CacheBackendInMemory:
+		return cfg.InMemory.Validate()
 	case CacheBackendMemcached:
 		return cfg.Memcached.Validate()
 	case CacheBackendRedis:
@@ -60,6 +64,7 @@ func (cfg *ChunksCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix st
 
 	cfg.Memcached.RegisterFlagsWithPrefix(f, prefix+"memcached.")
 	cfg.Redis.RegisterFlagsWithPrefix(f, prefix+"redis.")
+	cfg.InMemory.RegisterFlagsWithPrefix(f, prefix+"inmemory.")
 
 	f.Int64Var(&cfg.SubrangeSize, prefix+"subrange-size", 16000, "Size of each subrange that bucket object is split into for better caching.")
 	f.IntVar(&cfg.MaxGetRangeRequests, prefix+"max-get-range-requests", 3, "Maximum number of sub-GetRange requests that a single GetRange request can be split into when fetching chunks. Zero or negative value = unlimited number of sub-requests.")
@@ -113,6 +118,7 @@ func (cfg *MetadataCacheConfig) Validate() error {
 func CreateCachingBucket(chunksConfig ChunksCacheConfig, metadataConfig MetadataCacheConfig, bkt objstore.Bucket, logger log.Logger, reg prometheus.Registerer) (objstore.Bucket, error) {
 	cfg := cache.NewCachingBucketConfig()
 	cachingConfigured := false
+	cfg.SetCacheImplementation()
 
 	chunksCache, err := createCache("chunks-cache", &chunksConfig.CacheBackend, logger, reg)
 	if err != nil {
@@ -153,29 +159,50 @@ func CreateCachingBucket(chunksConfig ChunksCacheConfig, metadataConfig Metadata
 }
 
 func createCache(cacheName string, cacheBackend *CacheBackend, logger log.Logger, reg prometheus.Registerer) (cache.Cache, error) {
-	switch cacheBackend.Backend {
-	case "":
-		// No caching.
+	splitBackends := strings.Split(cacheBackend.Backend, ",")
+	if len(splitBackends) == 0 {
 		return nil, nil
-
-	case CacheBackendMemcached:
-		var client cacheutil.MemcachedClient
-		client, err := cacheutil.NewMemcachedClientWithConfig(logger, cacheName, cacheBackend.Memcached.ToMemcachedClientConfig(), reg)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to create memcached client")
-		}
-		return cache.NewMemcachedCache(cacheName, logger, client, reg), nil
-
-	case CacheBackendRedis:
-		redisCache, err := cacheutil.NewRedisClientWithConfig(logger, cacheName, cacheBackend.Redis.ToRedisClientConfig(), reg)
-		if err != nil {
-			return nil, errors.Wrapf(err, "failed to create redis client")
-		}
-		return cache.NewRedisCache(cacheName, logger, redisCache, reg), nil
-
-	default:
-		return nil, errors.Errorf("unsupported cache type for cache %s: %s", cacheName, cacheBackend.Backend)
 	}
+	var caches []cache.Cache
+
+	for _, backend := range splitBackends {
+		switch backend {
+		case CacheBackendInMemory:
+			c, err := cache.NewInMemoryCacheWithConfig(cacheName, logger, reg, cacheBackend.InMemory.ToInMemoryCacheConfig())
+			if err != nil {
+				return nil, err
+			}
+			caches = append(caches, c)
+
+		case CacheBackendMemcached:
+			var client cacheutil.MemcachedClient
+			client, err := cacheutil.NewMemcachedClientWithConfig(logger, cacheName, cacheBackend.Memcached.ToMemcachedClientConfig(), reg)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to create memcached client")
+			}
+			c, err := cache.NewMemcachedCache(cacheName, logger, client, reg), nil
+			if err != nil {
+				return nil, err
+			}
+			caches = append(caches, c)
+
+		case CacheBackendRedis:
+			redisCache, err := cacheutil.NewRedisClientWithConfig(logger, cacheName, cacheBackend.Redis.ToRedisClientConfig(), reg)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to create redis client")
+			}
+			c, err := cache.NewRedisCache(cacheName, logger, redisCache, reg), nil
+			if err != nil {
+				return nil, err
+			}
+			caches = append(caches, c)
+
+		default:
+			return nil, errors.Errorf("unsupported cache type for cache %s: %s", cacheName, cacheBackend.Backend)
+		}
+	}
+
+	return newMultiLevelBucketCache(cacheName, caches...), nil
 }
 
 var chunksMatcher = regexp.MustCompile(`^.*/chunks/\d+$`)
