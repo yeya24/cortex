@@ -32,21 +32,29 @@ type CacheBackend struct {
 	InMemory  InMemoryCacheConfig   `yaml:"inmemory"`
 	Memcached MemcachedClientConfig `yaml:"memcached"`
 	Redis     RedisClientConfig     `yaml:"redis"`
+	TTL       time.Duration         `yaml:"ttl"`
 }
 
 // Validate the config.
 func (cfg *CacheBackend) Validate() error {
-	switch cfg.Backend {
-	case CacheBackendInMemory:
-		return cfg.InMemory.Validate()
-	case CacheBackendMemcached:
-		return cfg.Memcached.Validate()
-	case CacheBackendRedis:
-		return cfg.Redis.Validate()
-	case "":
-	default:
-		return fmt.Errorf("unsupported cache backend: %s", cfg.Backend)
+	splitBackends := strings.Split(cfg.Backend, ",")
+	if len(splitBackends) == 0 {
+		return fmt.Errorf("empty backend")
 	}
+	for _, backend := range splitBackends {
+		switch backend {
+		case CacheBackendInMemory:
+			return cfg.InMemory.Validate()
+		case CacheBackendMemcached:
+			return cfg.Memcached.Validate()
+		case CacheBackendRedis:
+			return cfg.Redis.Validate()
+		case "":
+		default:
+			return fmt.Errorf("unsupported cache backend: %s", cfg.Backend)
+		}
+	}
+
 	return nil
 }
 
@@ -70,6 +78,7 @@ func (cfg *ChunksCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix st
 	f.IntVar(&cfg.MaxGetRangeRequests, prefix+"max-get-range-requests", 3, "Maximum number of sub-GetRange requests that a single GetRange request can be split into when fetching chunks. Zero or negative value = unlimited number of sub-requests.")
 	f.DurationVar(&cfg.AttributesTTL, prefix+"attributes-ttl", 168*time.Hour, "TTL for caching object attributes for chunks.")
 	f.DurationVar(&cfg.SubrangeTTL, prefix+"subrange-ttl", 24*time.Hour, "TTL for caching individual chunks subranges.")
+	f.DurationVar(&cfg.TTL, prefix+"ttl", 24*time.Hour, "ttl for backfilling multi level caches. Only used when multi level cache is enabled.")
 }
 
 func (cfg *ChunksCacheConfig) Validate() error {
@@ -118,7 +127,6 @@ func (cfg *MetadataCacheConfig) Validate() error {
 func CreateCachingBucket(chunksConfig ChunksCacheConfig, metadataConfig MetadataCacheConfig, bkt objstore.Bucket, logger log.Logger, reg prometheus.Registerer) (objstore.Bucket, error) {
 	cfg := cache.NewCachingBucketConfig()
 	cachingConfigured := false
-	cfg.SetCacheImplementation()
 
 	chunksCache, err := createCache("chunks-cache", &chunksConfig.CacheBackend, logger, reg)
 	if err != nil {
@@ -159,10 +167,10 @@ func CreateCachingBucket(chunksConfig ChunksCacheConfig, metadataConfig Metadata
 }
 
 func createCache(cacheName string, cacheBackend *CacheBackend, logger log.Logger, reg prometheus.Registerer) (cache.Cache, error) {
-	splitBackends := strings.Split(cacheBackend.Backend, ",")
-	if len(splitBackends) == 0 {
+	if len(cacheBackend.Backend) == 0 {
 		return nil, nil
 	}
+	splitBackends := strings.Split(cacheBackend.Backend, ",")
 	var caches []cache.Cache
 
 	for _, backend := range splitBackends {
@@ -202,7 +210,7 @@ func createCache(cacheName string, cacheBackend *CacheBackend, logger log.Logger
 		}
 	}
 
-	return newMultiLevelBucketCache(cacheName, caches...), nil
+	return newMultiLevelBucketCache(cacheName, cacheBackend.TTL, caches...), nil
 }
 
 var chunksMatcher = regexp.MustCompile(`^.*/chunks/\d+$`)

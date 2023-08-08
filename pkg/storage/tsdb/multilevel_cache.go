@@ -2,13 +2,13 @@ package tsdb
 
 import (
 	"context"
-	"github.com/thanos-io/thanos/pkg/cache"
 	"sync"
 	"time"
 
 	"github.com/oklog/ulid"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/thanos-io/thanos/pkg/cache"
 	storecache "github.com/thanos-io/thanos/pkg/store/cache"
 )
 
@@ -17,8 +17,9 @@ type multiLevelIndexCache struct {
 }
 
 type multiLevelBucketCache struct {
-	name   string
-	caches []cache.Cache
+	name        string
+	caches      []cache.Cache
+	backfillTTL time.Duration
 }
 
 func (m *multiLevelBucketCache) Store(data map[string][]byte, ttl time.Duration) {
@@ -38,8 +39,8 @@ func (m *multiLevelBucketCache) Fetch(ctx context.Context, keys []string) map[st
 	hits := make(map[string][]byte, len(keys))
 	missed := keys
 	nextMissed := make([]string, 0)
-	//backfillMap := make(map[int]map[string][]byte)
-	for _, c := range m.caches {
+	backfillMap := make(map[int]map[string][]byte)
+	for i, c := range m.caches {
 		res := c.Fetch(ctx, missed)
 		for _, key := range missed {
 			if data, ok := res[key]; ok {
@@ -48,10 +49,10 @@ func (m *multiLevelBucketCache) Fetch(ctx context.Context, keys []string) map[st
 				nextMissed = append(nextMissed, key)
 			}
 		}
-		//
-		//if i > 0 {
-		//	backfillMap[i - 1] = res
-		//}
+
+		if i > 0 {
+			backfillMap[i-1] = res
+		}
 
 		if len(nextMissed) == 0 {
 			break
@@ -59,6 +60,12 @@ func (m *multiLevelBucketCache) Fetch(ctx context.Context, keys []string) map[st
 		missed = nextMissed
 		nextMissed = nextMissed[:0]
 	}
+
+	defer func() {
+		for idx, hit := range backfillMap {
+			m.caches[idx].Store(hit, m.backfillTTL)
+		}
+	}()
 
 	return hits
 }
@@ -199,12 +206,13 @@ func newMultiLevelIndexCache(c ...storecache.IndexCache) storecache.IndexCache {
 	}
 }
 
-func newMultiLevelBucketCache(name string, c ...cache.Cache) cache.Cache {
+func newMultiLevelBucketCache(name string, backfillTTL time.Duration, c ...cache.Cache) cache.Cache {
 	if len(c) == 1 {
 		return c[0]
 	}
 	return &multiLevelBucketCache{
-		name:   name,
-		caches: c,
+		name:        name,
+		backfillTTL: backfillTTL,
+		caches:      c,
 	}
 }
