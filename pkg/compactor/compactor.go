@@ -183,6 +183,8 @@ type Config struct {
 	SkipBlocksWithOutOfOrderChunksEnabled bool                     `yaml:"skip_blocks_with_out_of_order_chunks_enabled"`
 	BlockFilesConcurrency                 int                      `yaml:"block_files_concurrency"`
 	BlocksFetchConcurrency                int                      `yaml:"blocks_fetch_concurrency"`
+	DownsampleInterval                    time.Duration            `yaml:"downsample_interval"`
+	DownsampleConcurrency                 int                      `yaml:"downsample_concurrency"`
 
 	// Whether the migration of block deletion marks to the global markers location is enabled.
 	BlockDeletionMarksMigrationEnabled bool `yaml:"block_deletion_marks_migration_enabled"`
@@ -230,6 +232,8 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.IntVar(&cfg.CompactionConcurrency, "compactor.compaction-concurrency", 1, "Max number of concurrent compactions running.")
 	f.DurationVar(&cfg.CleanupInterval, "compactor.cleanup-interval", 15*time.Minute, "How frequently compactor should run blocks cleanup and maintenance, as well as update the bucket index.")
 	f.IntVar(&cfg.CleanupConcurrency, "compactor.cleanup-concurrency", 20, "Max number of tenants for which blocks cleanup and maintenance should run concurrently.")
+	f.DurationVar(&cfg.DownsampleInterval, "compactor.downsample-interval", 1*time.Hour, "How frequently compactor should run blocks downsample.")
+	f.IntVar(&cfg.DownsampleConcurrency, "compactor.downsample-concurrency", 10, "Max number of tenants for which blocks downsample should run concurrently.")
 	f.BoolVar(&cfg.ShardingEnabled, "compactor.sharding-enabled", false, "Shard tenants across multiple compactor instances. Sharding is required if you run multiple compactor instances, in order to coordinate compactions and avoid race conditions leading to the same tenant blocks simultaneously compacted by different instances.")
 	f.StringVar(&cfg.ShardingStrategy, "compactor.sharding-strategy", util.ShardingStrategyDefault, fmt.Sprintf("The sharding strategy to use. Supported values are: %s.", strings.Join(supportedShardingStrategies, ", ")))
 	f.DurationVar(&cfg.DeletionDelay, "compactor.deletion-delay", 12*time.Hour, "Time before a block marked for deletion is deleted from bucket. "+
@@ -305,6 +309,8 @@ type Compactor struct {
 
 	// Underlying compactor used to compact TSDB blocks.
 	blocksCompactor compact.Compactor
+
+	blockDownsample *Downsample
 
 	blocksPlannerFactory PlannerFactory
 
@@ -513,6 +519,22 @@ func (c *Compactor) starting(ctx context.Context) error {
 		TenantCleanupDelay:                 c.compactorCfg.TenantCleanupDelay,
 	}, c.bucketClient, c.usersScanner, c.cfgProvider, c.parentLogger, c.registerer)
 
+	c.blockDownsample = NewDownsample(
+		DownsampleConfig{
+			DownsampleInterval:    util.DurationWithJitter(c.compactorCfg.DownsampleInterval, 0.1),
+			DownsampleConcurrency: c.compactorCfg.DownsampleConcurrency,
+			downsampleRetries:     c.compactorCfg.CompactionRetries,
+			retryMinBackoff:       c.compactorCfg.retryMinBackoff,
+			retryMaxBackoff:       c.compactorCfg.retryMaxBackoff,
+			dataDir:               c.compactorCfg.DataDir,
+			blockFilesConcurrency: defaultDeleteBlocksConcurrency,
+			acceptMalformedIndex:  c.compactorCfg.AcceptMalformedIndex,
+		},
+		c.bucketClient,
+		cortex_tsdb.NewUsersScanner(c.bucketClient, c.ownUserForCompaction, c.parentLogger),
+		c.cfgProvider, c.parentLogger, c.registerer, c.syncerMetrics,
+	)
+
 	// Initialize the compactors ring if sharding is enabled.
 	if c.compactorCfg.ShardingEnabled {
 		lifecyclerCfg := c.compactorCfg.ShardingRing.ToLifecyclerConfig()
@@ -582,7 +604,8 @@ func (c *Compactor) starting(ctx context.Context) error {
 func (c *Compactor) stopping(_ error) error {
 	ctx := context.Background()
 
-	services.StopAndAwaitTerminated(ctx, c.blocksCleaner) //nolint:errcheck
+	services.StopAndAwaitTerminated(ctx, c.blocksCleaner)   //nolint:errcheck
+	services.StopAndAwaitTerminated(ctx, c.blockDownsample) //nolint:errcheck
 	if c.ringSubservices != nil {
 		return services.StopManagerAndAwaitStopped(ctx, c.ringSubservices)
 	}

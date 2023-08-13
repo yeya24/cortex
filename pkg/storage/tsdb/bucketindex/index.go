@@ -83,6 +83,8 @@ type Block struct {
 	// UploadedAt is a unix timestamp (seconds precision) of when the block has been completed to be uploaded
 	// to the storage.
 	UploadedAt int64 `json:"uploaded_at"`
+
+	Resolution int64 `json:"resolution"`
 }
 
 // Within returns whether the block contains samples within the provided range.
@@ -113,6 +115,9 @@ func (m *Block) ThanosMeta(userID string) *metadata.Meta {
 				cortex_tsdb.TenantIDExternalLabel: userID,
 			},
 			SegmentFiles: m.thanosMetaSegmentFiles(),
+			Downsample: metadata.ThanosDownsample{
+				Resolution: m.Resolution,
+			},
 		},
 	}
 }
@@ -143,6 +148,7 @@ func BlockFromThanosMeta(meta metadata.Meta) *Block {
 		MaxTime:        meta.MaxTime,
 		SegmentsFormat: segmentsFormat,
 		SegmentsNum:    segmentsNum,
+		Resolution:     meta.Thanos.Downsample.Resolution,
 	}
 }
 

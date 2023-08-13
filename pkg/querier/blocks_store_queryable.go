@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/extprom"
+	"github.com/thanos-io/thanos/pkg/query"
 	"github.com/thanos-io/thanos/pkg/store/hintspb"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 	"github.com/thanos-io/thanos/pkg/strutil"
@@ -424,7 +425,6 @@ func (q *blocksStoreQuerier) selectSorted(sp *storage.SelectHints, matchers ...*
 	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error) {
 		seriesSets, queriedBlocks, warnings, numChunks, err := q.fetchSeriesFromStores(spanCtx, sp, clients, minT, maxT, matchers, maxChunksLimit, leftChunksLimit)
 		if err != nil {
-
 			return nil, err
 		}
 
@@ -587,6 +587,8 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 	}
 	convertedMatchers := convertMatchersToLabelMatcher(matchers)
 
+	aggrs := query.AggrsFromFunc(sp.Func)
+	skipChunks := sp != nil && sp.Func == "series"
 	// Concurrently fetch series from all clients.
 	for c, blockIDs := range clients {
 		// Change variables scope since it will be used in a goroutine.
@@ -602,9 +604,8 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 			// Only fail the function if we have validation error. We should return blocks that were successfully
 			// retrieved.
 			seriesQueryStats := &hintspb.QueryStats{}
-			skipChunks := sp != nil && sp.Func == "series"
 
-			req, err := createSeriesRequest(minT, maxT, convertedMatchers, shardingInfo, skipChunks, blockIDs)
+			req, err := createSeriesRequest(minT, maxT, convertedMatchers, shardingInfo, skipChunks, aggrs, sp.Step, blockIDs)
 			if err != nil {
 				return errors.Wrapf(err, "failed to create series request")
 			}
@@ -758,7 +759,8 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 			// Store the result.
 			mtx.Lock()
-			seriesSets = append(seriesSets, &blockQuerierSeriesSet{series: mySeries})
+			pss := query.NewPromSeriesSet(newStoreSeriesSet(mySeries), minT, maxT, aggrs, nil)
+			seriesSets = append(seriesSets, pss)
 			warnings = append(warnings, myWarnings...)
 			queriedBlocks = append(queriedBlocks, myQueriedBlocks...)
 			mtx.Unlock()
@@ -773,6 +775,33 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 	}
 
 	return seriesSets, queriedBlocks, warnings, int(numChunks.Load()), nil
+}
+
+// storeSeriesSet implements a storepb SeriesSet against a list of storepb.Series.
+type storeSeriesSet struct {
+	// TODO(bwplotka): Don't buffer all, we have to buffer single series (to sort and dedup chunks), but nothing more.
+	series []*storepb.Series
+	i      int
+}
+
+func newStoreSeriesSet(s []*storepb.Series) storepb.SeriesSet {
+	return &storeSeriesSet{series: s, i: -1}
+}
+
+func (s *storeSeriesSet) Next() bool {
+	if s.i >= len(s.series)-1 {
+		return false
+	}
+	s.i++
+	return true
+}
+
+func (*storeSeriesSet) Err() error {
+	return nil
+}
+
+func (s *storeSeriesSet) At() (labels.Labels, []storepb.AggrChunk) {
+	return s.series[s.i].PromLabels(), s.series[s.i].Chunks
 }
 
 func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
@@ -969,7 +998,7 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 	return valueSets, warnings, queriedBlocks, nil
 }
 
-func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shardingInfo *storepb.ShardInfo, skipChunks bool, blockIDs []ulid.ULID) (*storepb.SeriesRequest, error) {
+func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shardingInfo *storepb.ShardInfo, skipChunks bool, aggrs []storepb.Aggr, maxResolutionWindow int64, blockIDs []ulid.ULID) (*storepb.SeriesRequest, error) {
 	// Selectively query only specific blocks.
 	hints := &hintspb.SeriesRequestHints{
 		BlockMatchers: []storepb.LabelMatcher{
@@ -995,6 +1024,8 @@ func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shar
 		Hints:                   anyHints,
 		SkipChunks:              skipChunks,
 		ShardInfo:               shardingInfo,
+		Aggregates:              aggrs,
+		MaxResolutionWindow:     maxResolutionWindow, // TODO: verify how to calculate resolution window
 	}, nil
 }
 
