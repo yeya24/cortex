@@ -261,4 +261,4 @@ replace gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0
 
 replace github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
 
-replace github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20230813191901-20aad1858c2c
+replace github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20230814020440-122e94e5c303

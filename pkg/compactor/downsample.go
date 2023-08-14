@@ -56,6 +56,7 @@ type Downsample struct {
 	logger       log.Logger
 	bucketClient objstore.Bucket
 	usersScanner *cortex_tsdb.UsersScanner
+	metrics      *downsample.DownsampleMetrics
 
 	// TSDB syncer metrics
 	syncerMetrics *syncerMetrics
@@ -70,6 +71,7 @@ func NewDownsample(cfg DownsampleConfig, bucketClient objstore.Bucket, usersScan
 		cfgProvider:   cfgProvider,
 		logger:        log.With(logger, "component", "downsample"),
 		syncerMetrics: syncerMetrics,
+		metrics:       downsample.NewDownsampleMetrics(reg),
 	}
 
 	c.Service = services.NewTimerService(c.cfg.DownsampleInterval, c.starting, c.ticker, nil)
@@ -227,7 +229,7 @@ func (c *Downsample) downsampleUser(ctx context.Context, userID string) (returnE
 	if err := downsample.DownsampleBucket(
 		currentCtx,
 		ulogger,
-		nil,
+		c.metrics,
 		bucket,
 		metas,
 		path.Join(c.cfg.dataDir, "downsample"),
@@ -235,6 +237,8 @@ func (c *Downsample) downsampleUser(ctx context.Context, userID string) (returnE
 		c.cfg.blockFilesConcurrency,
 		metadata.NoneFunc,
 		c.cfg.acceptMalformedIndex,
+		downsample.ResLevel1DownsampleRange,
+		downsample.ResLevel2DownsampleRange,
 	); err != nil {
 		return errors.Wrap(err, "downsample bucket")
 	}
