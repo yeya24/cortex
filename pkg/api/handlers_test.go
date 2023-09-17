@@ -263,7 +263,8 @@ func TestRetryableMiddleware(t *testing.T) {
 			name: "no retry for 500 and pool exhaustion error",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(500)
-				w.Write([]byte(pool.ErrPoolExhausted.Error()))
+				_, err := w.Write([]byte(pool.ErrPoolExhausted.Error()))
+				require.NoError(t, err)
 			},
 			retry: false,
 		},
@@ -271,7 +272,8 @@ func TestRetryableMiddleware(t *testing.T) {
 			name: "retry for normal 500",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(500)
-				w.Write([]byte("error"))
+				_, err := w.Write([]byte("error"))
+				require.NoError(t, err)
 			},
 			retry: true,
 		},
