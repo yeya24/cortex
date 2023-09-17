@@ -78,6 +78,7 @@ require (
 
 require (
 	github.com/cespare/xxhash/v2 v2.2.0
+	github.com/felixge/httpsnoop v1.0.3
 	github.com/google/go-cmp v0.5.9
 	google.golang.org/protobuf v1.31.0
 )
@@ -123,7 +124,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0 // indirect
 	github.com/efficientgo/tools/extkingpin v0.0.0-20220817170617-6c25e3b627dd // indirect
 	github.com/fatih/color v1.15.0 // indirect
-	github.com/felixge/httpsnoop v1.0.3 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect

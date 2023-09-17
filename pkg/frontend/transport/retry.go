@@ -2,10 +2,15 @@ package transport
 
 import (
 	"context"
+	"github.com/pkg/errors"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/weaveworks/common/httpgrpc"
+)
+
+const (
+	NoRetryHeader = "No-Retry"
 )
 
 type Retry struct {
@@ -38,13 +43,22 @@ func (r *Retry) Do(ctx context.Context, f func() (*httpgrpc.HTTPResponse, error)
 		resp *httpgrpc.HTTPResponse
 		err  error
 	)
+OUTER:
 	for ; tries < r.maxRetries; tries++ {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 
 		resp, err = f()
-		if err != nil && err != context.Canceled {
+		if resp != nil {
+			for _, header := range resp.Headers {
+				// No retry header set, ignore any retry check.
+				if header.Key == NoRetryHeader && len(header.Values) > 0 && header.Values[0] == "true" {
+					break OUTER
+				}
+			}
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
 			continue // Retryable
 		} else if resp != nil && resp.Code/100 == 5 {
 			continue // Retryable

@@ -11,3 +11,9 @@ func TestYoloBuf(t *testing.T) {
 
 	require.Equal(t, []byte("hello world"), s)
 }
+
+func TestYoloString(t *testing.T) {
+	s := YoloString([]byte("hello world"))
+
+	require.Equal(t, "hello world", s)
+}
