@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	NoRetryHeader = "No-Retry"
+	NoRetryHeader = "X-No-Retry"
 )
 
 type Retry struct {
