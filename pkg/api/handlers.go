@@ -6,10 +6,8 @@ import (
 	"html/template"
 	"net/http"
 	"path"
-	"strings"
 	"sync"
 
-	"github.com/felixge/httpsnoop"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/gorilla/mux"
@@ -23,11 +21,9 @@ import (
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/storage"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
-	"github.com/thanos-io/thanos/pkg/pool"
 	"github.com/weaveworks/common/instrument"
 	"github.com/weaveworks/common/middleware"
 
-	"github.com/cortexproject/cortex/pkg/frontend/transport"
 	"github.com/cortexproject/cortex/pkg/purger"
 	"github.com/cortexproject/cortex/pkg/querier"
 	"github.com/cortexproject/cortex/pkg/querier/stats"
@@ -260,18 +256,13 @@ func NewQuerierHandler(
 	legacyPromRouter := route.New().WithPrefix(path.Join(legacyPrefix, "/api/v1"))
 	api.Register(legacyPromRouter)
 
-	// retryable middleware wraps APIs that query chunks.
-	// Only instant and range query are supported.
-	// TODO(yeya24): support remote read as well.
-	retryableMiddleware := RetryableMiddleware{}
-
 	// TODO(gotjosh): This custom handler is temporary until we're able to vendor the changes in:
 	// https://github.com/prometheus/prometheus/pull/7125/files
 	router.Path(path.Join(prefix, "/api/v1/metadata")).Handler(querier.MetadataHandler(distributor))
 	router.Path(path.Join(prefix, "/api/v1/read")).Handler(querier.RemoteReadHandler(queryable, logger))
 	router.Path(path.Join(prefix, "/api/v1/read")).Methods("POST").Handler(promRouter)
-	router.Path(path.Join(prefix, "/api/v1/query")).Methods("GET", "POST").Handler(retryableMiddleware.Wrap(promRouter))
-	router.Path(path.Join(prefix, "/api/v1/query_range")).Methods("GET", "POST").Handler(retryableMiddleware.Wrap(promRouter))
+	router.Path(path.Join(prefix, "/api/v1/query")).Methods("GET", "POST").Handler(promRouter)
+	router.Path(path.Join(prefix, "/api/v1/query_range")).Methods("GET", "POST").Handler(promRouter)
 	router.Path(path.Join(prefix, "/api/v1/query_exemplars")).Methods("GET", "POST").Handler(promRouter)
 	router.Path(path.Join(prefix, "/api/v1/labels")).Methods("GET", "POST").Handler(promRouter)
 	router.Path(path.Join(prefix, "/api/v1/label/{name}/values")).Methods("GET").Handler(promRouter)
@@ -283,8 +274,8 @@ func NewQuerierHandler(
 	router.Path(path.Join(legacyPrefix, "/api/v1/metadata")).Handler(querier.MetadataHandler(distributor))
 	router.Path(path.Join(legacyPrefix, "/api/v1/read")).Handler(querier.RemoteReadHandler(queryable, logger))
 	router.Path(path.Join(legacyPrefix, "/api/v1/read")).Methods("POST").Handler(legacyPromRouter)
-	router.Path(path.Join(legacyPrefix, "/api/v1/query")).Methods("GET", "POST").Handler(retryableMiddleware.Wrap(legacyPromRouter))
-	router.Path(path.Join(legacyPrefix, "/api/v1/query_range")).Methods("GET", "POST").Handler(retryableMiddleware.Wrap(legacyPromRouter))
+	router.Path(path.Join(legacyPrefix, "/api/v1/query")).Methods("GET", "POST").Handler(legacyPromRouter)
+	router.Path(path.Join(legacyPrefix, "/api/v1/query_range")).Methods("GET", "POST").Handler(legacyPromRouter)
 	router.Path(path.Join(legacyPrefix, "/api/v1/query_exemplars")).Methods("GET", "POST").Handler(legacyPromRouter)
 	router.Path(path.Join(legacyPrefix, "/api/v1/labels")).Methods("GET", "POST").Handler(legacyPromRouter)
 	router.Path(path.Join(legacyPrefix, "/api/v1/label/{name}/values")).Methods("GET").Handler(legacyPromRouter)
@@ -331,34 +322,4 @@ func (h *buildInfoHandler) ServeHTTP(writer http.ResponseWriter, _ *http.Request
 	if _, err := writer.Write(output); err != nil {
 		level.Error(h.logger).Log("msg", "write build info response", "error", err)
 	}
-}
-
-type RetryableMiddleware struct{}
-
-func (h RetryableMiddleware) Wrap(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var statusCode int
-		ww := httpsnoop.Wrap(w, httpsnoop.Hooks{
-			// Capture status code.
-			WriteHeader: func(f httpsnoop.WriteHeaderFunc) httpsnoop.WriteHeaderFunc {
-				return func(code int) {
-					statusCode = code
-				}
-			},
-			// Capture response body.
-			Write: func(writeFunc httpsnoop.WriteFunc) httpsnoop.WriteFunc {
-				return func(b []byte) (int, error) {
-					if statusCode/100 == 5 {
-						if strings.Contains(util.YoloString(b), pool.ErrPoolExhausted.Error()) {
-							w.Header().Set(transport.NoRetryHeader, "true")
-						}
-					}
-					// Delay writing header until we got the information about response body.
-					w.WriteHeader(statusCode)
-					return writeFunc(b)
-				}
-			},
-		})
-		next.ServeHTTP(ww, r)
-	})
 }

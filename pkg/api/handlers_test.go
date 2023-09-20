@@ -13,10 +13,8 @@ import (
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/thanos-io/thanos/pkg/pool"
 	"github.com/weaveworks/common/user"
 
-	"github.com/cortexproject/cortex/pkg/frontend/transport"
 	"github.com/cortexproject/cortex/pkg/purger"
 )
 
@@ -248,56 +246,6 @@ func TestBuildInfoAPI(t *testing.T) {
 			err = json.Unmarshal(out, &info)
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, info)
-		})
-	}
-}
-
-func TestRetryableMiddleware(t *testing.T) {
-	rm := RetryableMiddleware{}
-	for _, tc := range []struct {
-		name    string
-		handler http.HandlerFunc
-		retry   bool
-	}{
-		{
-			name: "no retry for 500 and pool exhaustion error",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(500)
-				_, err := w.Write([]byte(pool.ErrPoolExhausted.Error()))
-				require.NoError(t, err)
-			},
-			retry: false,
-		},
-		{
-			name: "retry for normal 500",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(500)
-				_, err := w.Write([]byte("error"))
-				require.NoError(t, err)
-			},
-			retry: true,
-		},
-		{
-			name: "no need retry for 200",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(200)
-			},
-			retry: false,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := rm.Wrap(tc.handler)
-			s := httptest.NewServer(h)
-			defer s.Close()
-
-			resp, err := http.Get(s.URL)
-			require.NoError(t, err)
-			// Only check no retry for response code 500.
-			if resp.StatusCode/100 == 5 && !tc.retry {
-				require.Equal(t, resp.Header.Get(transport.NoRetryHeader), "true")
-			} else {
-				require.Equal(t, resp.Header.Get(transport.NoRetryHeader), "")
-			}
 		})
 	}
 }

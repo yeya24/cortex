@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/util/multierror"
 	"io"
 	"sort"
 	"strings"
@@ -342,10 +343,10 @@ func (q *blocksStoreQuerier) LabelNames(matchers ...*labels.Matcher) ([]string, 
 		convertedMatchers = convertMatchersToLabelMatcher(matchers)
 	)
 
-	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error) {
-		nameSets, warnings, queriedBlocks, err := q.fetchLabelNamesFromStore(spanCtx, clients, minT, maxT, convertedMatchers)
+	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error, error) {
+		nameSets, warnings, queriedBlocks, err, retryableError := q.fetchLabelNamesFromStore(spanCtx, clients, minT, maxT, convertedMatchers)
 		if err != nil {
-			return nil, err
+			return nil, err, retryableError
 		}
 
 		resMtx.Lock()
@@ -353,7 +354,7 @@ func (q *blocksStoreQuerier) LabelNames(matchers ...*labels.Matcher) ([]string, 
 		resWarnings = append(resWarnings, warnings...)
 		resMtx.Unlock()
 
-		return queriedBlocks, nil
+		return queriedBlocks, nil, retryableError
 	}
 
 	err := q.queryWithConsistencyCheck(spanCtx, spanLog, minT, maxT, queryFunc)
@@ -377,10 +378,10 @@ func (q *blocksStoreQuerier) LabelValues(name string, matchers ...*labels.Matche
 		resultMtx sync.Mutex
 	)
 
-	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error) {
-		valueSets, warnings, queriedBlocks, err := q.fetchLabelValuesFromStore(spanCtx, name, clients, minT, maxT, matchers...)
+	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error, error) {
+		valueSets, warnings, queriedBlocks, err, retryableError := q.fetchLabelValuesFromStore(spanCtx, name, clients, minT, maxT, matchers...)
 		if err != nil {
-			return nil, err
+			return nil, err, retryableError
 		}
 
 		resultMtx.Lock()
@@ -388,7 +389,7 @@ func (q *blocksStoreQuerier) LabelValues(name string, matchers ...*labels.Matche
 		resWarnings = append(resWarnings, warnings...)
 		resultMtx.Unlock()
 
-		return queriedBlocks, nil
+		return queriedBlocks, nil, retryableError
 	}
 
 	err := q.queryWithConsistencyCheck(spanCtx, spanLog, minT, maxT, queryFunc)
@@ -422,11 +423,10 @@ func (q *blocksStoreQuerier) selectSorted(sp *storage.SelectHints, matchers ...*
 		resultMtx sync.Mutex
 	)
 
-	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error) {
-		seriesSets, queriedBlocks, warnings, numChunks, err := q.fetchSeriesFromStores(spanCtx, sp, clients, minT, maxT, matchers, maxChunksLimit, leftChunksLimit)
+	queryFunc := func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error, error) {
+		seriesSets, queriedBlocks, warnings, numChunks, err, retryableError := q.fetchSeriesFromStores(spanCtx, sp, clients, minT, maxT, matchers, maxChunksLimit, leftChunksLimit)
 		if err != nil {
-
-			return nil, err
+			return nil, err, retryableError
 		}
 
 		resultMtx.Lock()
@@ -441,7 +441,7 @@ func (q *blocksStoreQuerier) selectSorted(sp *storage.SelectHints, matchers ...*
 		}
 		resultMtx.Unlock()
 
-		return queriedBlocks, nil
+		return queriedBlocks, nil, retryableError
 	}
 
 	err := q.queryWithConsistencyCheck(spanCtx, spanLog, minT, maxT, queryFunc)
@@ -459,7 +459,7 @@ func (q *blocksStoreQuerier) selectSorted(sp *storage.SelectHints, matchers ...*
 }
 
 func (q *blocksStoreQuerier) queryWithConsistencyCheck(ctx context.Context, logger log.Logger, minT, maxT int64,
-	queryFunc func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error)) error {
+	queryFunc func(clients map[BlocksStoreClient][]ulid.ULID, minT, maxT int64) ([]ulid.ULID, error, error)) error {
 	// If queryStoreAfter is enabled, we do manipulate the query maxt to query samples up until
 	// now - queryStoreAfter, because the most recent time range is covered by ingesters. This
 	// optimization is particularly important for the blocks storage because can be used to skip
@@ -502,6 +502,9 @@ func (q *blocksStoreQuerier) queryWithConsistencyCheck(ctx context.Context, logg
 
 		resQueriedBlocks     = []ulid.ULID(nil)
 		attemptedBlocksZones = make(map[ulid.ULID]map[string]int, len(remainingBlocks))
+
+		queriedBlocks  []ulid.ULID
+		retryableError error
 	)
 
 	for attempt := 1; attempt <= maxFetchSeriesAttempts; attempt++ {
@@ -522,7 +525,7 @@ func (q *blocksStoreQuerier) queryWithConsistencyCheck(ctx context.Context, logg
 
 		// Fetch series from stores. If an error occur we do not retry because retries
 		// are only meant to cover missing blocks.
-		queriedBlocks, err := queryFunc(clients, minT, maxT)
+		queriedBlocks, err, retryableError = queryFunc(clients, minT, maxT)
 		if err != nil {
 			return err
 		}
@@ -554,6 +557,12 @@ func (q *blocksStoreQuerier) queryWithConsistencyCheck(ctx context.Context, logg
 		remainingBlocks = missingBlocks
 	}
 
+	// After we exhausted retries, if retryable error is not nil return the retryable error.
+	// It can be helpful to know whether we need to retry more or not.
+	if retryableError != nil {
+		return retryableError
+	}
+
 	// We've not been able to query all expected blocks after all retries.
 	level.Warn(util_log.WithContext(ctx, logger)).Log("msg", "failed consistency check", "err", err)
 	return fmt.Errorf("consistency check failed because some blocks were not queried: %s", strings.Join(convertULIDsToString(remainingBlocks), " "))
@@ -568,7 +577,7 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 	matchers []*labels.Matcher,
 	maxChunksLimit int,
 	leftChunksLimit int,
-) ([]storage.SeriesSet, []ulid.ULID, storage.Warnings, int, error) {
+) ([]storage.SeriesSet, []ulid.ULID, storage.Warnings, int, error, error) {
 	var (
 		reqCtx        = grpc_metadata.AppendToOutgoingContext(ctx, cortex_tsdb.TenantIDExternalLabel, q.userID)
 		g, gCtx       = errgroup.WithContext(reqCtx)
@@ -580,11 +589,13 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 		spanLog       = spanlogger.FromContext(ctx)
 		queryLimiter  = limiter.QueryLimiterFromContextWithFallback(ctx)
 		reqStats      = stats.FromContext(ctx)
+		merrMtx       = sync.Mutex{}
+		merr          = multierror.MultiError{}
 	)
 	matchers, shardingInfo, err := querysharding.ExtractShardingInfo(matchers)
 
 	if err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, err, merr.Err()
 	}
 	convertedMatchers := convertMatchersToLabelMatcher(matchers)
 
@@ -614,6 +625,9 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 			if err != nil {
 				if isRetryableError(err) {
 					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to fetch series from %s due to retryable error", c.RemoteAddress()))
+					merrMtx.Lock()
+					merr.Add(err)
+					merrMtx.Unlock()
 					return nil
 				}
 				return errors.Wrapf(err, "failed to fetch series from %s", c.RemoteAddress())
@@ -637,6 +651,9 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 				if isRetryableError(err) {
 					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to receive series from %s due to retryable error", c.RemoteAddress()))
+					merrMtx.Lock()
+					merr.Add(err)
+					merrMtx.Unlock()
 					return nil
 				}
 
@@ -770,10 +787,10 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 	// Wait until all client requests complete.
 	if err := g.Wait(); err != nil {
-		return nil, nil, nil, 0, err
+		return nil, nil, nil, 0, err, merr.Err()
 	}
 
-	return seriesSets, queriedBlocks, warnings, int(numChunks.Load()), nil
+	return seriesSets, queriedBlocks, warnings, int(numChunks.Load()), nil, merr.Err()
 }
 
 func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
@@ -782,7 +799,7 @@ func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
 	minT int64,
 	maxT int64,
 	matchers []storepb.LabelMatcher,
-) ([][]string, storage.Warnings, []ulid.ULID, error) {
+) ([][]string, storage.Warnings, []ulid.ULID, error, error) {
 	var (
 		reqCtx        = grpc_metadata.AppendToOutgoingContext(ctx, cortex_tsdb.TenantIDExternalLabel, q.userID)
 		g, gCtx       = errgroup.WithContext(reqCtx)
@@ -791,6 +808,8 @@ func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
 		warnings      = storage.Warnings(nil)
 		queriedBlocks = []ulid.ULID(nil)
 		spanLog       = spanlogger.FromContext(ctx)
+		merrMtx       = sync.Mutex{}
+		merr          = multierror.MultiError{}
 	)
 
 	// Concurrently fetch series from all clients.
@@ -809,6 +828,9 @@ func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
 			if err != nil {
 				if isRetryableError(err) {
 					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to fetch label names from %s due to retryable error", c.RemoteAddress()))
+					merrMtx.Lock()
+					merr.Add(err)
+					merrMtx.Unlock()
 					return nil
 				}
 
@@ -865,10 +887,10 @@ func (q *blocksStoreQuerier) fetchLabelNamesFromStore(
 
 	// Wait until all client requests complete.
 	if err := g.Wait(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, err, merr.Err()
 	}
 
-	return nameSets, warnings, queriedBlocks, nil
+	return nameSets, warnings, queriedBlocks, nil, merr.Err()
 }
 
 func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
@@ -878,7 +900,7 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 	minT int64,
 	maxT int64,
 	matchers ...*labels.Matcher,
-) ([][]string, storage.Warnings, []ulid.ULID, error) {
+) ([][]string, storage.Warnings, []ulid.ULID, error, error) {
 	var (
 		reqCtx        = grpc_metadata.AppendToOutgoingContext(ctx, cortex_tsdb.TenantIDExternalLabel, q.userID)
 		g, gCtx       = errgroup.WithContext(reqCtx)
@@ -887,6 +909,8 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 		warnings      = storage.Warnings(nil)
 		queriedBlocks = []ulid.ULID(nil)
 		spanLog       = spanlogger.FromContext(ctx)
+		merrMtx       = sync.Mutex{}
+		merr          = multierror.MultiError{}
 	)
 
 	// Concurrently fetch series from all clients.
@@ -905,6 +929,9 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 			if err != nil {
 				if isRetryableError(err) {
 					level.Warn(spanLog).Log("err", errors.Wrapf(err, "failed to fetch label values from %s due to retryable error", c.RemoteAddress()))
+					merrMtx.Lock()
+					merr.Add(err)
+					merrMtx.Unlock()
 					return nil
 				}
 
@@ -964,10 +991,10 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 
 	// Wait until all client requests complete.
 	if err := g.Wait(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, err, merr.Err()
 	}
 
-	return valueSets, warnings, queriedBlocks, nil
+	return valueSets, warnings, queriedBlocks, nil, merr.Err()
 }
 
 func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shardingInfo *storepb.ShardInfo, skipChunks bool, blockIDs []ulid.ULID) (*storepb.SeriesRequest, error) {
