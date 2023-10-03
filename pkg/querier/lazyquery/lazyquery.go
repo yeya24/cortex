@@ -8,6 +8,26 @@ import (
 	"github.com/prometheus/prometheus/util/annotations"
 )
 
+// LazyQueryable wraps a storage.Queryable
+type LazyQueryable struct {
+	q storage.Queryable
+}
+
+// Querier implements storage.Queryable
+func (lq LazyQueryable) Querier(mint, maxt int64) (storage.Querier, error) {
+	q, err := lq.q.Querier(mint, maxt)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewLazyQuerier(q), nil
+}
+
+// NewLazyQueryable returns a lazily wrapped queryable
+func NewLazyQueryable(q storage.Queryable) storage.Queryable {
+	return LazyQueryable{q}
+}
+
 // LazyQuerier is a lazy-loaded adapter for a storage.Querier
 type LazyQuerier struct {
 	next storage.Querier

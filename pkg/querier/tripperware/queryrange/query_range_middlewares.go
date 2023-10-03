@@ -17,6 +17,7 @@ package queryrange
 
 import (
 	"flag"
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"time"
 
 	"github.com/go-kit/log"
@@ -80,6 +81,7 @@ func Middlewares(
 	queryAnalyzer querysharding.Analyzer,
 	prometheusCodec tripperware.Codec,
 	shardedPrometheusCodec tripperware.Codec,
+	engine v1.QueryEngine,
 ) ([]tripperware.Middleware, cache.Cache, error) {
 	// Metric used to keep track of each middleware execution duration.
 	metrics := tripperware.NewInstrumentMiddlewareMetrics(registerer)
@@ -109,6 +111,7 @@ func Middlewares(
 		queryRangeMiddleware = append(queryRangeMiddleware, tripperware.InstrumentMiddleware("results_cache", metrics), queryCacheMiddleware)
 	}
 
+	queryRangeMiddleware = append(queryRangeMiddleware, EmbedQueryMiddleware(log, limits, queryAnalyzer, engine))
 	queryRangeMiddleware = append(queryRangeMiddleware, tripperware.InstrumentMiddleware("shardBy", metrics), tripperware.ShardByMiddleware(log, limits, shardedPrometheusCodec, queryAnalyzer))
 
 	return queryRangeMiddleware, c, nil

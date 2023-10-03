@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -456,6 +457,23 @@ func (t *Cortex) initQueryFrontendTripperware() (serv services.Service, err erro
 	// ShardedPrometheusCodec is same as PrometheusCodec but to be used on the sharded queries (it sum up the stats)
 	shardedPrometheusCodec := queryrange.NewPrometheusCodec(true)
 
+	var queryEngine v1.QueryEngine
+	opts := promql.EngineOpts{
+		Logger:               util_log.Logger,
+		Reg:                  nil,
+		ActiveQueryTracker:   nil,
+		MaxSamples:           5000000000,
+		Timeout:              time.Minute,
+		LookbackDelta:        0,
+		EnablePerStepStats:   t.Cfg.Querier.EnablePerStepStats,
+		EnableAtModifier:     false,
+		EnableNegativeOffset: false,
+		NoStepSubqueryIntervalFn: func(int64) int64 {
+			return 0
+		},
+	}
+	queryEngine = promql.NewEngine(opts)
+
 	queryRangeMiddlewares, cache, err := queryrange.Middlewares(
 		t.Cfg.QueryRange,
 		util_log.Logger,
@@ -466,6 +484,7 @@ func (t *Cortex) initQueryFrontendTripperware() (serv services.Service, err erro
 		queryAnalyzer,
 		prometheusCodec,
 		shardedPrometheusCodec,
+		queryEngine,
 	)
 	if err != nil {
 		return nil, err
