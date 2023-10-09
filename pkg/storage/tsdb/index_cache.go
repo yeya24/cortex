@@ -21,6 +21,8 @@ const (
 	// IndexCacheBackendInMemory is the value for the in-memory index cache backend.
 	IndexCacheBackendInMemory = "inmemory"
 
+	IndexCacheBackendInMemoryRistretto = "inmemory-ristretto"
+
 	// IndexCacheBackendMemcached is the value for the memcached index cache backend.
 	IndexCacheBackendMemcached = "memcached"
 
@@ -34,7 +36,7 @@ const (
 )
 
 var (
-	supportedIndexCacheBackends = []string{IndexCacheBackendInMemory, IndexCacheBackendMemcached, IndexCacheBackendRedis}
+	supportedIndexCacheBackends = []string{IndexCacheBackendInMemory, IndexCacheBackendInMemoryRistretto, IndexCacheBackendMemcached, IndexCacheBackendRedis}
 
 	errUnsupportedIndexCacheBackend = errors.New("unsupported index cache backend")
 	errDuplicatedIndexCacheBackend  = errors.New("duplicated index cache backend")
@@ -166,6 +168,10 @@ func NewIndexCache(cfg IndexCacheConfig, logger log.Logger, registerer prometheu
 		}
 
 		switch backend {
+		case IndexCacheBackendInMemoryRistretto:
+			c := newInMemoryIndexCacheRistretto(iReg)
+			caches = append(caches, c)
+			enabledItems = cfg.InMemory.EnabledItems
 		case IndexCacheBackendInMemory:
 			c, err := newInMemoryIndexCache(cfg.InMemory, logger, iReg)
 			if err != nil {

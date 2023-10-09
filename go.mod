@@ -79,6 +79,7 @@ require (
 require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/google/go-cmp v0.5.9
+	github.com/outcaste-io/ristretto v0.2.3
 	google.golang.org/protobuf v1.31.0
 )
 
