@@ -111,7 +111,7 @@ func Middlewares(
 		queryRangeMiddleware = append(queryRangeMiddleware, tripperware.InstrumentMiddleware("results_cache", metrics), queryCacheMiddleware)
 	}
 
-	queryRangeMiddleware = append(queryRangeMiddleware, EmbedQueryMiddleware(log, limits, queryAnalyzer, engine))
+	queryRangeMiddleware = append(queryRangeMiddleware, tripperware.InstrumentMiddleware("embedding", metrics), EmbedQueryMiddleware(log, limits, queryAnalyzer, engine))
 	queryRangeMiddleware = append(queryRangeMiddleware, tripperware.InstrumentMiddleware("shardBy", metrics), tripperware.ShardByMiddleware(log, limits, shardedPrometheusCodec, queryAnalyzer))
 
 	return queryRangeMiddleware, c, nil

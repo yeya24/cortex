@@ -69,17 +69,26 @@ func (s embedQuery) Do(ctx context.Context, r tripperware.Request) (tripperware.
 	}
 	switch n := expr.(type) {
 	case *parser.AggregateExpr:
-		if len(n.Grouping) == 0 && n.Op == parser.SUM {
+		if len(n.Grouping) == 0 {
 			// Parse inner expr.
 			// Ignore error for now.
-			innerQuery := n.Expr.String()
-			analysis, err := s.analyzer.Analyze(innerQuery)
+			innerExpr := n.Expr
+			//innerQuery := n.Expr.String()
+			analysis, err := s.analyzer.Analyze(innerExpr.String())
 			if err != nil {
 				return s.next.Do(ctx, r)
 			}
 			// We can try to push down.
 			if analysis.IsShardable() {
-				n.Expr = &parser.VectorSelector{LabelMatchers: []*labels.Matcher{labels.MustNewMatcher(labels.MatchEqual, tripperware.QueryLabel, innerQuery)}}
+				newInnerExpr := &parser.AggregateExpr{
+					Op:       n.Op,
+					Expr:     innerExpr,
+					Param:    n.Param,
+					Grouping: n.Grouping,
+					Without:  n.Without,
+				}
+				// Rewrite the inner expression to a vector selector with a special label and original inner query as value.
+				n.Expr = &parser.VectorSelector{LabelMatchers: []*labels.Matcher{labels.MustNewMatcher(labels.MatchEqual, tripperware.QueryLabel, newInnerExpr.String())}}
 				return s.evaluateWithQueryEngine(ctx, r.WithQuery(n.String()))
 			}
 		}
@@ -109,9 +118,11 @@ func (s embedQuery) evaluateWithQueryEngine(ctx context.Context, r tripperware.R
 	}
 
 	return &PrometheusResponse{
+		Status: StatusSuccess,
 		Data: PrometheusData{
 			ResultType: model.ValMatrix.String(),
 			Result:     sampleStreams,
+			// TODO(yeya24): We should definitely think about how to handle query stats here.
 		},
 	}, nil
 }
