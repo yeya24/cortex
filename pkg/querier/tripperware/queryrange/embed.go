@@ -70,6 +70,11 @@ func (s embedQuery) Do(ctx context.Context, r tripperware.Request) (tripperware.
 	switch n := expr.(type) {
 	case *parser.AggregateExpr:
 		if len(n.Grouping) == 0 {
+			// unable to pushdown.
+			// TODO: we should think about how to support AVG.
+			if _, ok := distributiveAggregations[n.Op]; !ok {
+				return s.next.Do(ctx, r)
+			}
 			// Parse inner expr.
 			// Ignore error for now.
 			innerExpr := n.Expr
@@ -80,8 +85,12 @@ func (s embedQuery) Do(ctx context.Context, r tripperware.Request) (tripperware.
 			}
 			// We can try to push down.
 			if analysis.IsShardable() {
+				op := n.Op
+				if n.Op == parser.COUNT {
+					op = parser.SUM
+				}
 				newInnerExpr := &parser.AggregateExpr{
-					Op:       n.Op,
+					Op:       op,
 					Expr:     innerExpr,
 					Param:    n.Param,
 					Grouping: n.Grouping,
@@ -95,6 +104,18 @@ func (s embedQuery) Do(ctx context.Context, r tripperware.Request) (tripperware.
 	}
 
 	return s.next.Do(ctx, r)
+}
+
+// distributiveAggregations are all PromQL aggregations which support
+// distributed execution.
+var distributiveAggregations = map[parser.ItemType]struct{}{
+	parser.SUM:     {},
+	parser.MIN:     {},
+	parser.MAX:     {},
+	parser.GROUP:   {},
+	parser.COUNT:   {},
+	parser.BOTTOMK: {},
+	parser.TOPK:    {},
 }
 
 func (s embedQuery) evaluateWithQueryEngine(ctx context.Context, r tripperware.Request) (tripperware.Response, error) {
