@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cortexproject/cortex/integration/e2e"
@@ -84,7 +85,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	// Push some series to Cortex.
 	start := now.Add(-time.Minute * 10)
 	end := now.Add(-time.Minute * 1)
-	numSeries := 3
+	numSeries := 100
 	numSamples := 20
 	lbls := make([]labels.Labels, numSeries*2)
 	serieses := make([]prompb.TimeSeries, numSeries*2)
@@ -144,24 +145,19 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	}
 
 	now = time.Now()
-	cases := make([]*testCase, 0, 200)
-	for i := 0; i < 100; i++ {
-		expr := ps.WalkInstantQuery()
-		query := expr.Pretty(0)
-		res1, err1 := c1.Query(query, now)
-		res2, err2 := c2.Query(query, now)
-		cases = append(cases, &testCase{
-			query:        query,
-			res1:         res1,
-			res2:         res2,
-			err1:         err1,
-			err2:         err2,
-			instantQuery: true,
-		})
-	}
+	cases := make([]*testCase, 0, 100)
 
 	for i := 0; i < 100; i++ {
-		expr := ps.WalkRangeQuery()
+		var expr parser.Expr
+		// Let's make sure we generate aggregation expression only as
+		// this is our main target to test.
+		for {
+			expr = ps.WalkRangeQuery()
+			aggr, ok := expr.(*parser.AggregateExpr)
+			if ok {
+				break
+			}
+		}
 		query := expr.Pretty(0)
 		res1, err1 := c1.QueryRange(query, start, end, scrapeInterval)
 		res2, err2 := c2.QueryRange(query, start, end, scrapeInterval)
