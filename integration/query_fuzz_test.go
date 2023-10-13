@@ -1,9 +1,7 @@
-//go:build integration_query_fuzz
-// +build integration_query_fuzz
-
 package integration
 
 import (
+	"github.com/thanos-io/thanos/pkg/querysharding"
 	"math/rand"
 	"path"
 	"sort"
@@ -146,6 +144,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 
 	now = time.Now()
 	cases := make([]*testCase, 0, 100)
+	analyzer := querysharding.NewQueryAnalyzer()
 
 	for i := 0; i < 100; i++ {
 		var expr parser.Expr
@@ -153,8 +152,13 @@ func TestVerticalShardingFuzz(t *testing.T) {
 		// this is our main target to test.
 		for {
 			expr = ps.WalkRangeQuery()
-			if _, ok := expr.(*parser.AggregateExpr); ok {
-				break
+			if a, ok := expr.(*parser.AggregateExpr); ok && len(a.Grouping) == 0 {
+				qa, err := analyzer.Analyze(a.Expr.String())
+				require.NoError(t, err)
+				// Let's focus on outer query not shardable but inner query shardable case.
+				if qa.IsShardable() {
+					break
+				}
 			}
 		}
 		query := expr.Pretty(0)
