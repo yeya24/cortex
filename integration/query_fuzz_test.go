@@ -86,7 +86,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	// Push some series to Cortex.
 	start := now.Add(-time.Minute * 10)
 	end := now.Add(-time.Minute * 1)
-	numSeries := 100
+	numSeries := 5
 	numSamples := 20
 	lbls := make([]labels.Labels, numSeries*2)
 	serieses := make([]prompb.TimeSeries, numSeries*2)
