@@ -1,3 +1,6 @@
+//go:build integration_query_fuzz
+// +build integration_query_fuzz
+
 package integration
 
 import (
@@ -152,7 +155,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 		// this is our main target to test.
 		for {
 			expr = ps.WalkRangeQuery()
-			if a, ok := expr.(*parser.AggregateExpr); ok && len(a.Grouping) == 0 {
+			if a, ok := expr.(*parser.AggregateExpr); ok && len(a.Grouping) == 0 && !a.Without {
 				qa, err := analyzer.Analyze(a.Expr.String())
 				require.NoError(t, err)
 				// Let's focus on outer query not shardable but inner query shardable case.
