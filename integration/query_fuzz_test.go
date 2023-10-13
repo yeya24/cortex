@@ -146,10 +146,10 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	}
 
 	now = time.Now()
-	cases := make([]*testCase, 0, 100)
+	cases := make([]*testCase, 0, 1000)
 	analyzer := querysharding.NewQueryAnalyzer()
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		var expr parser.Expr
 		// Let's make sure we generate aggregation expression only as
 		// this is our main target to test.
