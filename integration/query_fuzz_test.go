@@ -153,8 +153,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 		// this is our main target to test.
 		for {
 			expr = ps.WalkRangeQuery()
-			aggr, ok := expr.(*parser.AggregateExpr)
-			if ok {
+			if _, ok := expr.(*parser.AggregateExpr); ok {
 				break
 			}
 		}
