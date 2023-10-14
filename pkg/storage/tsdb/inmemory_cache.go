@@ -2,16 +2,19 @@ package tsdb
 
 import (
 	"context"
-	"reflect"
-	"strings"
-	"unsafe"
-
+	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/outcaste-io/ristretto"
+	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/thanos-io/thanos/pkg/tenancy"
+	"gopkg.in/yaml.v2"
+	"reflect"
+	"unsafe"
 )
 
 type cacheKey struct {
@@ -32,18 +35,6 @@ const (
 type cacheKeyPostings labels.Label
 type cacheKeyExpandedPostings string // We don't use []*labels.Matcher because it is not a hashable type so fail at inmemory cache.
 type cacheKeySeries uint64
-
-func (c cacheKey) keyType() string {
-	switch c.key.(type) {
-	case cacheKeyPostings:
-		return cacheTypePostings
-	case cacheKeySeries:
-		return cacheTypeSeries
-	case cacheKeyExpandedPostings:
-		return cacheTypeExpandedPostings
-	}
-	return "<unknown>"
-}
 
 // Common metrics that should be used by all cache implementations.
 type commonMetrics struct {
@@ -79,50 +70,69 @@ func newCommonMetrics(reg prometheus.Registerer) *commonMetrics {
 }
 
 type InMemoryIndexCache struct {
-	cache *ristretto.Cache
+	logger           log.Logger
+	cache            *ristretto.Cache
+	maxSizeBytes     uint64
+	maxItemSizeBytes uint64
 
 	commonMetrics *commonMetrics
 	overflow      *prometheus.CounterVec
 }
 
-const (
-	totalSizeBytes   = 1024 * 1024 * 1024 // 1GB
-	maxItemSizeBytes = 128 * 1024 * 1024  // 128MB
-)
-
-func newInMemoryIndexCacheRistretto(reg prometheus.Registerer) *InMemoryIndexCache {
-	cache, _ := ristretto.NewCache(&ristretto.Config{
-		NumCounters: 1024 * 1024 * 10,
-		MaxCost:     totalSizeBytes,
-		BufferItems: 64,
-		Metrics:     false,
-	})
-	c := &InMemoryIndexCache{
-		cache:         cache,
-		commonMetrics: newCommonMetrics(reg),
+// parseInMemoryIndexCacheConfig unmarshals a buffer into a InMemoryIndexCacheConfig with default values.
+func parseInMemoryIndexCacheConfig(conf []byte) (InMemoryIndexCacheConfig, error) {
+	config := DefaultInMemoryIndexCacheConfig
+	if err := yaml.Unmarshal(conf, &config); err != nil {
+		return InMemoryIndexCacheConfig{}, err
 	}
-	c.overflow = promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
-		Name: "thanos_store_index_cache_items_overflowed_total",
-		Help: "Total number of items that could not be added to the cache due to being too big.",
-	}, []string{"item_type"})
-	c.overflow.WithLabelValues(cacheTypePostings)
-	c.overflow.WithLabelValues(cacheTypeSeries)
-	c.overflow.WithLabelValues(cacheTypeExpandedPostings)
-	return c
+
+	return config, nil
 }
 
-// copyToKey is required as underlying strings might be mmaped.
-func copyToKey(l labels.Label) cacheKeyPostings {
-	return cacheKeyPostings(labels.Label{Value: copyString(l.Value), Name: copyString(l.Name)})
-}
+// NewInMemoryIndexCacheWithConfig creates a new thread-safe LRU cache for index entries and ensures the total cache
+// size approximately does not exceed maxBytes.
+func NewInMemoryIndexCacheWithConfig(logger log.Logger, commonMetrics *commonMetrics, reg prometheus.Registerer, config InMemoryIndexCacheConfig) (*InMemoryIndexCache, error) {
+	if config.MaxSizeBytes > config.MaxSize {
+		return nil, errors.Errorf("max item size (%v) cannot be bigger than overall cache size (%v)", config.MaxItemSize, config.MaxSize)
+	}
 
-func copyString(s string) string {
-	var b []byte
-	h := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	h.Data = (*reflect.StringHeader)(unsafe.Pointer(&s)).Data
-	h.Len = len(s)
-	h.Cap = len(s)
-	return string(b)
+	if commonMetrics == nil {
+		commonMetrics = newCommonMetrics(reg)
+	}
+
+	c := &InMemoryIndexCache{
+		commonMetrics:    commonMetrics,
+		logger:           logger,
+		maxSizeBytes:     uint64(config.MaxSize),
+		maxItemSizeBytes: uint64(config.MaxItemSize),
+	}
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters:        int64(config.MaxSize) / 1024,
+		MaxCost:            int64(config.MaxSize),
+		BufferItems:        64,
+		Metrics:            true,
+		IgnoreInternalCost: true,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "create inmemory cache")
+	}
+	c.cache = cache
+
+	c.commonMetrics.requestTotal.WithLabelValues(cacheTypePostings, tenancy.DefaultTenant)
+	c.commonMetrics.requestTotal.WithLabelValues(cacheTypeSeries, tenancy.DefaultTenant)
+	c.commonMetrics.requestTotal.WithLabelValues(cacheTypeExpandedPostings, tenancy.DefaultTenant)
+
+	c.commonMetrics.hitsTotal.WithLabelValues(cacheTypePostings, tenancy.DefaultTenant)
+	c.commonMetrics.hitsTotal.WithLabelValues(cacheTypeSeries, tenancy.DefaultTenant)
+	c.commonMetrics.hitsTotal.WithLabelValues(cacheTypeExpandedPostings, tenancy.DefaultTenant)
+
+	level.Info(logger).Log(
+		"msg", "created in-memory index cache",
+		"maxItemSizeBytes", c.maxItemSizeBytes,
+		"maxSizeBytes", c.maxSizeBytes,
+		"maxItems", "maxInt",
+	)
+	return c, nil
 }
 
 func (c *InMemoryIndexCache) set(typ string, key cacheKey, val []byte) {
@@ -130,10 +140,18 @@ func (c *InMemoryIndexCache) set(typ string, key cacheKey, val []byte) {
 	if _, ok := c.cache.Get(key); ok {
 		return
 	}
-	if size > maxItemSizeBytes {
+	if size > c.maxItemSizeBytes {
+		level.Debug(c.logger).Log(
+			"msg", "item bigger than maxItemSizeBytes. Ignoring..",
+			"maxItemSizeBytes", c.maxItemSizeBytes,
+			"maxSizeBytes", c.maxSizeBytes,
+			"itemSize", size,
+			"cacheType", typ,
+		)
 		c.overflow.WithLabelValues(typ).Inc()
 		return
 	}
+
 	// The caller may be passing in a sub-slice of a huge array. Copy the data
 	// to ensure we don't waste huge amounts of space for something small.
 	v := make([]byte, len(val))
@@ -152,6 +170,20 @@ func (c *InMemoryIndexCache) get(typ string, key cacheKey, tenant string) ([]byt
 	return v.([]byte), true
 }
 
+func copyString(s string) string {
+	var b []byte
+	h := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	h.Data = (*reflect.StringHeader)(unsafe.Pointer(&s)).Data
+	h.Len = len(s)
+	h.Cap = len(s)
+	return string(b)
+}
+
+// copyToKey is required as underlying strings might be mmaped.
+func copyToKey(l labels.Label) cacheKeyPostings {
+	return cacheKeyPostings(labels.Label{Value: copyString(l.Value), Name: copyString(l.Name)})
+}
+
 // StorePostings sets the postings identified by the ulid and label to the value v,
 // if the postings already exists in the cache it is not mutated.
 func (c *InMemoryIndexCache) StorePostings(blockID ulid.ULID, l labels.Label, v []byte, tenant string) {
@@ -161,7 +193,7 @@ func (c *InMemoryIndexCache) StorePostings(blockID ulid.ULID, l labels.Label, v 
 
 // FetchMultiPostings fetches multiple postings - each identified by a label -
 // and returns a map containing cache hits, along with a list of missing keys.
-func (c *InMemoryIndexCache) FetchMultiPostings(_ context.Context, blockID ulid.ULID, keys []labels.Label, tenant string) (hits map[labels.Label][]byte, misses []labels.Label) {
+func (c *InMemoryIndexCache) FetchMultiPostings(ctx context.Context, blockID ulid.ULID, keys []labels.Label, tenant string) (hits map[labels.Label][]byte, misses []labels.Label) {
 	timer := prometheus.NewTimer(c.commonMetrics.fetchLatency.WithLabelValues(cacheTypePostings, tenant))
 	defer timer.ObserveDuration()
 
@@ -169,6 +201,9 @@ func (c *InMemoryIndexCache) FetchMultiPostings(_ context.Context, blockID ulid.
 
 	blockIDKey := blockID.String()
 	for _, key := range keys {
+		if ctx.Err() != nil {
+			return hits, misses
+		}
 		if b, ok := c.get(cacheTypePostings, cacheKey{blockIDKey, cacheKeyPostings(key), ""}, tenant); ok {
 			hits[key] = b
 			continue
@@ -187,10 +222,13 @@ func (c *InMemoryIndexCache) StoreExpandedPostings(blockID ulid.ULID, matchers [
 }
 
 // FetchExpandedPostings fetches expanded postings and returns cached data and a boolean value representing whether it is a cache hit or not.
-func (c *InMemoryIndexCache) FetchExpandedPostings(_ context.Context, blockID ulid.ULID, matchers []*labels.Matcher, tenant string) ([]byte, bool) {
+func (c *InMemoryIndexCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers []*labels.Matcher, tenant string) ([]byte, bool) {
 	timer := prometheus.NewTimer(c.commonMetrics.fetchLatency.WithLabelValues(cacheTypeExpandedPostings, tenant))
 	defer timer.ObserveDuration()
 
+	if ctx.Err() != nil {
+		return nil, false
+	}
 	if b, ok := c.get(cacheTypeExpandedPostings, cacheKey{blockID.String(), cacheKeyExpandedPostings(labelMatchersToString(matchers)), ""}, tenant); ok {
 		return b, true
 	}
@@ -206,7 +244,7 @@ func (c *InMemoryIndexCache) StoreSeries(blockID ulid.ULID, id storage.SeriesRef
 
 // FetchMultiSeries fetches multiple series - each identified by ID - from the cache
 // and returns a map containing cache hits, along with a list of missing IDs.
-func (c *InMemoryIndexCache) FetchMultiSeries(_ context.Context, blockID ulid.ULID, ids []storage.SeriesRef, tenant string) (hits map[storage.SeriesRef][]byte, misses []storage.SeriesRef) {
+func (c *InMemoryIndexCache) FetchMultiSeries(ctx context.Context, blockID ulid.ULID, ids []storage.SeriesRef, tenant string) (hits map[storage.SeriesRef][]byte, misses []storage.SeriesRef) {
 	timer := prometheus.NewTimer(c.commonMetrics.fetchLatency.WithLabelValues(cacheTypeSeries, tenant))
 	defer timer.ObserveDuration()
 
@@ -214,6 +252,9 @@ func (c *InMemoryIndexCache) FetchMultiSeries(_ context.Context, blockID ulid.UL
 
 	blockIDKey := blockID.String()
 	for _, id := range ids {
+		if ctx.Err() != nil {
+			return hits, misses
+		}
 		if b, ok := c.get(cacheTypeSeries, cacheKey{blockIDKey, cacheKeySeries(id), ""}, tenant); ok {
 			hits[id] = b
 			continue
@@ -223,15 +264,4 @@ func (c *InMemoryIndexCache) FetchMultiSeries(_ context.Context, blockID ulid.UL
 	}
 
 	return hits, misses
-}
-
-func labelMatchersToString(matchers []*labels.Matcher) string {
-	sb := strings.Builder{}
-	for i, lbl := range matchers {
-		sb.WriteString(lbl.String())
-		if i < len(matchers)-1 {
-			sb.WriteRune(';')
-		}
-	}
-	return sb.String()
 }
