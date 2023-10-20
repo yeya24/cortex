@@ -2,22 +2,22 @@ package queryrange
 
 import (
 	"context"
-	"github.com/cortexproject/cortex/pkg/querier/tripperware"
-	"github.com/cortexproject/cortex/pkg/util"
-	"github.com/prometheus/common/model"
-	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/promql/parser"
-	"github.com/prometheus/prometheus/storage"
-	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"net/http"
 	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/promql/parser"
+	"github.com/prometheus/prometheus/storage"
+	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/thanos-io/thanos/pkg/querysharding"
 	"github.com/weaveworks/common/httpgrpc"
 
+	"github.com/cortexproject/cortex/pkg/querier/tripperware"
 	"github.com/cortexproject/cortex/pkg/tenant"
+	"github.com/cortexproject/cortex/pkg/util"
 	util_log "github.com/cortexproject/cortex/pkg/util/log"
 	"github.com/cortexproject/cortex/pkg/util/validation"
 )
@@ -87,7 +87,7 @@ func (s embedQuery) Do(ctx context.Context, r tripperware.Request) (tripperware.
 			if analysis.IsShardable() {
 				op := n.Op
 				if n.Op == parser.COUNT {
-					op = parser.SUM
+					n.Op = parser.SUM
 				}
 				newInnerExpr := &parser.AggregateExpr{
 					Op:       op,
