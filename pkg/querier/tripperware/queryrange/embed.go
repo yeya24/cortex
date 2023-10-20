@@ -2,6 +2,7 @@ package queryrange
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -96,8 +97,11 @@ func (s embedQuery) Do(ctx context.Context, r tripperware.Request) (tripperware.
 					Grouping: n.Grouping,
 					Without:  n.Without,
 				}
+				ctx = context.WithValue(ctx, tripperware.AnalysisKey{}, analysis)
 				// Rewrite the inner expression to a vector selector with a special label and original inner query as value.
 				n.Expr = &parser.VectorSelector{LabelMatchers: []*labels.Matcher{labels.MustNewMatcher(labels.MatchEqual, tripperware.QueryLabel, newInnerExpr.String())}}
+				fmt.Printf("query at root: %s\n", n.String())
+				fmt.Printf("query at leaf: %s\n", newInnerExpr.String())
 				return s.evaluateWithQueryEngine(ctx, r.WithQuery(n.String()))
 			}
 		}
