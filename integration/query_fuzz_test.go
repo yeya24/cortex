@@ -66,6 +66,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	cortex1 := e2ecortex.NewSingleBinary("cortex-1", flags1, "")
 	// Enable vertical sharding for the second Cortex instance.
 	flags2 := mergeFlags(flags, map[string]string{
+		"-querier.embed":                      "true",
 		"-frontend.query-vertical-shard-size": "2",
 		"-blocks-storage.filesystem.dir":      path2,
 		"-consul.hostname":                    consul2.NetworkHTTPEndpoint(),
