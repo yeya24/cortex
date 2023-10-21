@@ -55,6 +55,7 @@ func (s shardBy) Do(ctx context.Context, r Request) (Response, error) {
 
 	logger := util_log.WithContext(ctx, s.logger)
 
+	deduplicate := true
 	out := ctx.Value(AnalysisKey{})
 	analysis, ok := out.(querysharding.QueryAnalysis)
 	if !ok {
@@ -72,6 +73,8 @@ func (s shardBy) Do(ctx context.Context, r Request) (Response, error) {
 		if err != nil || !analysis.IsShardable() {
 			return s.next.Do(ctx, r)
 		}
+	} else {
+		deduplicate = false
 	}
 
 	reqs := s.shardQuery(logger, numShards, r, analysis)
@@ -86,7 +89,7 @@ func (s shardBy) Do(ctx context.Context, r Request) (Response, error) {
 		resps = append(resps, reqResp.Response)
 	}
 
-	return s.merger.MergeResponse(ctx, r, resps...)
+	return s.merger.MergeResponse(ctx, deduplicate, r, resps...)
 }
 
 func (s shardBy) shardQuery(l log.Logger, numShards int, r Request, analysis querysharding.QueryAnalysis) []Request {

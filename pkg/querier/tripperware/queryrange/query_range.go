@@ -126,7 +126,7 @@ func NewEmptyPrometheusResponse() *PrometheusResponse {
 	}
 }
 
-func (c prometheusCodec) MergeResponse(ctx context.Context, _ tripperware.Request, responses ...tripperware.Response) (tripperware.Response, error) {
+func (c prometheusCodec) MergeResponse(ctx context.Context, deduplicate bool, _ tripperware.Request, responses ...tripperware.Response) (tripperware.Response, error) {
 	sp, _ := opentracing.StartSpanFromContext(ctx, "QueryRangeResponse.MergeResponse")
 	sp.SetTag("response_count", len(responses))
 	defer sp.Finish()
@@ -145,9 +145,20 @@ func (c prometheusCodec) MergeResponse(ctx context.Context, _ tripperware.Reques
 
 	// Merge the responses.
 	sort.Sort(byFirstTime(promResponses))
-	sampleStreams, err := matrixMerge(ctx, promResponses)
-	if err != nil {
-		return nil, err
+	var (
+		sampleStreams []tripperware.SampleStream
+		err           error
+	)
+	if deduplicate {
+		sampleStreams, err = matrixMerge(ctx, promResponses)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		sampleStreams = make([]tripperware.SampleStream, 0)
+		for _, resp := range promResponses {
+			sampleStreams = append(sampleStreams, resp.Data.Result...)
+		}
 	}
 
 	response := PrometheusResponse{
