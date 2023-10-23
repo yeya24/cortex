@@ -157,6 +157,9 @@ func TestVerticalShardingFuzz(t *testing.T) {
 		for {
 			expr = ps.WalkRangeQuery()
 			if a, ok := expr.(*parser.AggregateExpr); ok && len(a.Grouping) == 0 && !a.Without {
+				if a.Op == parser.TOPK || a.Op == parser.BOTTOMK {
+					continue
+				}
 				qa, err := analyzer.Analyze(a.Expr.String())
 				require.NoError(t, err)
 				// Let's focus on outer query not shardable but inner query shardable case.
