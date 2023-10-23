@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"regexp"
 	"sync"
 	"time"
 
@@ -156,6 +157,7 @@ FindQueue:
 				q.queues.deleteQueue(userID)
 			}
 
+			regexp.MatchString()
 			q.queueLength.WithLabelValues(userID).Dec()
 
 			// Tell close() we've processed a request.

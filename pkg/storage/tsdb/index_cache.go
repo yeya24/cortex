@@ -184,7 +184,7 @@ func NewIndexCache(cfg IndexCacheConfig, logger log.Logger, registerer prometheu
 			if err != nil {
 				return nil, err
 			}
-			cache, err := storecache.NewRemoteIndexCache(logger, c, nil, iReg)
+			cache, err := storecache.NewRemoteIndexCache(logger, c, nil, iReg, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -195,7 +195,7 @@ func NewIndexCache(cfg IndexCacheConfig, logger log.Logger, registerer prometheu
 			if err != nil {
 				return nil, err
 			}
-			cache, err := storecache.NewRemoteIndexCache(logger, c, nil, iReg)
+			cache, err := storecache.NewRemoteIndexCache(logger, c, nil, iReg, 0)
 			if err != nil {
 				return nil, err
 			}
