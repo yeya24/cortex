@@ -2,7 +2,6 @@ package client
 
 import (
 	"encoding/binary"
-
 	"github.com/cortexproject/cortex/pkg/chunk/encoding"
 )
 

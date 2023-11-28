@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/prometheus/prometheus/model/histogram"
 	"io"
 	"math"
 	"net/http"
@@ -1033,6 +1034,7 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 		// Look up a reference for this series.
 		tsLabels := cortexpb.FromLabelAdaptersToLabels(ts.Labels)
 		tsLabelsHash := tsLabels.Hash()
+		model.Duration()
 		ref, copiedLabels := app.GetRef(tsLabels, tsLabelsHash)
 
 		// To find out if any sample was added to this series, we keep old value.
@@ -1107,6 +1109,40 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 			}
 
 			return nil, wrapWithUser(err, userID)
+		}
+
+		for _, hp := range ts.Histograms {
+			var (
+				err error
+				h   *histogram.Histogram
+				fh  *histogram.FloatHistogram
+			)
+
+			if hp.GetCountFloat() > 0 {
+				fh = cortexpb.FloatHistogramProtoToFloatHistogram(hp)
+			} else {
+				h = cortexpb.HistogramProtoToHistogram(hp)
+			}
+
+			if ref != 0 {
+				if _, err = app.AppendHistogram(ref, tsLabels, hp.TimestampMs, h, fh); err != nil {
+
+				}
+			} else {
+				if ref, err = app.AppendHistogram(0, tsLabels, hp.TimestampMs, h, fh); err != nil {
+
+				}
+			}
+
+			if err != nil {
+				switch err {
+				case storage.ErrOutOfOrderSample:
+				case storage.ErrDuplicateSampleForTimestamp:
+				case storage.ErrOutOfBounds:
+				case storage.ErrTooOldSample:
+				default:
+				}
+			}
 		}
 
 		if i.cfg.ActiveSeriesMetricsEnabled && succeededSamplesCount > oldSucceededSamplesCount {
@@ -1831,6 +1867,10 @@ func (i *Ingester) queryStreamChunks(ctx context.Context, db *userTSDB, from, th
 			switch meta.Chunk.Encoding() {
 			case chunkenc.EncXOR:
 				ch.Encoding = int32(encoding.PrometheusXorChunk)
+			case chunkenc.EncHistogram:
+				ch.Encoding = int32(encoding.PrometheusHistogramChunk)
+			case chunkenc.EncFloatHistogram:
+				ch.Encoding = int32(encoding.PrometheusFloatHistogramChunk)
 			default:
 				return 0, 0, errors.Errorf("unknown chunk encoding from TSDB chunk querier: %v", meta.Chunk.Encoding())
 			}
@@ -1993,6 +2033,7 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 		EnableMemorySnapshotOnShutdown: i.cfg.BlocksStorageConfig.TSDB.MemorySnapshotOnShutdown,
 		OutOfOrderTimeWindow:           time.Duration(oooTimeWindow).Milliseconds(),
 		OutOfOrderCapMax:               i.cfg.BlocksStorageConfig.TSDB.OutOfOrderCapMax,
+		EnableNativeHistograms:         i.cfg.BlocksStorageConfig.TSDB.EnableNativeHistograms,
 	}, nil)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open TSDB: %s", udir)

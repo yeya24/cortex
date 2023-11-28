@@ -20,6 +20,8 @@ import (
 	"io"
 
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/histogram"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 )
@@ -37,6 +39,8 @@ type Chunk interface {
 	// The returned Chunk is the overflow chunk if it was created.
 	// The returned Chunk is nil if the sample got appended to the same chunk.
 	Add(sample model.SamplePair) (Chunk, error)
+	AddHistogram(int64, *histogram.Histogram) (Chunk, error)
+	AddFloatHistogram(int64, *histogram.FloatHistogram) (Chunk, error)
 	// NewIterator returns an iterator for the chunks.
 	// The iterator passed as argument is for re-use. Depending on implementation,
 	// the iterator can be re-used or a new iterator can be allocated.
@@ -62,18 +66,20 @@ type Iterator interface {
 	// chunk. Otherwise, it is the value following the last value scanned or
 	// found (by one of the Find... methods). Returns false if either the
 	// end of the chunk is reached or an error has occurred.
-	Scan() bool
+	Scan() chunkenc.ValueType
 	// Finds the oldest value at or after the provided time. Returns false
 	// if either the chunk contains no value at or after the provided time,
 	// or an error has occurred.
-	FindAtOrAfter(model.Time) bool
+	FindAtOrAfter(model.Time) chunkenc.ValueType
 	// Returns the last value scanned (by the scan method) or found (by one
 	// of the find... methods). It returns model.ZeroSamplePair before any of
 	// those methods were called.
 	Value() model.SamplePair
+	AtHistogram() (int64, *histogram.Histogram)
+	AtFloatHistogram() (int64, *histogram.FloatHistogram)
 	// Returns a batch of the provisded size; NB not idempotent!  Should only be called
 	// once per Scan.
-	Batch(size int) Batch
+	Batch(size int, valType chunkenc.ValueType) Batch
 	// Returns the last error encountered. In general, an error signals data
 	// corruption in the chunk and requires quarantining.
 	Err() error
@@ -86,22 +92,24 @@ const BatchSize = 12
 // Batch is a sorted set of (timestamp, value) pairs.  They are intended to be
 // small, and passed by value.
 type Batch struct {
-	Timestamps [BatchSize]int64
-	Values     [BatchSize]float64
-	Index      int
-	Length     int
+	Timestamps      [BatchSize]int64
+	Values          [BatchSize]float64
+	Histograms      [BatchSize]*histogram.Histogram
+	FloatHistograms [BatchSize]*histogram.FloatHistogram
+	Index           int
+	Length          int
 }
 
 // RangeValues is a utility function that retrieves all values within the given
 // range from an Iterator.
 func RangeValues(it Iterator, in metric.Interval) ([]model.SamplePair, error) {
 	result := []model.SamplePair{}
-	if !it.FindAtOrAfter(in.OldestInclusive) {
+	if valueType := it.FindAtOrAfter(in.OldestInclusive); valueType == chunkenc.ValNone {
 		return result, it.Err()
 	}
 	for !it.Value().Timestamp.After(in.NewestInclusive) {
 		result = append(result, it.Value())
-		if !it.Scan() {
+		if it.Scan() != chunkenc.ValNone {
 			break
 		}
 	}

@@ -2,6 +2,7 @@ package batch
 
 import (
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 
 	promchunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
 )
@@ -46,16 +47,16 @@ func (i *chunkIterator) Seek(t int64, size int) bool {
 		}
 	}
 
-	if i.it.FindAtOrAfter(model.Time(t)) {
-		i.batch = i.it.Batch(size)
+	if valueType := i.it.FindAtOrAfter(model.Time(t)); valueType != chunkenc.ValNone {
+		i.batch = i.it.Batch(size, valueType)
 		return i.batch.Length > 0
 	}
 	return false
 }
 
 func (i *chunkIterator) Next(size int) bool {
-	if i.it.Scan() {
-		i.batch = i.it.Batch(size)
+	if valueType := i.it.Scan(); valueType != chunkenc.ValNone {
+		i.batch = i.it.Batch(size, valueType)
 		return i.batch.Length > 0
 	}
 	return false

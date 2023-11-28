@@ -20,14 +20,15 @@ import (
 	"sort"
 
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 
+	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 	"github.com/cortexproject/cortex/pkg/purger"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 )
 
 // ConcreteSeriesSet implements storage.SeriesSet.
@@ -71,15 +72,17 @@ func (c *ConcreteSeriesSet) Warnings() annotations.Annotations {
 
 // ConcreteSeries implements storage.Series.
 type ConcreteSeries struct {
-	labels  labels.Labels
-	samples []model.SamplePair
+	labels     labels.Labels
+	samples    []model.SamplePair
+	histograms []cortexpb.Histogram
 }
 
 // NewConcreteSeries instantiates an in memory series from a list of samples & labels
-func NewConcreteSeries(ls labels.Labels, samples []model.SamplePair) *ConcreteSeries {
+func NewConcreteSeries(ls labels.Labels, samples []model.SamplePair, histograms []cortexpb.Histogram) *ConcreteSeries {
 	return &ConcreteSeries{
-		labels:  ls,
-		samples: samples,
+		labels:     ls,
+		samples:    samples,
+		histograms: histograms,
 	}
 }
 
@@ -101,13 +104,13 @@ type concreteSeriesIterator struct {
 
 // NewConcreteSeriesIterator instaniates an in memory chunkenc.Iterator
 func NewConcreteSeriesIterator(series *ConcreteSeries) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(&concreteSeriesIterator{
+	return &concreteSeriesIterator{
 		cur:    -1,
 		series: series,
-	})
+	}
 }
 
-func (c *concreteSeriesIterator) Seek(t int64) bool {
+func (c *concreteSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	c.cur = sort.Search(len(c.series.samples), func(n int) bool {
 		return c.series.samples[n].Timestamp >= model.Time(t)
 	})
@@ -119,7 +122,19 @@ func (c *concreteSeriesIterator) At() (t int64, v float64) {
 	return int64(s.Timestamp), float64(s.Value)
 }
 
-func (c *concreteSeriesIterator) Next() bool {
+func (concreteSeriesIterator) AtHistogram() (int64, *histogram.Histogram) {
+	return 0, nil
+}
+
+func (concreteSeriesIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
+	return 0, nil
+}
+
+func (concreteSeriesIterator) AtT() int64 {
+	return 0
+}
+
+func (c *concreteSeriesIterator) Next() chunkenc.ValueType {
 	c.cur++
 	return c.cur < len(c.series.samples)
 }
@@ -130,7 +145,7 @@ func (c *concreteSeriesIterator) Err() error {
 
 // NewErrIterator instantiates an errIterator
 func NewErrIterator(err error) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(errIterator{err})
+	return errIterator{err}
 }
 
 // errIterator implements chunkenc.Iterator, just returning an error.
@@ -138,16 +153,28 @@ type errIterator struct {
 	err error
 }
 
-func (errIterator) Seek(int64) bool {
-	return false
+func (errIterator) Seek(int64) chunkenc.ValueType {
+	return chunkenc.ValNone
 }
 
-func (errIterator) Next() bool {
-	return false
+func (errIterator) Next() chunkenc.ValueType {
+	return chunkenc.ValNone
 }
 
 func (errIterator) At() (t int64, v float64) {
 	return 0, 0
+}
+
+func (errIterator) AtHistogram() (int64, *histogram.Histogram) {
+	return 0, nil
+}
+
+func (errIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
+	return 0, nil
+}
+
+func (errIterator) AtT() int64 {
+	return 0
 }
 
 func (e errIterator) Err() error {
@@ -263,13 +290,13 @@ type DeletedSeriesIterator struct {
 }
 
 func NewDeletedSeriesIterator(itr chunkenc.Iterator, deletedIntervals []model.Interval) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(&DeletedSeriesIterator{
+	return &DeletedSeriesIterator{
 		itr:              itr,
 		deletedIntervals: deletedIntervals,
-	})
+	}
 }
 
-func (d DeletedSeriesIterator) Seek(t int64) bool {
+func (d DeletedSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	if found := d.itr.Seek(t); found == chunkenc.ValNone {
 		return false
 	}
@@ -287,7 +314,7 @@ func (d DeletedSeriesIterator) At() (t int64, v float64) {
 	return d.itr.At()
 }
 
-func (d DeletedSeriesIterator) Next() bool {
+func (d DeletedSeriesIterator) Next() chunkenc.ValueType {
 	for d.itr.Next() != chunkenc.ValNone {
 		ts, _ := d.itr.At()
 
@@ -341,19 +368,19 @@ type emptySeriesIterator struct {
 }
 
 func NewEmptySeriesIterator() chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(emptySeriesIterator{})
+	return emptySeriesIterator{}
 }
 
-func (emptySeriesIterator) Seek(t int64) bool {
-	return false
+func (emptySeriesIterator) Seek(t int64) chunkenc.ValueType {
+	return chunkenc.ValNone
 }
 
 func (emptySeriesIterator) At() (t int64, v float64) {
 	return 0, 0
 }
 
-func (emptySeriesIterator) Next() bool {
-	return false
+func (emptySeriesIterator) Next() chunkenc.ValueType {
+	return chunkenc.ValNone
 }
 
 func (emptySeriesIterator) Err() error {

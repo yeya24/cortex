@@ -2,6 +2,7 @@ package iterators
 
 import (
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	promchunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
@@ -29,7 +30,7 @@ func (i *chunkIterator) Seek(t int64) bool {
 		return false
 	}
 
-	return i.it.FindAtOrAfter(model.Time(t))
+	return i.it.FindAtOrAfter(model.Time(t)) != chunkenc.ValNone
 }
 
 func (i *chunkIterator) AtTime() int64 {
@@ -56,7 +57,7 @@ func (i *chunkIterator) At() (int64, float64) {
 
 func (i *chunkIterator) Next() bool {
 	i.cacheValid = false
-	return i.it.Scan()
+	return i.it.Scan() != chunkenc.ValNone
 }
 
 func (i *chunkIterator) Err() error {
