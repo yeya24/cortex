@@ -9,7 +9,6 @@ import (
 	"github.com/prometheus/prometheus/util/annotations"
 
 	"github.com/cortexproject/cortex/pkg/cortexpb"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 )
 
 // timeSeriesSeriesSet is a wrapper around a cortexpb.TimeSeries slice to implement to SeriesSet interface
@@ -73,14 +72,14 @@ func (t *timeseries) Labels() labels.Labels {
 
 // Iterator implements the storage.Series interface
 func (t *timeseries) Iterator(chunkenc.Iterator) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(&timeSeriesSeriesIterator{
+	return &timeSeriesSeriesIterator{
 		ts: t,
 		i:  -1,
-	})
+	}
 }
 
 // Seek implements SeriesIterator interface
-func (t *timeSeriesSeriesIterator) Seek(s int64) bool {
+func (t *timeSeriesSeriesIterator) Seek(s int64) chunkenc.ValueType {
 	offset := 0
 	if t.i > 0 {
 		offset = t.i // only advance via Seek
@@ -102,7 +101,10 @@ func (t *timeSeriesSeriesIterator) At() (int64, float64) {
 }
 
 // Next implements the SeriesIterator interface
-func (t *timeSeriesSeriesIterator) Next() bool { t.i++; return t.i < len(t.ts.series.Samples) }
+func (t *timeSeriesSeriesIterator) Next() chunkenc.ValueType {
+	t.i++
+	return t.i < len(t.ts.series.Samples)
+}
 
 // Err implements the SeriesIterator interface
 func (t *timeSeriesSeriesIterator) Err() error { return nil }

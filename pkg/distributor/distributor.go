@@ -793,7 +793,9 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 		if len(ts.Samples) > 0 {
 			latestSampleTimestampMs = util_math.Max64(latestSampleTimestampMs, ts.Samples[len(ts.Samples)-1].TimestampMs)
 		}
-		// TODO(yeya24): use timestamp of the latest native histogram in the series as well.
+		if len(ts.Histograms) > 0 {
+			latestSampleTimestampMs = util_math.Max64(latestSampleTimestampMs, ts.Histograms[len(ts.Histograms)-1].TimestampMs)
+		}
 
 		if mrc := limits.MetricRelabelConfigs; len(mrc) > 0 {
 			l, _ := relabel.Process(cortexpb.FromLabelAdaptersToLabels(ts.Labels), mrc...)
@@ -858,8 +860,7 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 
 		seriesKeys = append(seriesKeys, key)
 		validatedTimeseries = append(validatedTimeseries, validatedSeries)
-		// TODO(yeya24): add histogram samples as well when supported.
-		validatedSamples += len(ts.Samples)
+		validatedSamples += len(ts.Samples) + len(ts.Histograms)
 		validatedExemplars += len(ts.Exemplars)
 	}
 	return seriesKeys, validatedTimeseries, validatedSamples, validatedExemplars, firstPartialErr, nil

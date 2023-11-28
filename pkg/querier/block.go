@@ -12,7 +12,6 @@ import (
 	"github.com/thanos-io/thanos/pkg/store/labelpb"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 	"github.com/cortexproject/cortex/pkg/querier/series"
 )
 
@@ -127,7 +126,7 @@ func (bqs *blockQuerierSeries) Iterator(chunkenc.Iterator) chunkenc.Iterator {
 		its = append(its, it)
 	}
 
-	return iterators.NewCompatibleChunksIterator(newBlockQuerierSeriesIterator(bqs.Labels(), its))
+	return newBlockQuerierSeriesIterator(bqs.Labels(), its)
 }
 
 func newBlockQuerierSeriesIterator(labels labels.Labels, its []chunkenc.Iterator) *blockQuerierSeriesIterator {
