@@ -3,7 +3,7 @@ package distributor
 import (
 	"context"
 	"io"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -275,7 +275,7 @@ func mergeExemplarQueryResponses(results []interface{}) *ingester_client.Exempla
 	}
 
 	// Query results from each ingester were sorted, but are not necessarily still sorted after merging.
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	result := make([]cortexpb.TimeSeries, len(exemplarResults))
 	for i, k := range keys {

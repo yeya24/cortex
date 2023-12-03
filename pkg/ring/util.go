@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -40,11 +41,7 @@ func GenerateTokens(numTokens int, takenTokens []uint32) []uint32 {
 		i++
 	}
 
-	// Ensure returned tokens are sorted.
-	sort.Slice(tokens, func(i, j int) bool {
-		return tokens[i] < tokens[j]
-	})
-
+	slices.Sort(tokens)
 	return tokens
 }
 
@@ -169,7 +166,7 @@ func getZones(tokens map[string][]uint32) []string {
 		zones = append(zones, zone)
 	}
 
-	sort.Strings(zones)
+	slices.Sort(zones)
 	return zones
 }
 

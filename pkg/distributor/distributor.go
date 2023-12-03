@@ -4,9 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	io "io"
+	"io"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -873,8 +873,8 @@ func sortLabelsIfNeeded(labels []cortexpb.LabelAdapter) {
 		return
 	}
 
-	sort.Slice(labels, func(i, j int) bool {
-		return strings.Compare(labels[i].Name, labels[j].Name) < 0
+	slices.SortFunc(labels, func(a, b cortexpb.LabelAdapter) int {
+		return strings.Compare(a.Name, b.Name)
 	})
 }
 
@@ -973,7 +973,7 @@ func (d *Distributor) LabelValuesForLabelNameCommon(ctx context.Context, from, t
 	}
 
 	// We need the values returned to be sorted.
-	sort.Strings(values)
+	slices.Sort(values)
 	span.SetTag("result_length", len(values))
 
 	return values, nil
@@ -1052,7 +1052,7 @@ func (d *Distributor) LabelNamesCommon(ctx context.Context, from, to model.Time,
 		values = append(values, v)
 	}
 
-	sort.Strings(values)
+	slices.Sort(values)
 	span.SetTag("result_length", len(values))
 
 	return values, nil

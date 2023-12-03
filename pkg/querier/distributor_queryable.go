@@ -2,7 +2,7 @@ package querier
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/go-kit/log/level"
@@ -275,7 +275,7 @@ func (q *distributorQuerier) labelNamesWithMatchers(ctx context.Context, matcher
 	for name := range namesMap {
 		names = append(names, name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 
 	return names, nil, nil
 }

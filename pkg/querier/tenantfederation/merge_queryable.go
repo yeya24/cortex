@@ -3,6 +3,7 @@ package tenantfederation
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -284,7 +285,7 @@ func (m *mergeQuerier) mergeDistinctStringSliceWithTenants(ctx context.Context, 
 	for e := range resultMap {
 		result = append(result, e)
 	}
-	sort.Strings(result)
+	slices.Sort(result)
 	return result, warnings, nil
 }
 

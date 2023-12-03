@@ -2,6 +2,7 @@ package queue
 
 import (
 	"math/rand"
+	"slices"
 	"sort"
 	"time"
 
@@ -266,7 +267,7 @@ func (q *queues) addQuerierConnection(querierID string) {
 	// First connection from this querier.
 	q.queriers[querierID] = &querier{connections: 1}
 	q.sortedQueriers = append(q.sortedQueriers, querierID)
-	sort.Strings(q.sortedQueriers)
+	slices.Sort(q.sortedQueriers)
 
 	q.recomputeUserQueriers()
 }

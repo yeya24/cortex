@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -985,7 +985,7 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 				"queried blocks", strings.Join(convertULIDsToString(myQueriedBlocks), " "))
 
 			// Values returned need not be sorted, but we need them to be sorted so we can merge.
-			sort.Strings(valuesResp.Values)
+			slices.Sort(valuesResp.Values)
 
 			// Store the result.
 			mtx.Lock()

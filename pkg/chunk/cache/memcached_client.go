@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -274,7 +274,7 @@ func (c *memcachedClient) updateMemcacheServers() error {
 	// ServerList deterministically maps keys to _index_ of the server list.
 	// Since DNS returns records in different order each time, we sort to
 	// guarantee best possible match between nodes.
-	sort.Strings(servers)
+	slices.Sort(servers)
 	c.numServers.Set(float64(len(servers)))
 	return c.serverList.SetServers(servers...)
 }
