@@ -591,6 +591,9 @@ func (u *BucketStores) getOrCreateStore(userID string) (*store.BucketStore, erro
 		}),
 		store.WithLazyExpandedPostings(u.cfg.BucketStore.LazyExpandedPostingsEnabled),
 		store.WithDontResort(true), // Cortex doesn't need to resort series in store gateway.
+		store.WithLazyDownloadIndexHeaderFunc(func(meta *thanos_metadata.Meta) bool {
+			return meta.MaxTime < time.Now().Add(-7*24*time.Hour).UnixMilli()
+		}),
 	}
 	if u.logLevel.String() == "debug" {
 		bucketStoreOpts = append(bucketStoreOpts, store.WithDebugLogging())

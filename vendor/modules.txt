@@ -909,7 +909,7 @@ github.com/thanos-io/promql-engine/execution/warnings
 github.com/thanos-io/promql-engine/extlabels
 github.com/thanos-io/promql-engine/logicalplan
 github.com/thanos-io/promql-engine/query
-# github.com/thanos-io/thanos v0.32.5-0.20231204192512-28407d61e72d
+# github.com/thanos-io/thanos v0.32.5-0.20231127170340-8ffb9da1383e => github.com/yeya24/thanos v0.2.2-0.20231207010222-c2583ba5c863
 ## explicit; go 1.21
 github.com/thanos-io/thanos/pkg/block
 github.com/thanos-io/thanos/pkg/block/indexheader
@@ -1463,3 +1463,4 @@ sigs.k8s.io/yaml
 # gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0.20210301060133-17f40c25f497
 # github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4.0.0
 # google.golang.org/grpc => google.golang.org/grpc v1.56.3
+# github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20231207010222-c2583ba5c863

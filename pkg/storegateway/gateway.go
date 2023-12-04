@@ -207,7 +207,8 @@ func newStoreGateway(gatewayCfg Config, storageCfg cortex_tsdb.BlocksStorageConf
 		case util.ShardingStrategyDefault:
 			shardingStrategy = NewDefaultShardingStrategy(g.ring, lifecyclerCfg.Addr, logger, allowedTenants)
 		case util.ShardingStrategyShuffle:
-			shardingStrategy = NewShuffleShardingStrategy(g.ring, lifecyclerCfg.ID, lifecyclerCfg.Addr, limits, logger, allowedTenants, g.gatewayCfg.ShardingRing.ZoneStableShuffleSharding)
+			shuffleSharding := NewShuffleShardingStrategy(g.ring, lifecyclerCfg.ID, lifecyclerCfg.Addr, limits, logger, allowedTenants, g.gatewayCfg.ShardingRing.ZoneStableShuffleSharding)
+			shardingStrategy = NewTimeShuffleShardingStrategy(shuffleSharding, logger, 7*24*time.Hour)
 		default:
 			return nil, errInvalidShardingStrategy
 		}

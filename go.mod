@@ -268,3 +268,5 @@ replace github.com/sercand/kuberesolver => github.com/sercand/kuberesolver/v4 v4
 
 // v1.58.2 caused compile error on github.com/sercand/kuberesolver (even on v5.1.1)
 replace google.golang.org/grpc => google.golang.org/grpc v1.56.3
+
+replace github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20231207010222-c2583ba5c863
