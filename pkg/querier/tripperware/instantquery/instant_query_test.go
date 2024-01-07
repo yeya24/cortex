@@ -407,7 +407,7 @@ func TestMergeResponse(t *testing.T) {
 			if tc.cancelBeforeMerge {
 				cancelCtx()
 			}
-			resp, err := InstantQueryCodec.MergeResponse(ctx, tc.req, resps...)
+			resp, err := InstantQueryCodec.MergeResponse(ctx, true, tc.req, resps...)
 			assert.Equal(t, tc.expectedErr, err)
 			if err != nil {
 				cancelCtx()

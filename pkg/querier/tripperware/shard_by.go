@@ -37,6 +37,8 @@ type shardBy struct {
 	analyzer querysharding.Analyzer
 }
 
+type AnalysisKey struct{}
+
 func (s shardBy) Do(ctx context.Context, r Request) (Response, error) {
 	tenantIDs, err := tenant.TenantIDs(ctx)
 	stats := querier_stats.FromContext(ctx)
@@ -52,19 +54,27 @@ func (s shardBy) Do(ctx context.Context, r Request) (Response, error) {
 	}
 
 	logger := util_log.WithContext(ctx, s.logger)
-	analysis, err := s.analyzer.Analyze(r.GetQuery())
-	if err != nil {
-		level.Warn(logger).Log("msg", "error analyzing query", "q", r.GetQuery(), "err", err)
-	}
 
-	stats.AddExtraFields(
-		"shard_by.is_shardable", analysis.IsShardable(),
-		"shard_by.num_shards", numShards,
-		"shard_by.sharding_labels", analysis.ShardingLabels(),
-	)
+	deduplicate := true
+	out := ctx.Value(AnalysisKey{})
+	analysis, ok := out.(querysharding.QueryAnalysis)
+	if !ok {
+		analysis, err = s.analyzer.Analyze(r.GetQuery())
+		if err != nil {
+			level.Warn(logger).Log("msg", "error analyzing query", "q", r.GetQuery(), "err", err)
+		}
 
-	if err != nil || !analysis.IsShardable() {
-		return s.next.Do(ctx, r)
+		stats.AddExtraFields(
+			"shard_by.is_shardable", analysis.IsShardable(),
+			"shard_by.num_shards", numShards,
+			"shard_by.sharding_labels", analysis.ShardingLabels(),
+		)
+
+		if err != nil || !analysis.IsShardable() {
+			return s.next.Do(ctx, r)
+		}
+	} else {
+		deduplicate = false
 	}
 
 	reqs := s.shardQuery(logger, numShards, r, analysis)
@@ -79,7 +89,7 @@ func (s shardBy) Do(ctx context.Context, r Request) (Response, error) {
 		resps = append(resps, reqResp.Response)
 	}
 
-	return s.merger.MergeResponse(ctx, r, resps...)
+	return s.merger.MergeResponse(ctx, deduplicate, r, resps...)
 }
 
 func (s shardBy) shardQuery(l log.Logger, numShards int, r Request, analysis querysharding.QueryAnalysis) []Request {

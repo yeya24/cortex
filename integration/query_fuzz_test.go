@@ -1,6 +1,3 @@
-//go:build integration_query_fuzz
-// +build integration_query_fuzz
-
 package integration
 
 import (
@@ -17,7 +14,9 @@ import (
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
+	"github.com/thanos-io/thanos/pkg/querysharding"
 
 	"github.com/cortexproject/cortex/integration/e2e"
 	e2edb "github.com/cortexproject/cortex/integration/e2e/db"
@@ -64,6 +63,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	cortex1 := e2ecortex.NewSingleBinary("cortex-1", flags1, "")
 	// Enable vertical sharding for the second Cortex instance.
 	flags2 := mergeFlags(flags, map[string]string{
+		"-querier.embed":                      "true",
 		"-frontend.query-vertical-shard-size": "2",
 		"-blocks-storage.filesystem.dir":      path2,
 		"-consul.hostname":                    consul2.NetworkHTTPEndpoint(),
@@ -84,7 +84,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	// Push some series to Cortex.
 	start := now.Add(-time.Minute * 10)
 	end := now.Add(-time.Minute * 1)
-	numSeries := 3
+	numSeries := 5
 	numSamples := 20
 	lbls := make([]labels.Labels, numSeries*2)
 	serieses := make([]prompb.TimeSeries, numSeries*2)
@@ -131,8 +131,8 @@ func TestVerticalShardingFuzz(t *testing.T) {
 
 	rnd := rand.New(rand.NewSource(now.Unix()))
 	opts := []promqlsmith.Option{
-		promqlsmith.WithEnableOffset(true),
-		promqlsmith.WithEnableAtModifier(true),
+		promqlsmith.WithEnableOffset(false),
+		promqlsmith.WithEnableAtModifier(false),
 	}
 	ps := promqlsmith.New(rnd, lbls, opts...)
 
@@ -144,24 +144,27 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	}
 
 	now = time.Now()
-	cases := make([]*testCase, 0, 200)
-	for i := 0; i < 100; i++ {
-		expr := ps.WalkInstantQuery()
-		query := expr.Pretty(0)
-		res1, err1 := c1.Query(query, now)
-		res2, err2 := c2.Query(query, now)
-		cases = append(cases, &testCase{
-			query:        query,
-			res1:         res1,
-			res2:         res2,
-			err1:         err1,
-			err2:         err2,
-			instantQuery: true,
-		})
-	}
+	cases := make([]*testCase, 0, 1000)
+	analyzer := querysharding.NewQueryAnalyzer()
 
-	for i := 0; i < 100; i++ {
-		expr := ps.WalkRangeQuery()
+	for i := 0; i < 1000; i++ {
+		var expr parser.Expr
+		// Let's make sure we generate aggregation expression only as
+		// this is our main target to test.
+		for {
+			expr = ps.WalkRangeQuery()
+			if a, ok := expr.(*parser.AggregateExpr); ok && len(a.Grouping) == 0 && !a.Without {
+				if a.Op == parser.TOPK || a.Op == parser.BOTTOMK {
+					continue
+				}
+				qa, err := analyzer.Analyze(a.Expr.String())
+				require.NoError(t, err)
+				// Let's focus on outer query not shardable but inner query shardable case.
+				if qa.IsShardable() {
+					break
+				}
+			}
+		}
 		query := expr.Pretty(0)
 		res1, err1 := c1.QueryRange(query, start, end, scrapeInterval)
 		res2, err2 := c2.QueryRange(query, start, end, scrapeInterval)
@@ -186,7 +189,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 				t.Logf("case %d error mismatch.\n%s: %s\nerr1: %v\nerr2: %v\n", i, qt, tc.query, tc.err1, tc.err2)
 				failures++
 			}
-		} else if !sameModelValue(tc.res1, tc.res2) {
+		} else if !cmp.Equal(tc.res1, tc.res2, comparer) {
 			t.Logf("case %d results mismatch.\n%s: %s\nres1: %s\nres2: %s\n", i, qt, tc.query, tc.res1.String(), tc.res2.String())
 			failures++
 		}
@@ -196,37 +199,88 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	}
 }
 
-func sameModelValue(a model.Value, b model.Value) bool {
-	if a.Type() != b.Type() {
+// comparer should be used to compare promql results between engines.
+var comparer = cmp.Comparer(func(x, y model.Value) bool {
+	if x.Type() != y.Type() {
 		return false
 	}
-	// We allow a margin for comparing floats.
-	opts := []cmp.Option{cmpopts.EquateNaNs(), cmpopts.EquateApprox(0, 1e-6)}
-	switch a.Type() {
-	case model.ValMatrix:
-		s1, _ := a.(model.Matrix)
-		s2, _ := b.(model.Matrix)
-		// Sort to make sure we are not affected by series order.
-		sort.Sort(s1)
-		sort.Sort(s2)
-		return cmp.Equal(s1, s2, opts...)
-	case model.ValVector:
-		s1, _ := a.(model.Vector)
-		s2, _ := b.(model.Vector)
-		// Sort to make sure we are not affected by series order.
-		sort.Sort(s1)
-		sort.Sort(s2)
-		return cmp.Equal(s1, s2, opts...)
-	case model.ValScalar:
-		s1, _ := a.(*model.Scalar)
-		s2, _ := b.(*model.Scalar)
-		return cmp.Equal(s1, s2, opts...)
-	case model.ValString:
-		s1, _ := a.(*model.String)
-		s2, _ := b.(*model.String)
-		return cmp.Equal(s1, s2, opts...)
-	default:
-		// model.ValNone is impossible.
-		return false
+	compareFloats := func(l, r float64) bool {
+		const epsilon = 1e-6
+		return cmp.Equal(l, r, cmpopts.EquateNaNs(), cmpopts.EquateApprox(0, epsilon))
 	}
-}
+	compareMetrics := func(l, r model.Metric) bool {
+		return l.Equal(r)
+	}
+
+	vx, xvec := x.(model.Vector)
+	vy, yvec := y.(model.Vector)
+
+	if xvec && yvec {
+		if len(vx) != len(vy) {
+			return false
+		}
+
+		// Sort vector before comparing.
+		sort.Sort(vx)
+		sort.Sort(vy)
+
+		for i := 0; i < len(vx); i++ {
+			if !compareMetrics(vx[i].Metric, vy[i].Metric) {
+				return false
+			}
+			if vx[i].Timestamp != vy[i].Timestamp {
+				return false
+			}
+			if !compareFloats(float64(vx[i].Value), float64(vy[i].Value)) {
+				return false
+			}
+		}
+		return true
+	}
+
+	mx, xmat := x.(model.Matrix)
+	my, ymat := y.(model.Matrix)
+
+	if xmat && ymat {
+		if len(mx) != len(my) {
+			return false
+		}
+		// Sort matrix before comparing.
+		sort.Sort(mx)
+		sort.Sort(my)
+		for i := 0; i < len(mx); i++ {
+			mxs := mx[i]
+			mys := my[i]
+
+			if !compareMetrics(mxs.Metric, mys.Metric) {
+				return false
+			}
+
+			xps := mxs.Values
+			yps := mys.Values
+
+			if len(xps) != len(yps) {
+				return false
+			}
+			for j := 0; j < len(xps); j++ {
+				if xps[j].Timestamp != yps[j].Timestamp {
+					return false
+				}
+				if !compareFloats(float64(xps[j].Value), float64(yps[j].Value)) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+
+	sx, xscalar := x.(*model.Scalar)
+	sy, yscalar := y.(*model.Scalar)
+	if xscalar && yscalar {
+		if sx.Timestamp != sy.Timestamp {
+			return false
+		}
+		return compareFloats(float64(sx.Value), float64(sy.Value))
+	}
+	return false
+})
