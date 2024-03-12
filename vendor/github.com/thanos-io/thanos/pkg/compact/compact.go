@@ -807,14 +807,14 @@ type CompactionLifecycleCallback interface {
 type DefaultCompactionLifecycleCallback struct {
 }
 
-func (c DefaultCompactionLifecycleCallback) PreCompactionCallback(_ context.Context, _ log.Logger, _ *Group, toCompactBlocks []*metadata.Meta) error {
+func (c DefaultCompactionLifecycleCallback) PreCompactionCallback(_ context.Context, l log.Logger, _ *Group, toCompactBlocks []*metadata.Meta) error {
 	// Due to #183 we verify that none of the blocks in the plan have overlapping sources.
 	// This is one potential source of how we could end up with duplicated chunks.
 	uniqueSources := map[ulid.ULID]struct{}{}
 	for _, m := range toCompactBlocks {
 		for _, s := range m.Compaction.Sources {
 			if _, ok := uniqueSources[s]; ok {
-				return halt(errors.Errorf("overlapping sources detected for plan %v", toCompactBlocks))
+			        level.Error(l).Log("msg", "overlapping sources detected for plan", "duplicated_block", s, "to compact blocks", fmt.Sprintf("%v", toCompactBlocks))
 			}
 			uniqueSources[s] = struct{}{}
 		}
