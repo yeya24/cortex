@@ -3,7 +3,6 @@ package cortexpb
 import (
 	stdjson "encoding/json"
 	"fmt"
-	"github.com/prometheus/prometheus/model/histogram"
 	"math"
 	"sort"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 
 	"github.com/cortexproject/cortex/pkg/util"

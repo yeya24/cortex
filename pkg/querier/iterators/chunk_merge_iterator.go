@@ -2,9 +2,9 @@ package iterators
 
 import (
 	"container/heap"
-	"github.com/pkg/errors"
 	"sort"
 
+	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
