@@ -1403,8 +1403,8 @@ github.com/thanos-io/objstore v0.0.0-20240128223450-bdadaefbfe03 h1:VEu81Atmor2R
 github.com/thanos-io/objstore v0.0.0-20240128223450-bdadaefbfe03/go.mod h1:RMvJQnpB4QQiYGg1gF8mnPJg6IkIPY28Buh8f6b+F0c=
 github.com/thanos-io/promql-engine v0.0.0-20240125175542-4a8e9731acba h1:BFohBPqCWBpbqNO3F3lC2uZ0egSfPGQoSDloTRraPHU=
 github.com/thanos-io/promql-engine v0.0.0-20240125175542-4a8e9731acba/go.mod h1:YGk7VqhYDfhUyZjWK7ZU1JmBQKSvr5mT5Txut8oK1MA=
-github.com/thanos-io/thanos v0.34.2-0.20240226184600-e7cd6c1c60fb h1:/kpKf+GpBGcA0/+HmBF2VCDJuQYDJaml7JV1/YtDA/U=
-github.com/thanos-io/thanos v0.34.2-0.20240226184600-e7cd6c1c60fb/go.mod h1:bcqHW+37C8GTiwokbUNHClNIS0qb5R4qXfNSvNCGHFU=
+github.com/thanos-io/thanos v0.34.2-0.20240314081355-f731719f9515 h1:ua9li61Ke2KuN88BWuZN6UKuJSNM1xa6JW2PdQEnozA=
+github.com/thanos-io/thanos v0.34.2-0.20240314081355-f731719f9515/go.mod h1:bXHn+l9BZHRRz+pcUnRSNNg5FyWEkbofxmNgXM+A5J4=
 github.com/tv42/httpunix v0.0.0-20150427012821-b75d8614f926/go.mod h1:9ESjWnEqriFuLhtthL60Sar/7RFoluCcXsuvEwTV5KM=
 github.com/uber/jaeger-client-go v2.28.0+incompatible/go.mod h1:WVhlPFC8FDjOFMMWRy2pZqQJSXxYSwNYOkTr/Z6d3Kk=
 github.com/uber/jaeger-client-go v2.30.0+incompatible h1:D6wyKGCecFaSRUpo8lCVbaOOb6ThwMmTEbhRwtKR97o=
@@ -2200,8 +2200,8 @@ google.golang.org/protobuf v1.27.1/go.mod h1:9q0QmTI4eRPtz6boOQmLYwt+qCgq0jsYwAQ
 google.golang.org/protobuf v1.28.0/go.mod h1:HV8QOd/L58Z+nl8r43ehVNZIU/HEI6OcFqwMG9pJV4I=
 google.golang.org/protobuf v1.28.1/go.mod h1:HV8QOd/L58Z+nl8r43ehVNZIU/HEI6OcFqwMG9pJV4I=
 google.golang.org/protobuf v1.30.0/go.mod h1:HV8QOd/L58Z+nl8r43ehVNZIU/HEI6OcFqwMG9pJV4I=
-google.golang.org/protobuf v1.32.0 h1:pPC6BG5ex8PDFnkbrGU3EixyhKcQ2aDuBS36lqK/C7I=
-google.golang.org/protobuf v1.32.0/go.mod h1:c6P6GXX6sHbq/GpV6MGZEdwhWPcYBgnhAHhKbcUYpos=
+google.golang.org/protobuf v1.33.0 h1:uNO2rsAINq/JlFpSdYEKIZ0uKD/R9cpdv0T+yoGwGmI=
+google.golang.org/protobuf v1.33.0/go.mod h1:c6P6GXX6sHbq/GpV6MGZEdwhWPcYBgnhAHhKbcUYpos=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
