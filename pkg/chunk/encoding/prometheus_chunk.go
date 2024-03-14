@@ -265,12 +265,12 @@ func (p *prometheusChunkIterator) Value() model.SamplePair {
 	}
 }
 
-func (p *prometheusChunkIterator) AtHistogram() (int64, *histogram.Histogram) {
-	return p.it.AtHistogram()
+func (p *prometheusChunkIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
+	return p.it.AtHistogram(h)
 }
 
-func (p *prometheusChunkIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
-	return p.it.AtFloatHistogram()
+func (p *prometheusChunkIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	return p.it.AtFloatHistogram(h)
 }
 
 func (p *prometheusChunkIterator) Batch(size int, valType chunkenc.ValueType) Batch {
@@ -334,10 +334,14 @@ func (p *prometheusFloatHistogramChunk) Equals(chunk Chunk) (bool, error) {
 
 type errorIterator string
 
-func (e errorIterator) Scan() chunkenc.ValueType                             { return chunkenc.ValNone }
-func (e errorIterator) FindAtOrAfter(time model.Time) chunkenc.ValueType     { return chunkenc.ValNone }
-func (e errorIterator) Value() model.SamplePair                              { panic("no values") }
-func (e errorIterator) AtHistogram() (int64, *histogram.Histogram)           { panic("no values") }
-func (e errorIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) { panic("no values") }
-func (e errorIterator) Batch(size int, valType chunkenc.ValueType) Batch     { panic("no values") }
-func (e errorIterator) Err() error                                           { return errors.New(string(e)) }
+func (e errorIterator) Scan() chunkenc.ValueType                         { return chunkenc.ValNone }
+func (e errorIterator) FindAtOrAfter(time model.Time) chunkenc.ValueType { return chunkenc.ValNone }
+func (e errorIterator) Value() model.SamplePair                          { panic("no values") }
+func (e errorIterator) AtHistogram(_ *histogram.Histogram) (int64, *histogram.Histogram) {
+	panic("no values")
+}
+func (e errorIterator) AtFloatHistogram(_ *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	panic("no values")
+}
+func (e errorIterator) Batch(size int, valType chunkenc.ValueType) Batch { panic("no values") }
+func (e errorIterator) Err() error                                       { return errors.New(string(e)) }

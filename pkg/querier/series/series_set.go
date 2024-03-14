@@ -121,11 +121,11 @@ func (c *concreteSeriesIterator) At() (t int64, v float64) {
 	return int64(s.Timestamp), float64(s.Value)
 }
 
-func (concreteSeriesIterator) AtHistogram() (int64, *histogram.Histogram) {
+func (concreteSeriesIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
 	return 0, nil
 }
 
-func (concreteSeriesIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
+func (concreteSeriesIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return 0, nil
 }
 
@@ -166,11 +166,11 @@ func (errIterator) At() (t int64, v float64) {
 	return 0, 0
 }
 
-func (errIterator) AtHistogram() (int64, *histogram.Histogram) {
+func (errIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
 	return 0, nil
 }
 
-func (errIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
+func (errIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	return 0, nil
 }
 

@@ -75,8 +75,8 @@ type Iterator interface {
 	// of the find... methods). It returns model.ZeroSamplePair before any of
 	// those methods were called.
 	Value() model.SamplePair
-	AtHistogram() (int64, *histogram.Histogram)
-	AtFloatHistogram() (int64, *histogram.FloatHistogram)
+	AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram)
+	AtFloatHistogram(floatHistogram *histogram.FloatHistogram) (int64, *histogram.FloatHistogram)
 	// Returns a batch of the provisded size; NB not idempotent!  Should only be called
 	// once per Scan.
 	Batch(size int, valType chunkenc.ValueType) Batch

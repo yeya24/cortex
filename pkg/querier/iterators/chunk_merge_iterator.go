@@ -145,11 +145,11 @@ func (c *chunkMergeIterator) At() (t int64, v float64) {
 	return c.currTime, c.currValue
 }
 
-func (c *chunkMergeIterator) AtHistogram() (t int64, v *histogram.Histogram) {
+func (c *chunkMergeIterator) AtHistogram(h *histogram.Histogram) (t int64, v *histogram.Histogram) {
 	return c.currTime, c.currHistogram
 }
 
-func (c *chunkMergeIterator) AtFloatHistogram() (t int64, v *histogram.FloatHistogram) {
+func (c *chunkMergeIterator) AtFloatHistogram(h *histogram.FloatHistogram) (t int64, v *histogram.FloatHistogram) {
 	return c.currTime, c.currFloatHistogram
 }
 
@@ -237,13 +237,13 @@ func (it *nonOverlappingIterator) Err() error {
 }
 
 // AtHistogram implements chunkenc.Iterator.
-func (it *nonOverlappingIterator) AtHistogram() (int64, *histogram.Histogram) {
-	return it.chunks[it.curr].AtHistogram()
+func (it *nonOverlappingIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
+	return it.chunks[it.curr].AtHistogram(h)
 }
 
 // AtFloatHistogram implements chunkenc.Iterator.
-func (it *nonOverlappingIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
-	return it.chunks[it.curr].AtFloatHistogram()
+func (it *nonOverlappingIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	return it.chunks[it.curr].AtFloatHistogram(h)
 }
 
 // AtT implements chunkenc.Iterator.

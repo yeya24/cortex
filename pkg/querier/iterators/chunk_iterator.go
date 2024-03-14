@@ -58,7 +58,7 @@ func (i *chunkIterator) At() (int64, float64) {
 	return i.cachedTime, i.cachedValue
 }
 
-func (i *chunkIterator) AtHistogram() (int64, *histogram.Histogram) {
+func (i *chunkIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
 	if i.cacheValid {
 		return i.cachedTime, i.cachedHistogram
 	}
@@ -69,7 +69,7 @@ func (i *chunkIterator) AtHistogram() (int64, *histogram.Histogram) {
 	return i.cachedTime, i.cachedHistogram
 }
 
-func (i *chunkIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
+func (i *chunkIterator) AtFloatHistogram(f *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
 	if i.cacheValid {
 		return i.cachedTime, i.cachedFloatHistogram
 	}
