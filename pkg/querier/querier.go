@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 	v1 "github.com/prometheus/prometheus/web/api/v1"
 	"github.com/thanos-io/promql-engine/engine"
@@ -26,7 +27,6 @@ import (
 
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/ingester/client"
-	"github.com/cortexproject/cortex/pkg/querier/batch"
 	"github.com/cortexproject/cortex/pkg/querier/lazyquery"
 	seriesset "github.com/cortexproject/cortex/pkg/querier/series"
 	querier_stats "github.com/cortexproject/cortex/pkg/querier/stats"
@@ -150,15 +150,9 @@ func (cfg *Config) GetStoreGatewayAddresses() []string {
 	return strings.Split(cfg.StoreGatewayAddresses, ",")
 }
 
-func getChunksIteratorFunction(cfg Config) chunkIteratorFunc {
-	return batch.NewChunkMergeIterator
-}
-
 // New builds a queryable and promql engine.
 func New(cfg Config, limits *validation.Overrides, distributor Distributor, stores []QueryableWithFilter, reg prometheus.Registerer, logger log.Logger) (storage.SampleAndChunkQueryable, storage.ExemplarQueryable, v1.QueryEngine) {
-	iteratorFunc := getChunksIteratorFunction(cfg)
-
-	distributorQueryable := newDistributorQueryable(distributor, cfg.IngesterStreaming, cfg.IngesterMetadataStreaming, iteratorFunc, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
+	distributorQueryable := newDistributorQueryable(distributor, cfg.IngesterStreaming, cfg.IngesterMetadataStreaming, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
 
 	ns := make([]QueryableWithFilter, len(stores))
 	for ix, s := range stores {
@@ -167,7 +161,7 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 			QueryStoreAfter:     cfg.QueryStoreAfter,
 		}
 	}
-	queryable := NewQueryable(distributorQueryable, ns, iteratorFunc, cfg, limits)
+	queryable := NewQueryable(distributorQueryable, ns, cfg, limits)
 	exemplarQueryable := newDistributorExemplarQueryable(distributor)
 
 	lazyQueryable := storage.QueryableFunc(func(mint int64, maxt int64) (storage.Querier, error) {
@@ -251,13 +245,12 @@ type limiterHolder struct {
 }
 
 // NewQueryable creates a new Queryable for cortex.
-func NewQueryable(distributor QueryableWithFilter, stores []QueryableWithFilter, chunkIterFn chunkIteratorFunc, cfg Config, limits *validation.Overrides) storage.Queryable {
+func NewQueryable(distributor QueryableWithFilter, stores []QueryableWithFilter, cfg Config, limits *validation.Overrides) storage.Queryable {
 	return storage.QueryableFunc(func(mint, maxt int64) (storage.Querier, error) {
 		q := querier{
 			now:                  time.Now(),
 			mint:                 mint,
 			maxt:                 maxt,
-			chunkIterFn:          chunkIterFn,
 			limits:               limits,
 			maxQueryIntoFuture:   cfg.MaxQueryIntoFuture,
 			queryStoreForLabels:  cfg.QueryStoreForLabels,
@@ -272,9 +265,8 @@ func NewQueryable(distributor QueryableWithFilter, stores []QueryableWithFilter,
 }
 
 type querier struct {
-	chunkIterFn chunkIteratorFunc
-	now         time.Time
-	mint, maxt  int64
+	now        time.Time
+	mint, maxt int64
 
 	limits              *validation.Overrides
 	maxQueryIntoFuture  time.Duration
@@ -427,10 +419,7 @@ func (q querier) Select(ctx context.Context, sortSeries bool, sp *storage.Select
 		}
 	}
 
-	// we have all the sets from different sources (chunk from store, chunks from ingesters,
-	// time series from store and time series from ingesters).
-	// mergeSeriesSets will return sorted set.
-	return q.mergeSeriesSets(result)
+	return storage.NewMergeSeriesSet(result, storage.ChainedSeriesMerge)
 }
 
 // LabelValues implements storage.Querier.
@@ -546,74 +535,6 @@ func (querier) Close() error {
 	return nil
 }
 
-func (q querier) mergeSeriesSets(sets []storage.SeriesSet) storage.SeriesSet {
-	// Here we deal with sets that are based on chunks and build single set from them.
-	// Remaining sets are merged with chunks-based one using storage.NewMergeSeriesSet
-
-	otherSets := []storage.SeriesSet(nil)
-	chunks := []chunk.Chunk(nil)
-
-	for _, set := range sets {
-		nonChunkSeries := []storage.Series(nil)
-
-		// SeriesSet may have some series backed up by chunks, and some not.
-		for set.Next() {
-			s := set.At()
-
-			if sc, ok := s.(SeriesWithChunks); ok {
-				chunks = append(chunks, sc.Chunks()...)
-			} else {
-				nonChunkSeries = append(nonChunkSeries, s)
-			}
-		}
-
-		if err := set.Err(); err != nil {
-			otherSets = append(otherSets, storage.ErrSeriesSet(err))
-		} else if len(nonChunkSeries) > 0 {
-			otherSets = append(otherSets, &sliceSeriesSet{series: nonChunkSeries, ix: -1})
-		}
-	}
-
-	if len(chunks) == 0 {
-		return storage.NewMergeSeriesSet(otherSets, storage.ChainedSeriesMerge)
-	}
-
-	// partitionChunks returns set with sorted series, so it can be used by NewMergeSeriesSet
-	chunksSet := partitionChunks(chunks, q.mint, q.maxt, q.chunkIterFn)
-
-	if len(otherSets) == 0 {
-		return chunksSet
-	}
-
-	otherSets = append(otherSets, chunksSet)
-	return storage.NewMergeSeriesSet(otherSets, storage.ChainedSeriesMerge)
-}
-
-type sliceSeriesSet struct {
-	series []storage.Series
-	ix     int
-}
-
-func (s *sliceSeriesSet) Next() bool {
-	s.ix++
-	return s.ix < len(s.series)
-}
-
-func (s *sliceSeriesSet) At() storage.Series {
-	if s.ix < 0 || s.ix >= len(s.series) {
-		return nil
-	}
-	return s.series[s.ix]
-}
-
-func (s *sliceSeriesSet) Err() error {
-	return nil
-}
-
-func (s *sliceSeriesSet) Warnings() annotations.Annotations {
-	return nil
-}
-
 type storeQueryable struct {
 	QueryableWithFilter
 	QueryStoreAfter time.Duration
@@ -711,7 +632,8 @@ func validateQueryTimeRange(ctx context.Context, userID string, startMs, endMs i
 }
 
 // Series in the returned set are sorted alphabetically by labels.
-func partitionChunks(chunks []chunk.Chunk, mint, maxt int64, iteratorFunc chunkIteratorFunc) storage.SeriesSet {
+// Only used in tests now.
+func partitionChunks(chunks []chunk.Chunk) storage.SeriesSet {
 	chunksBySeries := map[string][]chunk.Chunk{}
 	for _, c := range chunks {
 		key := client.LabelsToKeyString(c.Metric)
@@ -720,12 +642,15 @@ func partitionChunks(chunks []chunk.Chunk, mint, maxt int64, iteratorFunc chunkI
 
 	series := make([]storage.Series, 0, len(chunksBySeries))
 	for i := range chunksBySeries {
-		series = append(series, &chunkSeries{
-			labels:            chunksBySeries[i][0].Metric,
-			chunks:            chunksBySeries[i],
-			chunkIteratorFunc: iteratorFunc,
-			mint:              mint,
-			maxt:              maxt,
+		series = append(series, &storage.SeriesEntry{
+			Lset: chunksBySeries[i][0].Metric,
+			SampleIteratorFn: func(iterator chunkenc.Iterator) chunkenc.Iterator {
+				iterables := make([]chunkenc.Iterable, len(chunks))
+				for j, c := range chunksBySeries[i] {
+					iterables[j] = c.Data.SampleIterable()
+				}
+				return storage.ChainSampleIteratorFromIterables(iterator, iterables)
+			},
 		})
 	}
 
