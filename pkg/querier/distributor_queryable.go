@@ -144,17 +144,7 @@ func (q *distributorQuerier) Select(ctx context.Context, sortSeries bool, sp *st
 		return series.MetricsToSeriesSet(sortSeries, ms)
 	}
 
-	if q.streaming {
-		return q.streamingSelect(ctx, sortSeries, minT, maxT, matchers)
-	}
-
-	matrix, err := q.distributor.Query(ctx, model.Time(minT), model.Time(maxT), matchers...)
-	if err != nil {
-		return storage.ErrSeriesSet(err)
-	}
-
-	// Using MatrixToSeriesSet (and in turn NewConcreteSeriesSet), sorts the series.
-	return series.MatrixToSeriesSet(sortSeries, matrix)
+	return q.streamingSelect(ctx, sortSeries, minT, maxT, matchers)
 }
 
 func (q *distributorQuerier) streamingSelect(ctx context.Context, sortSeries bool, minT, maxT int64, matchers []*labels.Matcher) storage.SeriesSet {

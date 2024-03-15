@@ -27,7 +27,6 @@ import (
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/ingester/client"
 	"github.com/cortexproject/cortex/pkg/querier/batch"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 	"github.com/cortexproject/cortex/pkg/querier/lazyquery"
 	seriesset "github.com/cortexproject/cortex/pkg/querier/series"
 	querier_stats "github.com/cortexproject/cortex/pkg/querier/stats"
@@ -152,12 +151,7 @@ func (cfg *Config) GetStoreGatewayAddresses() []string {
 }
 
 func getChunksIteratorFunction(cfg Config) chunkIteratorFunc {
-	if cfg.BatchIterators {
-		return batch.NewChunkMergeIterator
-	} else if cfg.Iterators {
-		return iterators.NewChunkMergeIterator
-	}
-	return mergeChunks
+	return batch.NewChunkMergeIterator
 }
 
 // New builds a queryable and promql engine.

@@ -17,6 +17,7 @@
 package series
 
 import (
+	"math"
 	"sort"
 
 	"github.com/prometheus/common/model"
@@ -26,7 +27,6 @@ import (
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 
-	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 )
 
@@ -73,11 +73,11 @@ func (c *ConcreteSeriesSet) Warnings() annotations.Annotations {
 type ConcreteSeries struct {
 	labels     labels.Labels
 	samples    []model.SamplePair
-	histograms []cortexpb.Histogram
+	histograms []model.SampleHistogramPair
 }
 
 // NewConcreteSeries instantiates an in memory series from a list of samples & labels
-func NewConcreteSeries(ls labels.Labels, samples []model.SamplePair, histograms []cortexpb.Histogram) *ConcreteSeries {
+func NewConcreteSeries(ls labels.Labels, samples []model.SamplePair, histograms []model.SampleHistogramPair) *ConcreteSeries {
 	return &ConcreteSeries{
 		labels:     ls,
 		samples:    samples,
@@ -113,7 +113,10 @@ func (c *concreteSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	c.cur = sort.Search(len(c.series.samples), func(n int) bool {
 		return c.series.samples[n].Timestamp >= model.Time(t)
 	})
-	return c.cur < len(c.series.samples)
+	if c.cur >= len(c.series.samples) {
+		return chunkenc.ValNone
+	}
+	return chunkenc.ValFloat
 }
 
 func (c *concreteSeriesIterator) At() (t int64, v float64) {
@@ -129,10 +132,13 @@ func (concreteSeriesIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int
 	return 0, nil
 }
 
-func (concreteSeriesIterator) AtT() int64 {
-	return 0
+func (c concreteSeriesIterator) AtT() int64 {
+	return int64(c.series.samples[c.cur].Timestamp)
 }
 
+const noTS = int64(math.MaxInt64)
+
+// Next implements chunkenc.Iterator.
 func (c *concreteSeriesIterator) Next() chunkenc.ValueType {
 	c.cur++
 	if c.cur < len(c.series.samples) {
@@ -188,8 +194,9 @@ func MatrixToSeriesSet(sortSeries bool, m model.Matrix) storage.SeriesSet {
 	series := make([]storage.Series, 0, len(m))
 	for _, ss := range m {
 		series = append(series, &ConcreteSeries{
-			labels:  metricToLabels(ss.Metric),
-			samples: ss.Values,
+			labels:     metricToLabels(ss.Metric),
+			samples:    ss.Values,
+			histograms: ss.Histograms,
 		})
 	}
 	return NewConcreteSeriesSet(sortSeries, series)
@@ -200,8 +207,7 @@ func MetricsToSeriesSet(sortSeries bool, ms []metric.Metric) storage.SeriesSet {
 	series := make([]storage.Series, 0, len(ms))
 	for _, m := range ms {
 		series = append(series, &ConcreteSeries{
-			labels:  metricToLabels(m.Metric),
-			samples: nil,
+			labels: metricToLabels(m.Metric),
 		})
 	}
 	return NewConcreteSeriesSet(sortSeries, series)

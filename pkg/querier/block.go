@@ -1,6 +1,7 @@
 package querier
 
 import (
+	"github.com/prometheus/prometheus/model/histogram"
 	"math"
 	"sort"
 
@@ -110,26 +111,43 @@ func (bqs *blockQuerierSeries) Iterator(chunkenc.Iterator) chunkenc.Iterator {
 		return series.NewErrIterator(errors.New("no chunks"))
 	}
 
-	its := make([]chunkenc.Iterator, 0, len(bqs.chunks))
+	its := make([]iteratorWithMaxT, 0, len(bqs.chunks))
 
 	for _, c := range bqs.chunks {
 		// Ignore if the current chunk is not XOR chunk.
 		if c.Raw == nil {
 			continue
 		}
-		ch, err := chunkenc.FromData(chunkenc.EncXOR, c.Raw.Data)
-		if err != nil {
-			return series.NewErrIterator(errors.Wrapf(err, "failed to initialize chunk from XOR encoded raw data (series: %v min time: %d max time: %d)", bqs.Labels(), c.MinTime, c.MaxTime))
+		var (
+			ch  chunkenc.Chunk
+			err error
+		)
+		switch c.Raw.Type {
+		case storepb.Chunk_XOR:
+			ch, err = chunkenc.FromData(chunkenc.EncXOR, c.Raw.Data)
+			if err != nil {
+				return series.NewErrIterator(errors.Wrapf(err, "failed to initialize chunk from XOR encoded raw data (series: %v min time: %d max time: %d)", bqs.Labels(), c.MinTime, c.MaxTime))
+			}
+		case storepb.Chunk_HISTOGRAM:
+			ch, err = chunkenc.FromData(chunkenc.EncHistogram, c.Raw.Data)
+			if err != nil {
+				return series.NewErrIterator(errors.Wrapf(err, "failed to initialize chunk from Histogram encoded raw data (series: %v min time: %d max time: %d)", bqs.Labels(), c.MinTime, c.MaxTime))
+			}
+		case storepb.Chunk_FLOAT_HISTOGRAM:
+			ch, err = chunkenc.FromData(chunkenc.EncFloatHistogram, c.Raw.Data)
+			if err != nil {
+				return series.NewErrIterator(errors.Wrapf(err, "failed to initialize chunk from FloatHistogram encoded raw data (series: %v min time: %d max time: %d)", bqs.Labels(), c.MinTime, c.MaxTime))
+			}
 		}
 
 		it := ch.Iterator(nil)
-		its = append(its, it)
+		its = append(its, iteratorWithMaxT{Iterator: it, maxT: c.MaxTime})
 	}
 
 	return newBlockQuerierSeriesIterator(bqs.Labels(), its)
 }
 
-func newBlockQuerierSeriesIterator(labels labels.Labels, its []chunkenc.Iterator) *blockQuerierSeriesIterator {
+func newBlockQuerierSeriesIterator(labels labels.Labels, its []iteratorWithMaxT) *blockQuerierSeriesIterator {
 	return &blockQuerierSeriesIterator{labels: labels, iterators: its, lastT: math.MinInt64}
 }
 
@@ -139,24 +157,32 @@ type blockQuerierSeriesIterator struct {
 	// only used for error reporting
 	labels labels.Labels
 
-	iterators []chunkenc.Iterator
+	iterators []iteratorWithMaxT
 	i         int
 	lastT     int64
 }
 
-func (it *blockQuerierSeriesIterator) Seek(t int64) bool {
+type iteratorWithMaxT struct {
+	chunkenc.Iterator
+	maxT int64
+}
+
+func (it *blockQuerierSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	// We generally expect the chunks already to be cut down
 	// to the range we are interested in. There's not much to be gained from
 	// hopping across chunks so we just call next until we reach t.
-	for {
-		ct, _ := it.At()
-		if ct >= t {
-			return true
-		}
-		if !it.Next() {
-			return false
+	for ; it.i < len(it.iterators); it.i++ {
+		if it.iterators[it.i].maxT >= t {
+			for valType := it.Next(); valType != chunkenc.ValNone; {
+				ct, _ := it.At()
+				if ct >= t {
+					return valType
+				}
+				valType = it.Next()
+			}
 		}
 	}
+	return chunkenc.ValNone
 }
 
 func (it *blockQuerierSeriesIterator) At() (int64, float64) {
@@ -169,30 +195,54 @@ func (it *blockQuerierSeriesIterator) At() (int64, float64) {
 	return t, v
 }
 
-func (it *blockQuerierSeriesIterator) Next() bool {
+func (it *blockQuerierSeriesIterator) AtT() int64 {
+	return it.lastT
+}
+
+func (it *blockQuerierSeriesIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
 	if it.i >= len(it.iterators) {
-		return false
+		return 0, nil
 	}
 
-	if it.iterators[it.i].Next() != chunkenc.ValNone {
-		return true
+	t, h := it.iterators[it.i].AtHistogram(h)
+	it.lastT = t
+	return t, h
+}
+
+func (it *blockQuerierSeriesIterator) AtFloatHistogram(fh *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	if it.i >= len(it.iterators) {
+		return 0, nil
+	}
+
+	t, fh := it.iterators[it.i].AtFloatHistogram(fh)
+	it.lastT = t
+	return t, fh
+}
+
+func (it *blockQuerierSeriesIterator) Next() chunkenc.ValueType {
+	if it.i >= len(it.iterators) {
+		return chunkenc.ValNone
+	}
+
+	if valueType := it.iterators[it.i].Next(); valueType != chunkenc.ValNone {
+		return valueType
 	}
 	if it.iterators[it.i].Err() != nil {
-		return false
+		return chunkenc.ValNone
 	}
 
 	for {
 		it.i++
 
 		if it.i >= len(it.iterators) {
-			return false
+			return chunkenc.ValNone
 		}
 
 		// we must advance iterator first, to see if it has any samples.
 		// Seek will call At() as its first operation.
 		if it.iterators[it.i].Next() == chunkenc.ValNone {
 			if it.iterators[it.i].Err() != nil {
-				return false
+				return chunkenc.ValNone
 			}
 
 			// Found empty iterator without error, skip it.
