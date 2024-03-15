@@ -98,7 +98,7 @@ type concreteSeriesIterator struct {
 	series *ConcreteSeries
 }
 
-// NewConcreteSeriesIterator instaniates an in memory chunkenc.Iterator
+// NewConcreteSeriesIterator instantiates an in memory chunkenc.Iterator
 func NewConcreteSeriesIterator(series *ConcreteSeries) chunkenc.Iterator {
 	return iterators.NewCompatibleChunksIterator(&concreteSeriesIterator{
 		cur:    -1,

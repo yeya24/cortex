@@ -17,6 +17,7 @@
 package encoding
 
 import (
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"io"
 
 	"github.com/prometheus/common/model"
@@ -41,6 +42,7 @@ type Chunk interface {
 	// The iterator passed as argument is for reuse. Depending on implementation,
 	// the iterator can be re-used or a new iterator can be allocated.
 	NewIterator(Iterator) Iterator
+	SampleIterable() chunkenc.Iterable
 	Marshal(io.Writer) error
 	UnmarshalFromBuf([]byte) error
 	Encoding() Encoding

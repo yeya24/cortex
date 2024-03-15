@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/scrape"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 
 	"github.com/cortexproject/cortex/pkg/cortexpb"
@@ -38,12 +39,11 @@ type Distributor interface {
 	MetricsMetadata(ctx context.Context) ([]scrape.MetricMetadata, error)
 }
 
-func newDistributorQueryable(distributor Distributor, streaming bool, streamingMetdata bool, iteratorFn chunkIteratorFunc, queryIngestersWithin time.Duration, queryStoreForLabels bool) QueryableWithFilter {
+func newDistributorQueryable(distributor Distributor, streaming bool, streamingMetdata bool, queryIngestersWithin time.Duration, queryStoreForLabels bool) QueryableWithFilter {
 	return distributorQueryable{
 		distributor:          distributor,
 		streaming:            streaming,
 		streamingMetdata:     streamingMetdata,
-		iteratorFn:           iteratorFn,
 		queryIngestersWithin: queryIngestersWithin,
 		queryStoreForLabels:  queryStoreForLabels,
 	}
@@ -53,7 +53,6 @@ type distributorQueryable struct {
 	distributor          Distributor
 	streaming            bool
 	streamingMetdata     bool
-	iteratorFn           chunkIteratorFunc
 	queryIngestersWithin time.Duration
 	queryStoreForLabels  bool
 }
@@ -65,7 +64,6 @@ func (d distributorQueryable) Querier(mint, maxt int64) (storage.Querier, error)
 		maxt:                 maxt,
 		streaming:            d.streaming,
 		streamingMetadata:    d.streamingMetdata,
-		chunkIterFn:          d.iteratorFn,
 		queryIngestersWithin: d.queryIngestersWithin,
 		queryStoreForLabels:  d.queryStoreForLabels,
 	}, nil
@@ -81,7 +79,6 @@ type distributorQuerier struct {
 	mint, maxt           int64
 	streaming            bool
 	streamingMetadata    bool
-	chunkIterFn          chunkIteratorFunc
 	queryIngestersWithin time.Duration
 	queryStoreForLabels  bool
 }
@@ -184,12 +181,15 @@ func (q *distributorQuerier) streamingSelect(ctx context.Context, sortSeries boo
 			return storage.ErrSeriesSet(err)
 		}
 
-		serieses = append(serieses, &chunkSeries{
-			labels:            ls,
-			chunks:            chunks,
-			chunkIteratorFunc: q.chunkIterFn,
-			mint:              minT,
-			maxt:              maxT,
+		iterables := make([]chunkenc.Iterable, len(chunks))
+		serieses = append(serieses, &storage.SeriesEntry{
+			Lset: ls,
+			SampleIteratorFn: func(iterator chunkenc.Iterator) chunkenc.Iterator {
+				for i, c := range chunks {
+					iterables[i] = c.Data.SampleIterable()
+				}
+				return storage.ChainSampleIteratorFromIterables(iterator, iterables)
+			},
 		})
 	}
 
