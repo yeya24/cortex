@@ -1,7 +1,6 @@
 package cortexpb
 
 import (
-	stdjson "encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -184,40 +183,6 @@ func MetricMetadataMetricTypeToMetricType(mt MetricMetadata_MetricType) model.Me
 // isTesting is only set from tests to get special behaviour to verify that custom sample encode and decode is used,
 // both when using jsonitor or standard json package.
 var isTesting = false
-
-// MarshalJSON implements json.Marshaler.
-func (s Sample) MarshalJSON() ([]byte, error) {
-	if isTesting && math.IsNaN(s.Value) {
-		return nil, fmt.Errorf("test sample")
-	}
-
-	t, err := jsoniter.ConfigCompatibleWithStandardLibrary.Marshal(model.Time(s.TimestampMs))
-	if err != nil {
-		return nil, err
-	}
-	v, err := jsoniter.ConfigCompatibleWithStandardLibrary.Marshal(model.SampleValue(s.Value))
-	if err != nil {
-		return nil, err
-	}
-	return []byte(fmt.Sprintf("[%s,%s]", t, v)), nil
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (s *Sample) UnmarshalJSON(b []byte) error {
-	var t model.Time
-	var v model.SampleValue
-	vs := [...]stdjson.Unmarshaler{&t, &v}
-	if err := jsoniter.ConfigCompatibleWithStandardLibrary.Unmarshal(b, &vs); err != nil {
-		return err
-	}
-	s.TimestampMs = int64(t)
-	s.Value = float64(v)
-
-	if isTesting && math.IsNaN(float64(v)) {
-		return fmt.Errorf("test sample")
-	}
-	return nil
-}
 
 func SampleJsoniterEncode(ptr unsafe.Pointer, stream *jsoniter.Stream) {
 	sample := (*Sample)(ptr)

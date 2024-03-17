@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
+	"github.com/pkg/errors"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -86,6 +89,7 @@ type Request interface {
 func decodeSampleStream(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
 	lbls := labels.Labels{}
 	samples := []cortexpb.Sample{}
+	histograms := []SampleHistogramPair{}
 	for field := iter.ReadObject(); field != ""; field = iter.ReadObject() {
 		switch field {
 		case "metric":
@@ -99,12 +103,68 @@ func decodeSampleStream(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
 				cortexpb.SampleJsoniterDecode(unsafe.Pointer(&s), iter)
 				samples = append(samples, s)
 			}
+		case "histograms":
+			for iter.ReadArray() {
+				if !iter.ReadArray() {
+					iter.ReportError("unmarshal model.SampleHistogramPair", "SampleHistogramPair must be [timestamp, {histogram}]")
+					return
+				}
+				p := SampleHistogramPair{}
+				p.Timestamp = int64(model.Time(iter.ReadFloat64() * float64(time.Second/time.Millisecond)))
+
+				if !iter.ReadArray() {
+					break
+				}
+				h := &model.SampleHistogram{}
+				for key := iter.ReadObject(); key != ""; key = iter.ReadObject() {
+					switch key {
+					case "count":
+						f, err := strconv.ParseFloat(iter.ReadString(), 64)
+						if err != nil {
+							iter.ReportError("unmarshal model.SampleHistogramPair", "count of histogram is not a float")
+							return
+						}
+						h.Count = model.FloatString(f)
+					case "sum":
+						f, err := strconv.ParseFloat(iter.ReadString(), 64)
+						if err != nil {
+							iter.ReportError("unmarshal model.SampleHistogramPair", "sum of histogram is not a float")
+							return
+						}
+						h.Sum = model.FloatString(f)
+					case "buckets":
+						for {
+							if iter.ReadArray() {
+								b, err := unmarshalHistogramBucket(iter)
+								if err != nil {
+									iter.ReportError("unmarshal model.HistogramBucket", err.Error())
+									return
+								}
+								h.Buckets = append(h.Buckets, b)
+							} else {
+								fmt.Println("break out")
+								break
+							}
+						}
+					default:
+						iter.ReportError("unmarshal model.SampleHistogramPair", fmt.Sprint("unexpected key in histogram:", key))
+						return
+					}
+				}
+				if iter.ReadArray() {
+					iter.ReportError("unmarshal model.SampleHistogramPair", "SampleHistogramPair has too many values, must be [timestamp, {histogram}]")
+					return
+				}
+				p.Histogram = modelSampleHistogramToSampleHistogram(h)
+				histograms = append(histograms, p)
+			}
 		}
 	}
 
 	*(*SampleStream)(ptr) = SampleStream{
-		Samples: samples,
-		Labels:  cortexpb.FromLabelsToLabelAdapters(lbls),
+		Samples:    samples,
+		Histograms: histograms,
+		Labels:     cortexpb.FromLabelsToLabelAdapters(lbls),
 	}
 }
 
@@ -119,33 +179,107 @@ func encodeSampleStream(ptr unsafe.Pointer, stream *jsoniter.Stream) {
 		return
 	}
 	stream.SetBuffer(append(stream.Buffer(), lbls...))
-	stream.WriteMore()
 
-	stream.WriteObjectField(`values`)
-	stream.WriteArrayStart()
-	for i, sample := range ss.Samples {
-		if i != 0 {
-			stream.WriteMore()
+	if len(ss.Samples) > 0 {
+		stream.WriteMore()
+		stream.WriteObjectField(`values`)
+		stream.WriteArrayStart()
+		for i, sample := range ss.Samples {
+			if i != 0 {
+				stream.WriteMore()
+			}
+			cortexpb.SampleJsoniterEncode(unsafe.Pointer(&sample), stream)
 		}
-		cortexpb.SampleJsoniterEncode(unsafe.Pointer(&sample), stream)
+		stream.WriteArrayEnd()
 	}
-	stream.WriteArrayEnd()
+
+	if len(ss.Histograms) > 0 {
+		stream.WriteMore()
+		stream.WriteObjectField(`histograms`)
+		stream.WriteArrayStart()
+		for i, h := range ss.Histograms {
+			if i > 0 {
+				stream.WriteMore()
+			}
+			marshalSampleHistogramPairJSON(unsafe.Pointer(&h), stream)
+		}
+		stream.WriteArrayEnd()
+	}
 
 	stream.WriteObjectEnd()
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
-func (s *SampleStream) UnmarshalJSON(data []byte) error {
-	var stream struct {
-		Metric labels.Labels     `json:"metric"`
-		Values []cortexpb.Sample `json:"values"`
+func marshalSampleHistogramPairJSON(ptr unsafe.Pointer, stream *jsoniter.Stream) {
+	p := *((*SampleHistogramPair)(ptr))
+	stream.WriteArrayStart()
+	stream.WriteFloat64(float64(p.Timestamp) / float64(time.Second/time.Millisecond))
+	stream.WriteMore()
+	marshalHistogram(p.Histogram, stream)
+	stream.WriteArrayEnd()
+}
+
+// marshalHistogramBucket writes something like: [ 3, "-0.25", "0.25", "3"]
+// See marshalHistogram to understand what the numbers mean
+func marshalHistogramBucket(b HistogramBucket, stream *jsoniter.Stream) {
+	stream.WriteArrayStart()
+	stream.WriteInt32(b.Boundaries)
+	stream.WriteMore()
+	marshalFloat(b.Lower, stream)
+	stream.WriteMore()
+	marshalFloat(b.Upper, stream)
+	stream.WriteMore()
+	marshalFloat(b.Count, stream)
+	stream.WriteArrayEnd()
+}
+
+// marshalHistogram writes something like:
+//
+//	{
+//	    "count": "42",
+//	    "sum": "34593.34",
+//	    "buckets": [
+//	      [ 3, "-0.25", "0.25", "3"],
+//	      [ 0, "0.25", "0.5", "12"],
+//	      [ 0, "0.5", "1", "21"],
+//	      [ 0, "2", "4", "6"]
+//	    ]
+//	}
+//
+// The 1st element in each bucket array determines if the boundaries are
+// inclusive (AKA closed) or exclusive (AKA open):
+//
+//	0: lower exclusive, upper inclusive
+//	1: lower inclusive, upper exclusive
+//	2: both exclusive
+//	3: both inclusive
+//
+// The 2nd and 3rd elements are the lower and upper boundary. The 4th element is
+// the bucket count.
+func marshalHistogram(h SampleHistogram, stream *jsoniter.Stream) {
+	stream.WriteObjectStart()
+	stream.WriteObjectField(`count`)
+	marshalFloat(h.Count, stream)
+	stream.WriteMore()
+	stream.WriteObjectField(`sum`)
+	marshalFloat(h.Sum, stream)
+
+	bucketFound := false
+	for _, bucket := range h.Buckets {
+		if bucket.Count == 0 {
+			continue // No need to expose empty buckets in JSON.
+		}
+		stream.WriteMore()
+		if !bucketFound {
+			stream.WriteObjectField(`buckets`)
+			stream.WriteArrayStart()
+		}
+		bucketFound = true
+		marshalHistogramBucket(*bucket, stream)
 	}
-	if err := json.Unmarshal(data, &stream); err != nil {
-		return err
+	if bucketFound {
+		stream.WriteArrayEnd()
 	}
-	s.Labels = cortexpb.FromLabelsToLabelAdapters(stream.Metric)
-	s.Samples = stream.Values
-	return nil
+	stream.WriteObjectEnd()
 }
 
 func PrometheusResponseQueryableSamplesStatsPerStepJsoniterDecode(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
@@ -265,4 +399,79 @@ func StatsMerge(stats map[int64]*PrometheusResponseQueryableSamplesStatsPerStep)
 	}
 
 	return result
+}
+
+func unmarshalHistogramBucket(iter *jsoniter.Iterator) (*model.HistogramBucket, error) {
+	b := model.HistogramBucket{}
+	if !iter.ReadArray() {
+		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
+	}
+	boundaries, err := iter.ReadNumber().Int64()
+	if err != nil {
+		return nil, err
+	}
+	b.Boundaries = int32(boundaries)
+	if !iter.ReadArray() {
+		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
+	}
+	f, err := strconv.ParseFloat(iter.ReadString(), 64)
+	if err != nil {
+		return nil, err
+	}
+	b.Lower = model.FloatString(f)
+	if !iter.ReadArray() {
+		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
+	}
+	f, err = strconv.ParseFloat(iter.ReadString(), 64)
+	if err != nil {
+		return nil, err
+	}
+	b.Upper = model.FloatString(f)
+	if !iter.ReadArray() {
+		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
+	}
+	f, err = strconv.ParseFloat(iter.ReadString(), 64)
+	if err != nil {
+		return nil, err
+	}
+	b.Count = model.FloatString(f)
+	if iter.ReadArray() {
+		return nil, errors.New("HistogramBucket has too many values, must be [boundaries, lower, upper, count]")
+	}
+	return &b, nil
+}
+
+func modelSampleHistogramToSampleHistogram(h *model.SampleHistogram) SampleHistogram {
+	res := &SampleHistogram{
+		Count:   float64(h.Count),
+		Sum:     float64(h.Sum),
+		Buckets: make([]*HistogramBucket, len(h.Buckets)),
+	}
+	for i, bucket := range h.Buckets {
+		res.Buckets[i] = &HistogramBucket{
+			Boundaries: bucket.Boundaries,
+			Lower:      float64(bucket.Lower),
+			Upper:      float64(bucket.Upper),
+			Count:      float64(bucket.Count),
+		}
+	}
+	return *res
+}
+
+func marshalFloat(v float64, stream *jsoniter.Stream) {
+	stream.WriteRaw(`"`)
+	// Taken from https://github.com/json-iterator/go/blob/master/stream_float.go#L71 as a workaround
+	// to https://github.com/json-iterator/go/issues/365 (json-iterator, to follow json standard, doesn't allow inf/nan).
+	buf := stream.Buffer()
+	abs := math.Abs(v)
+	fmt := byte('f')
+	// Note: Must use float32 comparisons for underlying float32 value to get precise cutoffs right.
+	if abs != 0 {
+		if abs < 1e-6 || abs >= 1e21 {
+			fmt = 'e'
+		}
+	}
+	buf = strconv.AppendFloat(buf, v, fmt, -1, 64)
+	stream.SetBuffer(buf)
+	stream.WriteRaw(`"`)
 }

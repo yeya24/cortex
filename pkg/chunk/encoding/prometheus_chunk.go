@@ -139,6 +139,10 @@ func (p *prometheusHistogramChunk) NewIterator(iterator Iterator) Iterator {
 	return &prometheusChunkIterator{c: p.chunk, it: p.chunk.Iterator(nil)}
 }
 
+func (p *prometheusHistogramChunk) SampleIterable() chunkenc.Iterable {
+	return p.chunk
+}
+
 func (p *prometheusHistogramChunk) Marshal(i io.Writer) error {
 	if p.chunk == nil {
 		return errors.New("chunk data not set")
@@ -214,6 +218,10 @@ func (p *prometheusFloatHistogramChunk) NewIterator(iterator Iterator) Iterator 
 	}
 
 	return &prometheusChunkIterator{c: p.chunk, it: p.chunk.Iterator(nil)}
+}
+
+func (p *prometheusFloatHistogramChunk) SampleIterable() chunkenc.Iterable {
+	return p.chunk
 }
 
 func (p *prometheusFloatHistogramChunk) Marshal(i io.Writer) error {

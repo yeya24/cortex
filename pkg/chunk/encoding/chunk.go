@@ -17,7 +17,6 @@
 package encoding
 
 import (
-	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"io"
 
 	"github.com/prometheus/common/model"
