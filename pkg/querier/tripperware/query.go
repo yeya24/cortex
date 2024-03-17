@@ -115,7 +115,6 @@ func decodeSampleStream(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
 				if !iter.ReadArray() {
 					break
 				}
-				h := &model.SampleHistogram{}
 				for key := iter.ReadObject(); key != ""; key = iter.ReadObject() {
 					switch key {
 					case "count":
@@ -124,27 +123,22 @@ func decodeSampleStream(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
 							iter.ReportError("unmarshal model.SampleHistogramPair", "count of histogram is not a float")
 							return
 						}
-						h.Count = model.FloatString(f)
+						p.Histogram.Count = f
 					case "sum":
 						f, err := strconv.ParseFloat(iter.ReadString(), 64)
 						if err != nil {
 							iter.ReportError("unmarshal model.SampleHistogramPair", "sum of histogram is not a float")
 							return
 						}
-						h.Sum = model.FloatString(f)
+						p.Histogram.Sum = f
 					case "buckets":
-						for {
-							if iter.ReadArray() {
-								b, err := unmarshalHistogramBucket(iter)
-								if err != nil {
-									iter.ReportError("unmarshal model.HistogramBucket", err.Error())
-									return
-								}
-								h.Buckets = append(h.Buckets, b)
-							} else {
-								fmt.Println("break out")
-								break
+						for iter.ReadArray() {
+							b, err := unmarshalHistogramBucket(iter)
+							if err != nil {
+								iter.ReportError("unmarshal model.HistogramBucket", err.Error())
+								return
 							}
+							p.Histogram.Buckets = append(p.Histogram.Buckets, b)
 						}
 					default:
 						iter.ReportError("unmarshal model.SampleHistogramPair", fmt.Sprint("unexpected key in histogram:", key))
@@ -155,7 +149,6 @@ func decodeSampleStream(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
 					iter.ReportError("unmarshal model.SampleHistogramPair", "SampleHistogramPair has too many values, must be [timestamp, {histogram}]")
 					return
 				}
-				p.Histogram = modelSampleHistogramToSampleHistogram(h)
 				histograms = append(histograms, p)
 			}
 		}
@@ -401,8 +394,8 @@ func StatsMerge(stats map[int64]*PrometheusResponseQueryableSamplesStatsPerStep)
 	return result
 }
 
-func unmarshalHistogramBucket(iter *jsoniter.Iterator) (*model.HistogramBucket, error) {
-	b := model.HistogramBucket{}
+func unmarshalHistogramBucket(iter *jsoniter.Iterator) (*HistogramBucket, error) {
+	b := HistogramBucket{}
 	if !iter.ReadArray() {
 		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
 	}
@@ -418,7 +411,7 @@ func unmarshalHistogramBucket(iter *jsoniter.Iterator) (*model.HistogramBucket, 
 	if err != nil {
 		return nil, err
 	}
-	b.Lower = model.FloatString(f)
+	b.Lower = f
 	if !iter.ReadArray() {
 		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
 	}
@@ -426,7 +419,7 @@ func unmarshalHistogramBucket(iter *jsoniter.Iterator) (*model.HistogramBucket, 
 	if err != nil {
 		return nil, err
 	}
-	b.Upper = model.FloatString(f)
+	b.Upper = f
 	if !iter.ReadArray() {
 		return nil, errors.New("HistogramBucket must be [boundaries, lower, upper, count]")
 	}
@@ -434,7 +427,7 @@ func unmarshalHistogramBucket(iter *jsoniter.Iterator) (*model.HistogramBucket, 
 	if err != nil {
 		return nil, err
 	}
-	b.Count = model.FloatString(f)
+	b.Count = f
 	if iter.ReadArray() {
 		return nil, errors.New("HistogramBucket has too many values, must be [boundaries, lower, upper, count]")
 	}
