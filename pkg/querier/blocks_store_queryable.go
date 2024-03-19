@@ -582,6 +582,29 @@ func (q *blocksStoreQuerier) queryWithConsistencyCheck(ctx context.Context, logg
 	return fmt.Errorf("consistency check failed because some blocks were not queried: %s", strings.Join(convertULIDsToString(remainingBlocks), " "))
 }
 
+// aggrsFromFunc infers aggregates of the underlying data based on the wrapping
+// function of a series selection.
+func aggrsFromFunc(f string) []storepb.Aggr {
+	if f == "min" || strings.HasPrefix(f, "min_") {
+		return []storepb.Aggr{storepb.Aggr_MIN}
+	}
+	if f == "max" || strings.HasPrefix(f, "max_") {
+		return []storepb.Aggr{storepb.Aggr_MAX}
+	}
+	if f == "count" || strings.HasPrefix(f, "count_") {
+		return []storepb.Aggr{storepb.Aggr_COUNT}
+	}
+	// f == "sum" falls through here since we want the actual samples.
+	if strings.HasPrefix(f, "sum_") {
+		return []storepb.Aggr{storepb.Aggr_SUM}
+	}
+	if f == "increase" || f == "rate" || f == "irate" || f == "resets" {
+		return []storepb.Aggr{storepb.Aggr_COUNTER}
+	}
+	// In the default case, we retrieve count and sum to compute an average.
+	return []storepb.Aggr{storepb.Aggr_COUNT, storepb.Aggr_SUM}
+}
+
 func (q *blocksStoreQuerier) fetchSeriesFromStores(
 	ctx context.Context,
 	sp *storage.SelectHints,
@@ -608,6 +631,7 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 		merr          = multierror.MultiError{}
 	)
 	matchers, shardingInfo, err := querysharding.ExtractShardingInfo(matchers)
+	aggrs := aggrsFromFunc(sp.Func)
 
 	if err != nil {
 		return nil, nil, nil, 0, err, merr.Err()
@@ -631,7 +655,7 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 			seriesQueryStats := &hintspb.QueryStats{}
 			skipChunks := sp != nil && sp.Func == "series"
 
-			req, err := createSeriesRequest(minT, maxT, convertedMatchers, shardingInfo, skipChunks, blockIDs)
+			req, err := createSeriesRequest(minT, maxT, convertedMatchers, shardingInfo, skipChunks, blockIDs, aggrs)
 			if err != nil {
 				return errors.Wrapf(err, "failed to create series request")
 			}
@@ -795,7 +819,8 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 			// Store the result.
 			mtx.Lock()
-			seriesSets = append(seriesSets, &blockQuerierSeriesSet{series: mySeries})
+
+			seriesSets = append(seriesSets, &promSeriesSet{set: newStoreSeriesSet(mySeries), aggrs: aggrs, mint: minT, maxt: maxT})
 			warnings.Merge(myWarnings)
 			queriedBlocks = append(queriedBlocks, myQueriedBlocks...)
 			mtx.Unlock()
@@ -1018,7 +1043,7 @@ func (q *blocksStoreQuerier) fetchLabelValuesFromStore(
 	return valueSets, warnings, queriedBlocks, nil, merr.Err()
 }
 
-func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shardingInfo *storepb.ShardInfo, skipChunks bool, blockIDs []ulid.ULID) (*storepb.SeriesRequest, error) {
+func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shardingInfo *storepb.ShardInfo, skipChunks bool, blockIDs []ulid.ULID, aggrs []storepb.Aggr) (*storepb.SeriesRequest, error) {
 	// Selectively query only specific blocks.
 	hints := &hintspb.SeriesRequestHints{
 		BlockMatchers: []storepb.LabelMatcher{
@@ -1044,6 +1069,7 @@ func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shar
 		Hints:                   anyHints,
 		SkipChunks:              skipChunks,
 		ShardInfo:               shardingInfo,
+		Aggregates:              aggrs,
 	}, nil
 }
 

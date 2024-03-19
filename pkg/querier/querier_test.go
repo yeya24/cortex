@@ -31,8 +31,6 @@ import (
 	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/ingester/client"
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
-	"github.com/cortexproject/cortex/pkg/querier/batch"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 	"github.com/cortexproject/cortex/pkg/tenant"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/chunkcompat"
@@ -81,15 +79,6 @@ type query struct {
 }
 
 var (
-	testcases = []struct {
-		name string
-		f    chunkIteratorFunc
-	}{
-		{"matrixes", mergeChunks},
-		{"iterators", iterators.NewChunkMergeIterator},
-		{"batches", batch.NewChunkMergeIterator},
-	}
-
 	encodings = []struct {
 		name string
 		e    promchunk.Encoding
@@ -221,8 +210,8 @@ func TestShouldSortSeriesIfQueryingMultipleQueryables(t *testing.T) {
 
 	distributor.On("QueryStream", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&unorderedResponse, nil)
 	distributor.On("Query", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(unorderedResponseMatrix, nil)
-	distributorQueryableStreaming := newDistributorQueryable(distributor, true, cfg.IngesterMetadataStreaming, batch.NewChunkMergeIterator, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
-	distributorQueryable := newDistributorQueryable(distributor, false, cfg.IngesterMetadataStreaming, batch.NewChunkMergeIterator, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
+	distributorQueryableStreaming := newDistributorQueryable(distributor, true, cfg.IngesterMetadataStreaming, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
+	distributorQueryable := newDistributorQueryable(distributor, false, cfg.IngesterMetadataStreaming, cfg.QueryIngestersWithin, cfg.QueryStoreForLabels)
 
 	tCases := []struct {
 		name                 string
@@ -277,7 +266,7 @@ func TestShouldSortSeriesIfQueryingMultipleQueryables(t *testing.T) {
 				for _, queryable := range tc.storeQueriables {
 					wQueriables = append(wQueriables, &wrappedSampleAndChunkQueryable{QueryableWithFilter: queryable})
 				}
-				queryable := NewQueryable(wDistributorQueriable, wQueriables, batch.NewChunkMergeIterator, cfg, overrides)
+				queryable := NewQueryable(wDistributorQueriable, wQueriables, cfg, overrides)
 				opts := promql.EngineOpts{
 					Logger:     log.NewNopLogger(),
 					MaxSamples: 1e6,
@@ -1439,7 +1428,7 @@ func (q *mockStoreQuerier) Select(ctx context.Context, _ bool, sp *storage.Selec
 		return storage.ErrSeriesSet(err)
 	}
 
-	return partitionChunks(chunks, q.mint, q.maxt, q.chunkIteratorFunc)
+	return partitionChunks(chunks)
 }
 
 func (q *mockStoreQuerier) LabelValues(ctx context.Context, name string, labels ...*labels.Matcher) ([]string, annotations.Annotations, error) {

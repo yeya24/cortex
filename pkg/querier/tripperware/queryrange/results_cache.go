@@ -712,15 +712,28 @@ func extractMatrix(start, end int64, matrix []tripperware.SampleStream) []trippe
 
 func extractSampleStream(start, end int64, stream tripperware.SampleStream) (tripperware.SampleStream, bool) {
 	result := tripperware.SampleStream{
-		Labels:  stream.Labels,
-		Samples: make([]cortexpb.Sample, 0, len(stream.Samples)),
+		Labels: stream.Labels,
 	}
+
+	if len(stream.Samples) > 0 {
+		result.Samples = make([]cortexpb.Sample, 0, len(stream.Samples))
+	}
+
+	if len(stream.Histograms) > 0 {
+		result.Histograms = make([]tripperware.SampleHistogramPair, 0, len(stream.Histograms))
+	}
+
 	for _, sample := range stream.Samples {
 		if start <= sample.TimestampMs && sample.TimestampMs <= end {
 			result.Samples = append(result.Samples, sample)
 		}
 	}
-	if len(result.Samples) == 0 {
+	for _, histogram := range stream.Histograms {
+		if start <= histogram.GetTimestamp() && histogram.GetTimestamp() <= end {
+			result.Histograms = append(result.Histograms, histogram)
+		}
+	}
+	if len(result.Samples) == 0 && len(result.Histograms) == 0 {
 		return tripperware.SampleStream{}, false
 	}
 	return result, true

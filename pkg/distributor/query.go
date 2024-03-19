@@ -383,6 +383,10 @@ func (d *Distributor) queryIngesterStream(ctx context.Context, replicationSet ri
 			} else {
 				existing.Samples = mergeSamples(existing.Samples, series.Samples)
 			}
+			// Need to find a way to merge native histograms.
+			if existing.Histograms == nil {
+				existing.Histograms = series.Histograms
+			}
 			hashToTimeSeries[key] = existing
 		}
 	}

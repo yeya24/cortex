@@ -17,16 +17,17 @@
 package series
 
 import (
+	"math"
 	"sort"
 
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 )
 
 // ConcreteSeriesSet implements storage.SeriesSet.
@@ -70,15 +71,17 @@ func (c *ConcreteSeriesSet) Warnings() annotations.Annotations {
 
 // ConcreteSeries implements storage.Series.
 type ConcreteSeries struct {
-	labels  labels.Labels
-	samples []model.SamplePair
+	labels     labels.Labels
+	samples    []model.SamplePair
+	histograms []model.SampleHistogramPair
 }
 
 // NewConcreteSeries instantiates an in memory series from a list of samples & labels
-func NewConcreteSeries(ls labels.Labels, samples []model.SamplePair) *ConcreteSeries {
+func NewConcreteSeries(ls labels.Labels, samples []model.SamplePair, histograms []model.SampleHistogramPair) *ConcreteSeries {
 	return &ConcreteSeries{
-		labels:  ls,
-		samples: samples,
+		labels:     ls,
+		samples:    samples,
+		histograms: histograms,
 	}
 }
 
@@ -98,19 +101,22 @@ type concreteSeriesIterator struct {
 	series *ConcreteSeries
 }
 
-// NewConcreteSeriesIterator instaniates an in memory chunkenc.Iterator
+// NewConcreteSeriesIterator instantiates an in memory chunkenc.Iterator
 func NewConcreteSeriesIterator(series *ConcreteSeries) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(&concreteSeriesIterator{
+	return &concreteSeriesIterator{
 		cur:    -1,
 		series: series,
-	})
+	}
 }
 
-func (c *concreteSeriesIterator) Seek(t int64) bool {
+func (c *concreteSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	c.cur = sort.Search(len(c.series.samples), func(n int) bool {
 		return c.series.samples[n].Timestamp >= model.Time(t)
 	})
-	return c.cur < len(c.series.samples)
+	if c.cur >= len(c.series.samples) {
+		return chunkenc.ValNone
+	}
+	return chunkenc.ValFloat
 }
 
 func (c *concreteSeriesIterator) At() (t int64, v float64) {
@@ -118,9 +124,26 @@ func (c *concreteSeriesIterator) At() (t int64, v float64) {
 	return int64(s.Timestamp), float64(s.Value)
 }
 
-func (c *concreteSeriesIterator) Next() bool {
+func (concreteSeriesIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
+	return 0, nil
+}
+
+func (concreteSeriesIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	return 0, nil
+}
+
+func (c concreteSeriesIterator) AtT() int64 {
+	return int64(c.series.samples[c.cur].Timestamp)
+}
+
+const noTS = int64(math.MaxInt64)
+
+// Next implements chunkenc.Iterator.
+func (c *concreteSeriesIterator) Next() chunkenc.ValueType {
 	c.cur++
-	return c.cur < len(c.series.samples)
+	if c.cur < len(c.series.samples) {
+	}
+	return chunkenc.ValNone
 }
 
 func (c *concreteSeriesIterator) Err() error {
@@ -129,7 +152,7 @@ func (c *concreteSeriesIterator) Err() error {
 
 // NewErrIterator instantiates an errIterator
 func NewErrIterator(err error) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(errIterator{err})
+	return errIterator{err}
 }
 
 // errIterator implements chunkenc.Iterator, just returning an error.
@@ -137,16 +160,28 @@ type errIterator struct {
 	err error
 }
 
-func (errIterator) Seek(int64) bool {
-	return false
+func (errIterator) Seek(int64) chunkenc.ValueType {
+	return chunkenc.ValNone
 }
 
-func (errIterator) Next() bool {
-	return false
+func (errIterator) Next() chunkenc.ValueType {
+	return chunkenc.ValNone
 }
 
 func (errIterator) At() (t int64, v float64) {
 	return 0, 0
+}
+
+func (errIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
+	return 0, nil
+}
+
+func (errIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	return 0, nil
+}
+
+func (errIterator) AtT() int64 {
+	return 0
 }
 
 func (e errIterator) Err() error {
@@ -159,8 +194,9 @@ func MatrixToSeriesSet(sortSeries bool, m model.Matrix) storage.SeriesSet {
 	series := make([]storage.Series, 0, len(m))
 	for _, ss := range m {
 		series = append(series, &ConcreteSeries{
-			labels:  metricToLabels(ss.Metric),
-			samples: ss.Values,
+			labels:     metricToLabels(ss.Metric),
+			samples:    ss.Values,
+			histograms: ss.Histograms,
 		})
 	}
 	return NewConcreteSeriesSet(sortSeries, series)
@@ -171,8 +207,7 @@ func MetricsToSeriesSet(sortSeries bool, ms []metric.Metric) storage.SeriesSet {
 	series := make([]storage.Series, 0, len(ms))
 	for _, m := range ms {
 		series = append(series, &ConcreteSeries{
-			labels:  metricToLabels(m.Metric),
-			samples: nil,
+			labels: metricToLabels(m.Metric),
 		})
 	}
 	return NewConcreteSeriesSet(sortSeries, series)

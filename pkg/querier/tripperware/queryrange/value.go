@@ -123,7 +123,7 @@ func NewSeriesSet(sortSeries bool, results []tripperware.SampleStream) storage.S
 		for _, l := range stream.Labels {
 			ls = append(ls, labels.Label(l))
 		}
-		set = append(set, series.NewConcreteSeries(ls, samples))
+		set = append(set, series.NewConcreteSeries(ls, samples, nil))
 	}
 	return series.NewConcreteSeriesSet(sortSeries, set)
 }
