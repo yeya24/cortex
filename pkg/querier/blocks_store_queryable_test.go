@@ -821,8 +821,12 @@ func TestBlocksStoreQuerier_Select(t *testing.T) {
 	}
 
 	for testName, testData := range tests {
+		//if testName != `multiple store-gateway instances have some missing blocks but queried from a replica during subsequent attempts` {
+		//	continue
+		//}
 		testData := testData
 		t.Run(testName, func(t *testing.T) {
+			fmt.Println(testName)
 			t.Parallel()
 
 			ctx := user.InjectOrgID(context.Background(), "user-1")

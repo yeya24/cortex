@@ -25,6 +25,7 @@ import (
 	"github.com/thanos-io/thanos/pkg/block"
 	"github.com/thanos-io/thanos/pkg/extprom"
 	"github.com/thanos-io/thanos/pkg/pool"
+	thanosquery "github.com/thanos-io/thanos/pkg/query"
 	"github.com/thanos-io/thanos/pkg/store/hintspb"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 	"github.com/thanos-io/thanos/pkg/strutil"
@@ -64,6 +65,10 @@ const (
 var (
 	errNoStoreGatewayAddress  = errors.New("no store-gateway address configured")
 	errMaxChunksPerQueryLimit = "the query hit the max number of chunks limit while fetching chunks from store-gateways for %s (limit: %d)"
+
+	// Default aggregations to query Store Gateway. Since Cortex doesn't have downsampled chunks
+	// it just fallbacks to raw chunks.
+	defaultAggrs = []storepb.Aggr{storepb.Aggr_COUNT, storepb.Aggr_SUM}
 )
 
 // BlocksStoreSet is the interface used to get the clients to query series on a set of blocks.
@@ -795,7 +800,7 @@ func (q *blocksStoreQuerier) fetchSeriesFromStores(
 
 			// Store the result.
 			mtx.Lock()
-			seriesSets = append(seriesSets, &blockQuerierSeriesSet{series: mySeries})
+			seriesSets = append(seriesSets, thanosquery.NewPromSeriesSet(newStoreSeriesSet(mySeries), minT, maxT, defaultAggrs, nil))
 			warnings.Merge(myWarnings)
 			queriedBlocks = append(queriedBlocks, myQueriedBlocks...)
 			mtx.Unlock()
