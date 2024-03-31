@@ -73,6 +73,15 @@ type TimeWindow struct {
 	End   model.Duration `yaml:"end" json:"end" doc:"nocli|description=End of the data select time window (including range selectors, modifiers and lookback delta) that the query should be within. If set to 0, it won't be checked.|default=0"`
 }
 
+type ShardBy struct {
+	LabelName string                    `yaml:"label_name" json:"label_name" doc:"nocli"`
+	Limits    map[string]*ShardByLimits `yaml:"limits" json:"limits" doc:"nocli"`
+}
+
+type ShardByLimits struct {
+	MaxSeriesPeShard int `yaml:"max_series_per_shard" json:"max_series_per_shard"`
+}
+
 // Limits describe all the limits for users; can be used to describe global default
 // limits via flags, or per-user limits via yaml config.
 type Limits struct {
@@ -167,6 +176,8 @@ type Limits struct {
 	AlertmanagerMaxAlertsCount                 int                `yaml:"alertmanager_max_alerts_count" json:"alertmanager_max_alerts_count"`
 	AlertmanagerMaxAlertsSizeBytes             int                `yaml:"alertmanager_max_alerts_size_bytes" json:"alertmanager_max_alerts_size_bytes"`
 	DisabledRuleGroups                         DisabledRuleGroups `yaml:"disabled_rule_groups" json:"disabled_rule_groups" doc:"nocli|description=list of rule groups to disable"`
+
+	ShardBy ShardBy `yaml:"shard_by" json:"shard_by" doc:"nocli"`
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet
@@ -549,6 +560,10 @@ func (o *Overrides) MaxFetchedChunkBytesPerQuery(userID string) int {
 // from ingesters and blocks storage.
 func (o *Overrides) MaxFetchedDataBytesPerQuery(userID string) int {
 	return o.GetOverridesForUser(userID).MaxFetchedDataBytesPerQuery
+}
+
+func (o *Overrides) GetShardBy(userID string) ShardBy {
+	return o.GetOverridesForUser(userID).ShardBy
 }
 
 // MaxDownloadedBytesPerRequest returns the maximum number of bytes to download for each gRPC request in Store Gateway,

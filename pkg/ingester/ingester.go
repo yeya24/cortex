@@ -2047,6 +2047,18 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 		OutOfOrderTimeWindow:           time.Duration(oooTimeWindow).Milliseconds(),
 		OutOfOrderCapMax:               i.cfg.BlocksStorageConfig.TSDB.OutOfOrderCapMax,
 		EnableOverlappingCompaction:    false, // Always let compactors handle overlapped blocks, e.g. OOO blocks.
+		NewCompactorFunc: func(ctx context.Context, r prometheus.Registerer, l log.Logger, ranges []int64, pool chunkenc.Pool, opts *tsdb.Options) (tsdb.Compactor, error) {
+			return &ExternalLabelCompactor{
+				logger:                   l,
+				ctx:                      ctx,
+				userID:                   userID,
+				chunkPool:                pool,
+				maxBlockChunkSegmentSize: opts.MaxBlockChunkSegmentSize,
+				mergeFunc:                storage.NewCompactingChunkSeriesMerger(storage.ChainedSeriesMerge),
+				metrics:                  tsdb.NewCompactorMetrics(r),
+				overrides:                i.limits,
+			}, nil
+		},
 	}, nil)
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to open TSDB: %s", udir)

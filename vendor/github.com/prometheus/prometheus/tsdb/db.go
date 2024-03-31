@@ -190,7 +190,11 @@ type Options struct {
 
 	// EnableSharding enables query sharding support in TSDB.
 	EnableSharding bool
+
+	NewCompactorFunc NewCompactorFunc
 }
+
+type NewCompactorFunc func(ctx context.Context, r prometheus.Registerer, l log.Logger, ranges []int64, pool chunkenc.Pool, opts *Options) (Compactor, error)
 
 type BlocksToDeleteFunc func(blocks []*Block) map[ulid.ULID]struct{}
 
@@ -829,13 +833,17 @@ func open(dir string, l log.Logger, r prometheus.Registerer, opts *Options, rngs
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	db.compactor, err = NewLeveledCompactorWithOptions(ctx, r, l, rngs, db.chunkPool, LeveledCompactorOptions{
-		MaxBlockChunkSegmentSize:    opts.MaxBlockChunkSegmentSize,
-		EnableOverlappingCompaction: opts.EnableOverlappingCompaction,
-	})
+	if opts.NewCompactorFunc != nil {
+		db.compactor, err = opts.NewCompactorFunc(ctx, r, l, rngs, db.chunkPool, opts)
+	} else {
+		db.compactor, err = NewLeveledCompactorWithOptions(ctx, r, l, rngs, db.chunkPool, LeveledCompactorOptions{
+			MaxBlockChunkSegmentSize:    opts.MaxBlockChunkSegmentSize,
+			EnableOverlappingCompaction: opts.EnableOverlappingCompaction,
+		})
+	}
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("create leveled compactor: %w", err)
+		return nil, fmt.Errorf("create compactor: %w", err)
 	}
 	db.compactCancel = cancel
 
@@ -1303,21 +1311,23 @@ func (db *DB) compactOOO(dest string, oooHead *OOOCompactionHead) (_ []ulid.ULID
 	for t := blockSize * (oooHeadMint / blockSize); t <= oooHeadMaxt; t += blockSize {
 		mint, maxt := t, t+blockSize
 		// Block intervals are half-open: [b.MinTime, b.MaxTime). Block intervals are always +1 than the total samples it includes.
-		uid, err := db.compactor.Write(dest, oooHead.CloneForTimeRange(mint, maxt-1), mint, maxt, nil)
+		uids, err := db.compactor.Write(dest, oooHead.CloneForTimeRange(mint, maxt-1), mint, maxt, nil)
 		if err != nil {
 			return nil, err
 		}
-		if uid.Compare(ulid.ULID{}) != 0 {
-			ulids = append(ulids, uid)
-			blockDir := filepath.Join(dest, uid.String())
-			meta, _, err := readMetaFile(blockDir)
-			if err != nil {
-				return ulids, fmt.Errorf("read meta: %w", err)
-			}
-			meta.Compaction.SetOutOfOrder()
-			_, err = writeMetaFile(db.logger, blockDir, meta)
-			if err != nil {
-				return ulids, fmt.Errorf("write meta: %w", err)
+		for _, uid := range uids {
+			if uid.Compare(ulid.ULID{}) != 0 {
+				ulids = append(ulids, uid)
+				blockDir := filepath.Join(dest, uid.String())
+				meta, _, err := readMetaFile(blockDir)
+				if err != nil {
+					return ulids, fmt.Errorf("read meta: %w", err)
+				}
+				meta.Compaction.SetOutOfOrder()
+				_, err = writeMetaFile(db.logger, blockDir, meta)
+				if err != nil {
+					return ulids, fmt.Errorf("write meta: %w", err)
+				}
 			}
 		}
 	}
@@ -1341,17 +1351,19 @@ func (db *DB) compactOOO(dest string, oooHead *OOOCompactionHead) (_ []ulid.ULID
 // compactHead compacts the given RangeHead.
 // The compaction mutex should be held before calling this method.
 func (db *DB) compactHead(head *RangeHead) error {
-	uid, err := db.compactor.Write(db.dir, head, head.MinTime(), head.BlockMaxTime(), nil)
+	uids, err := db.compactor.Write(db.dir, head, head.MinTime(), head.BlockMaxTime(), nil)
 	if err != nil {
 		return fmt.Errorf("persist head block: %w", err)
 	}
 
 	if err := db.reloadBlocks(); err != nil {
-		if errRemoveAll := os.RemoveAll(filepath.Join(db.dir, uid.String())); errRemoveAll != nil {
-			return tsdb_errors.NewMulti(
-				fmt.Errorf("reloadBlocks blocks: %w", err),
-				fmt.Errorf("delete persisted head block after failed db reloadBlocks:%s: %w", uid, errRemoveAll),
-			).Err()
+		for _, uid := range uids {
+			if errRemoveAll := os.RemoveAll(filepath.Join(db.dir, uid.String())); errRemoveAll != nil {
+				return tsdb_errors.NewMulti(
+					fmt.Errorf("reloadBlocks blocks: %w", err),
+					fmt.Errorf("delete persisted head block after failed db reloadBlocks:%s: %w", uid, errRemoveAll),
+				).Err()
+			}
 		}
 		return fmt.Errorf("reloadBlocks blocks: %w", err)
 	}
@@ -2119,7 +2131,7 @@ func (db *DB) CleanTombstones() (err error) {
 		cleanUpCompleted = true
 
 		for _, pb := range db.Blocks() {
-			uid, safeToDelete, cleanErr := pb.CleanTombstones(db.Dir(), db.compactor)
+			uids, safeToDelete, cleanErr := pb.CleanTombstones(db.Dir(), db.compactor)
 			if cleanErr != nil {
 				return fmt.Errorf("clean tombstones: %s: %w", pb.Dir(), cleanErr)
 			}
@@ -2143,10 +2155,12 @@ func (db *DB) CleanTombstones() (err error) {
 			}
 
 			// Delete new block if it was created.
-			if uid != nil && *uid != (ulid.ULID{}) {
-				dir := filepath.Join(db.Dir(), uid.String())
-				if err := os.RemoveAll(dir); err != nil {
-					level.Error(db.logger).Log("msg", "failed to delete block after failed `CleanTombstones`", "dir", dir, "err", err)
+			for _, uid := range uids {
+				if uid.Compare(ulid.ULID{}) != 0 {
+					dir := filepath.Join(db.Dir(), uid.String())
+					if err := os.RemoveAll(dir); err != nil {
+						level.Error(db.logger).Log("msg", "failed to delete block after failed `CleanTombstones`", "dir", dir, "err", err)
+					}
 				}
 			}
 			if err != nil {
