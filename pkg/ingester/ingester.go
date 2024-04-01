@@ -450,13 +450,6 @@ func (u *userTSDB) ChunkQuerier(mint, maxt int64) (_ storage.ChunkQuerier, err e
 		}
 		blockQueriers = append(blockQueriers, q)
 	}
-	for _, b := range blocks {
-		q, err := tsdb.NewBlockChunkQuerier(b, mint, maxt)
-		if err != nil {
-			return nil, fmt.Errorf("open querier for block %s: %w", b, err)
-		}
-		blockQueriers = append(blockQueriers, q)
-	}
 
 	return storage.NewMergeChunkQuerier(blockQueriers, nil, storage.NewCompactingChunkSeriesMerger(storage.ChainedSeriesMerge)), nil
 }

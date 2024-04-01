@@ -109,11 +109,6 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 		uid := ulid.MustNew(ulid.Now(), rand.Reader)
 
 		meta := &metadata.Meta{
-			Thanos: metadata.Thanos{
-				Labels: map[string]string{
-					outputBlock.label.Name: outputBlock.label.Value,
-				},
-			},
 			BlockMeta: tsdb.BlockMeta{
 				Version: metadata.TSDBVersion1,
 				ULID:    uid,
@@ -127,6 +122,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 		}
 		if len(outputBlock.label.Name) > 0 {
 			meta.BlockMeta.Compaction.Hints = []string{outputBlock.label.Name + "=" + outputBlock.label.Value}
+			meta.Thanos.Labels = map[string]string{outputBlock.label.Name: outputBlock.label.Value}
 		}
 
 		if parent != nil {
