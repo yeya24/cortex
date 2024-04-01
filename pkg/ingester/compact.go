@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"github.com/prometheus/prometheus/model/labels"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,7 +58,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 
 	type outputBlock struct {
 		postingFunc tsdb.IndexReaderPostingsFunc
-		labels      map[string]string
+		label       labels.Label
 	}
 	outputBlocks := []outputBlock{}
 	// Fallback to the default compactor write.
@@ -80,9 +81,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 			}
 			outputBlocks = append(outputBlocks, outputBlock{
 				postingFunc: pf,
-				labels: map[string]string{
-					shardBy.LabelName: val,
-				},
+				label:       labels.Label{Name: shardBy.LabelName, Value: val},
 			})
 		}
 		rootPF := func(ctx context.Context, reader tsdb.IndexReader) index.Postings {
@@ -111,7 +110,9 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 
 		meta := &metadata.Meta{
 			Thanos: metadata.Thanos{
-				Labels: outputBlock.labels,
+				Labels: map[string]string{
+					outputBlock.label.Name: outputBlock.label.Value,
+				},
 			},
 			BlockMeta: tsdb.BlockMeta{
 				Version: metadata.TSDBVersion1,
@@ -131,7 +132,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 			}
 		}
 
-		err := c.write(dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, b)
+		err := c.write(dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, outputBlock.label, b)
 		if err != nil {
 			return []ulid.ULID{uid}, err
 		}
@@ -160,7 +161,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 }
 
 // write creates a new block that is the union of the provided blocks into dir.
-func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPopulator tsdb.BlockPopulator, postingsFunc tsdb.IndexReaderPostingsFunc, blocks ...tsdb.BlockReader) (err error) {
+func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPopulator tsdb.BlockPopulator, postingsFunc tsdb.IndexReaderPostingsFunc, filterLabel labels.Label, blocks ...tsdb.BlockReader) (err error) {
 	dir := filepath.Join(dest, meta.ULID.String())
 	tmp := dir + tmpForCreationBlockDirSuffix
 	var closers []io.Closer
@@ -208,7 +209,14 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 	}
 	closers = append(closers, indexw)
 
-	if err := blockPopulator.PopulateBlock(c.ctx, c.metrics, c.logger, c.chunkPool, c.mergeFunc, blocks, &meta.BlockMeta, indexw, chunkw, postingsFunc); err != nil {
+	var indexWriter tsdb.IndexWriter
+	indexWriter = indexw
+	// TODO: we should enable filtered index writer to remove the label from series.
+	// However, this requires us to be able to filter and attach external label in TSDB queries.
+	//if len(filterLabel.Name) > 0 {
+	//	indexWriter = &FilteredIndexWriter{IndexWriter: indexw, name: filterLabel.Name, builder: labels.NewBuilder(labels.EmptyLabels())}
+	//}
+	if err := blockPopulator.PopulateBlock(c.ctx, c.metrics, c.logger, c.chunkPool, c.mergeFunc, blocks, &meta.BlockMeta, indexWriter, chunkw, postingsFunc); err != nil {
 		return fmt.Errorf("populate block: %w", err)
 	}
 
@@ -287,4 +295,16 @@ func (w *instrumentedChunkWriter) WriteChunks(chunks ...chunks.Meta) error {
 		w.trange.Observe(float64(c.MaxTime - c.MinTime))
 	}
 	return w.ChunkWriter.WriteChunks(chunks...)
+}
+
+type FilteredIndexWriter struct {
+	tsdb.IndexWriter
+	name    string
+	builder *labels.Builder
+}
+
+func (w *FilteredIndexWriter) AddSeries(ref storage.SeriesRef, l labels.Labels, chunks ...chunks.Meta) error {
+	w.builder.Reset(l)
+	w.builder.Del(w.name)
+	return w.IndexWriter.AddSeries(ref, w.builder.Labels(), chunks...)
 }
