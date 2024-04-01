@@ -122,9 +122,11 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 				Compaction: tsdb.BlockMetaCompaction{
 					Level:   1,
 					Sources: []ulid.ULID{uid},
-					Hints:   []string{outputBlock.label.Name + "=" + outputBlock.label.Value},
 				},
 			},
+		}
+		if len(outputBlock.label.Name) > 0 {
+			meta.BlockMeta.Compaction.Hints = []string{outputBlock.label.Name + "=" + outputBlock.label.Value}
 		}
 
 		if parent != nil {
