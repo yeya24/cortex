@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
-	"github.com/prometheus/prometheus/model/labels"
 	"io"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
@@ -122,6 +122,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 				Compaction: tsdb.BlockMetaCompaction{
 					Level:   1,
 					Sources: []ulid.ULID{uid},
+					Hints:   []string{outputBlock.label.Name + "=" + outputBlock.label.Value},
 				},
 			},
 		}
@@ -211,11 +212,10 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 
 	var indexWriter tsdb.IndexWriter
 	indexWriter = indexw
-	// TODO: we should enable filtered index writer to remove the label from series.
-	// However, this requires us to be able to filter and attach external label in TSDB queries.
-	//if len(filterLabel.Name) > 0 {
-	//	indexWriter = &FilteredIndexWriter{IndexWriter: indexw, name: filterLabel.Name, builder: labels.NewBuilder(labels.EmptyLabels())}
-	//}
+	// Use FilteredIndexWriter to remove the external label from the series.
+	if len(filterLabel.Name) > 0 {
+		indexWriter = &FilteredIndexWriter{IndexWriter: indexw, name: filterLabel.Name, builder: labels.NewBuilder(labels.EmptyLabels())}
+	}
 	if err := blockPopulator.PopulateBlock(c.ctx, c.metrics, c.logger, c.chunkPool, c.mergeFunc, blocks, &meta.BlockMeta, indexWriter, chunkw, postingsFunc); err != nil {
 		return fmt.Errorf("populate block: %w", err)
 	}

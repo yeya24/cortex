@@ -287,12 +287,178 @@ func (u *userTSDB) Appender(ctx context.Context) storage.Appender {
 	return u.db.Appender(ctx)
 }
 
-func (u *userTSDB) Querier(mint, maxt int64) (storage.Querier, error) {
-	return u.db.Querier(mint, maxt)
+func (u *userTSDB) Querier(mint, maxt int64) (_ storage.Querier, err error) {
+	db := u.db
+	var blocks []tsdb.BlockReader
+
+	for _, b := range db.Blocks() {
+		if b.OverlapsClosedInterval(mint, maxt) {
+			blocks = append(blocks, b)
+		}
+	}
+
+	blockQueriers := make([]storage.Querier, 0, len(blocks)+2) // +2 to allow for possible in-order and OOO head queriers
+
+	defer func() {
+		if err != nil {
+			// If we fail, all previously opened queriers must be closed.
+			for _, q := range blockQueriers {
+				// TODO(bwplotka): Handle error.
+				_ = q.Close()
+			}
+		}
+	}()
+
+	head := db.Head()
+	if maxt >= head.MinTime() {
+		rh := tsdb.NewRangeHead(head, mint, maxt)
+		var err error
+		inOrderHeadQuerier, err := tsdb.NewBlockQuerier(rh, mint, maxt)
+		if err != nil {
+			return nil, fmt.Errorf("open block querier for head %s: %w", rh, err)
+		}
+
+		// Getting the querier above registers itself in the queue that the truncation waits on.
+		// So if the querier is currently not colliding with any truncation, we can continue to use it and still
+		// won't run into a race later since any truncation that comes after will wait on this querier if it overlaps.
+		shouldClose, getNew, newMint := head.IsQuerierCollidingWithTruncation(mint, maxt)
+		if shouldClose {
+			if err := inOrderHeadQuerier.Close(); err != nil {
+				return nil, fmt.Errorf("closing head block querier %s: %w", rh, err)
+			}
+			inOrderHeadQuerier = nil
+		}
+		if getNew {
+			rh := tsdb.NewRangeHead(head, newMint, maxt)
+			inOrderHeadQuerier, err = tsdb.NewBlockQuerier(rh, newMint, maxt)
+			if err != nil {
+				return nil, fmt.Errorf("open block querier for head while getting new querier %s: %w", rh, err)
+			}
+		}
+
+		if inOrderHeadQuerier != nil {
+			blockQueriers = append(blockQueriers, inOrderHeadQuerier)
+		}
+	}
+
+	// We don't have a way to handle query OOO head since some fields are not exposed.
+	//if overlapsClosedInterval(mint, maxt, head.MinOOOTime(), head.MaxOOOTime()) {
+	//	rh := tsdb.NewOOORangeHead(head, mint, maxt, db.lastGarbageCollectedMmapRef)
+	//	var err error
+	//	outOfOrderHeadQuerier, err := tsdb.NewBlockQuerier(rh, mint, maxt)
+	//	if err != nil {
+	//		// If NewBlockQuerier() failed, make sure to clean up the pending read created by NewOOORangeHead.
+	//		rh.isoState.Close()
+	//
+	//		return nil, fmt.Errorf("open block querier for ooo head %s: %w", rh, err)
+	//	}
+	//
+	//	blockQueriers = append(blockQueriers, outOfOrderHeadQuerier)
+	//}
+
+	for _, b := range blocks {
+		hints := b.Meta().Compaction.Hints
+		q, err := tsdb.NewBlockQuerier(b, mint, maxt)
+		if err != nil {
+			return nil, fmt.Errorf("open querier for block %s: %w", b, err)
+		}
+
+		if len(hints) > 0 {
+			strs := strings.Split(hints[0], "=")
+			q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+		}
+		blockQueriers = append(blockQueriers, q)
+	}
+
+	return storage.NewMergeQuerier(blockQueriers, nil, storage.ChainedSeriesMerge), nil
 }
 
-func (u *userTSDB) ChunkQuerier(mint, maxt int64) (storage.ChunkQuerier, error) {
-	return u.db.ChunkQuerier(mint, maxt)
+func (u *userTSDB) ChunkQuerier(mint, maxt int64) (_ storage.ChunkQuerier, err error) {
+	db := u.db
+	head := db.Head()
+	var blocks []tsdb.BlockReader
+
+	for _, b := range db.Blocks() {
+		if b.OverlapsClosedInterval(mint, maxt) {
+			blocks = append(blocks, b)
+		}
+	}
+
+	blockQueriers := make([]storage.ChunkQuerier, 0, len(blocks)+2) // +2 to allow for possible in-order and OOO head queriers
+
+	defer func() {
+		if err != nil {
+			// If we fail, all previously opened queriers must be closed.
+			for _, q := range blockQueriers {
+				// TODO(bwplotka): Handle error.
+				_ = q.Close()
+			}
+		}
+	}()
+
+	if maxt >= head.MinTime() {
+		rh := tsdb.NewRangeHead(head, mint, maxt)
+		inOrderHeadQuerier, err := tsdb.NewBlockChunkQuerier(rh, mint, maxt)
+		if err != nil {
+			return nil, fmt.Errorf("open querier for head %s: %w", rh, err)
+		}
+
+		// Getting the querier above registers itself in the queue that the truncation waits on.
+		// So if the querier is currently not colliding with any truncation, we can continue to use it and still
+		// won't run into a race later since any truncation that comes after will wait on this querier if it overlaps.
+		shouldClose, getNew, newMint := head.IsQuerierCollidingWithTruncation(mint, maxt)
+		if shouldClose {
+			if err := inOrderHeadQuerier.Close(); err != nil {
+				return nil, fmt.Errorf("closing head querier %s: %w", rh, err)
+			}
+			inOrderHeadQuerier = nil
+		}
+		if getNew {
+			rh := tsdb.NewRangeHead(head, newMint, maxt)
+			inOrderHeadQuerier, err = tsdb.NewBlockChunkQuerier(rh, newMint, maxt)
+			if err != nil {
+				return nil, fmt.Errorf("open querier for head while getting new querier %s: %w", rh, err)
+			}
+		}
+
+		if inOrderHeadQuerier != nil {
+			blockQueriers = append(blockQueriers, inOrderHeadQuerier)
+		}
+	}
+
+	// Cannot do it because some fields are not exposed.
+	//if overlapsClosedInterval(mint, maxt, head.MinOOOTime(), head.MaxOOOTime()) {
+	//	rh := tsdb.NewOOORangeHead(head, mint, maxt, db.lastGarbageCollectedMmapRef)
+	//	outOfOrderHeadQuerier, err := tsdb.NewBlockChunkQuerier(rh, mint, maxt)
+	//	if err != nil {
+	//		return nil, fmt.Errorf("open block chunk querier for ooo head %s: %w", rh, err)
+	//	}
+	//
+	//	blockQueriers = append(blockQueriers, outOfOrderHeadQuerier)
+	//}
+
+	for _, b := range blocks {
+		hints := b.Meta().Compaction.Hints
+		q, err := tsdb.NewBlockChunkQuerier(b, mint, maxt)
+		if err != nil {
+			return nil, fmt.Errorf("open querier for block %s: %w", b, err)
+		}
+
+		if len(hints) > 0 {
+			strs := strings.Split(hints[0], "=")
+			q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+		}
+		blockQueriers = append(blockQueriers, q)
+	}
+	for _, b := range blocks {
+		q, err := tsdb.NewBlockChunkQuerier(b, mint, maxt)
+		if err != nil {
+			return nil, fmt.Errorf("open querier for block %s: %w", b, err)
+		}
+		blockQueriers = append(blockQueriers, q)
+	}
+
+	return storage.NewMergeChunkQuerier(blockQueriers, nil, storage.NewCompactingChunkSeriesMerger(storage.ChainedSeriesMerge)), nil
 }
 
 func (u *userTSDB) ExemplarQuerier(ctx context.Context) (storage.ExemplarQuerier, error) {
