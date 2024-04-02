@@ -192,7 +192,15 @@ type Options struct {
 	EnableSharding bool
 
 	NewCompactorFunc NewCompactorFunc
+
+	BlockQuerierFunc BlockQuerierFunc
+
+	BlockChunkQuerierFunc BlockChunkQuerierFunc
 }
+
+type BlockQuerierFunc func(b BlockReader, mint, maxt int64) (storage.Querier, error)
+
+type BlockChunkQuerierFunc func(b BlockReader, mint, maxt int64) (storage.ChunkQuerier, error)
 
 type NewCompactorFunc func(ctx context.Context, r prometheus.Registerer, l log.Logger, ranges []int64, pool chunkenc.Pool, opts *Options) (Compactor, error)
 
@@ -244,6 +252,10 @@ type DB struct {
 	writeNotified wlog.WriteNotified
 
 	registerer prometheus.Registerer
+
+	BlockQuerierFunc func(b BlockReader, mint, maxt int64) (storage.Querier, error)
+
+	BlockChunkQuerierFunc func(b BlockReader, mint, maxt int64) (storage.ChunkQuerier, error)
 }
 
 type dbMetrics struct {
@@ -846,6 +858,18 @@ func open(dir string, l log.Logger, r prometheus.Registerer, opts *Options, rngs
 		return nil, fmt.Errorf("create compactor: %w", err)
 	}
 	db.compactCancel = cancel
+
+	if opts.BlockQuerierFunc == nil {
+		db.BlockQuerierFunc = NewBlockQuerier
+	} else {
+		db.BlockQuerierFunc = opts.BlockQuerierFunc
+	}
+
+	if opts.BlockChunkQuerierFunc == nil {
+		db.BlockChunkQuerierFunc = NewBlockChunkQuerier
+	} else {
+		db.BlockChunkQuerierFunc = opts.BlockChunkQuerierFunc
+	}
 
 	var wal, wbl *wlog.WL
 	segmentSize := wlog.DefaultSegmentSize
@@ -1942,7 +1966,7 @@ func (db *DB) Querier(mint, maxt int64) (_ storage.Querier, err error) {
 	if maxt >= db.head.MinTime() {
 		rh := NewRangeHead(db.head, mint, maxt)
 		var err error
-		inOrderHeadQuerier, err := NewBlockQuerier(rh, mint, maxt)
+		inOrderHeadQuerier, err := db.BlockQuerierFunc(rh, mint, maxt)
 		if err != nil {
 			return nil, fmt.Errorf("open block querier for head %s: %w", rh, err)
 		}
@@ -1959,7 +1983,7 @@ func (db *DB) Querier(mint, maxt int64) (_ storage.Querier, err error) {
 		}
 		if getNew {
 			rh := NewRangeHead(db.head, newMint, maxt)
-			inOrderHeadQuerier, err = NewBlockQuerier(rh, newMint, maxt)
+			inOrderHeadQuerier, err = db.BlockQuerierFunc(rh, newMint, maxt)
 			if err != nil {
 				return nil, fmt.Errorf("open block querier for head while getting new querier %s: %w", rh, err)
 			}
@@ -1973,7 +1997,7 @@ func (db *DB) Querier(mint, maxt int64) (_ storage.Querier, err error) {
 	if overlapsClosedInterval(mint, maxt, db.head.MinOOOTime(), db.head.MaxOOOTime()) {
 		rh := NewOOORangeHead(db.head, mint, maxt, db.lastGarbageCollectedMmapRef)
 		var err error
-		outOfOrderHeadQuerier, err := NewBlockQuerier(rh, mint, maxt)
+		outOfOrderHeadQuerier, err := db.BlockQuerierFunc(rh, mint, maxt)
 		if err != nil {
 			// If NewBlockQuerier() failed, make sure to clean up the pending read created by NewOOORangeHead.
 			rh.isoState.Close()
@@ -1985,7 +2009,7 @@ func (db *DB) Querier(mint, maxt int64) (_ storage.Querier, err error) {
 	}
 
 	for _, b := range blocks {
-		q, err := NewBlockQuerier(b, mint, maxt)
+		q, err := db.BlockQuerierFunc(b, mint, maxt)
 		if err != nil {
 			return nil, fmt.Errorf("open querier for block %s: %w", b, err)
 		}
@@ -2023,7 +2047,7 @@ func (db *DB) blockChunkQuerierForRange(mint, maxt int64) (_ []storage.ChunkQuer
 
 	if maxt >= db.head.MinTime() {
 		rh := NewRangeHead(db.head, mint, maxt)
-		inOrderHeadQuerier, err := NewBlockChunkQuerier(rh, mint, maxt)
+		inOrderHeadQuerier, err := db.BlockChunkQuerierFunc(rh, mint, maxt)
 		if err != nil {
 			return nil, fmt.Errorf("open querier for head %s: %w", rh, err)
 		}
@@ -2040,7 +2064,7 @@ func (db *DB) blockChunkQuerierForRange(mint, maxt int64) (_ []storage.ChunkQuer
 		}
 		if getNew {
 			rh := NewRangeHead(db.head, newMint, maxt)
-			inOrderHeadQuerier, err = NewBlockChunkQuerier(rh, newMint, maxt)
+			inOrderHeadQuerier, err = db.BlockChunkQuerierFunc(rh, newMint, maxt)
 			if err != nil {
 				return nil, fmt.Errorf("open querier for head while getting new querier %s: %w", rh, err)
 			}
@@ -2053,7 +2077,7 @@ func (db *DB) blockChunkQuerierForRange(mint, maxt int64) (_ []storage.ChunkQuer
 
 	if overlapsClosedInterval(mint, maxt, db.head.MinOOOTime(), db.head.MaxOOOTime()) {
 		rh := NewOOORangeHead(db.head, mint, maxt, db.lastGarbageCollectedMmapRef)
-		outOfOrderHeadQuerier, err := NewBlockChunkQuerier(rh, mint, maxt)
+		outOfOrderHeadQuerier, err := db.BlockChunkQuerierFunc(rh, mint, maxt)
 		if err != nil {
 			return nil, fmt.Errorf("open block chunk querier for ooo head %s: %w", rh, err)
 		}
@@ -2062,7 +2086,7 @@ func (db *DB) blockChunkQuerierForRange(mint, maxt int64) (_ []storage.ChunkQuer
 	}
 
 	for _, b := range blocks {
-		q, err := NewBlockChunkQuerier(b, mint, maxt)
+		q, err := db.BlockChunkQuerierFunc(b, mint, maxt)
 		if err != nil {
 			return nil, fmt.Errorf("open querier for block %s: %w", b, err)
 		}
