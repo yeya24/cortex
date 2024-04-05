@@ -9,6 +9,10 @@ import (
 	"github.com/prometheus/prometheus/util/annotations"
 )
 
+var (
+	allPostingMatcher = labels.MustNewMatcher(labels.MatchEqual, "", "")
+)
+
 type ExternalLabelQuerier struct {
 	storage.Querier
 	label labels.Label
@@ -75,6 +79,9 @@ func (q *ExternalLabelQuerier) Select(ctx context.Context, sortSeries bool, hint
 			continue
 		}
 		newMatchers = append(newMatchers, matcher)
+	}
+	if len(newMatchers) == 0 {
+		newMatchers = append(newMatchers, allPostingMatcher)
 	}
 	return &ExternalLabelSeriesSet{
 		label:     q.label,
@@ -150,6 +157,9 @@ func (q *ExternalLabelChunkQuerier) Select(ctx context.Context, sortSeries bool,
 			continue
 		}
 		newMatchers = append(newMatchers, matcher)
+	}
+	if len(newMatchers) == 0 {
+		newMatchers = append(newMatchers, allPostingMatcher)
 	}
 	return &ExternalLabelChunkSeriesSet{
 		label:          q.label,
