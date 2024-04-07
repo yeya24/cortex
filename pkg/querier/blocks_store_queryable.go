@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/compact/downsample"
 	"io"
 	"sort"
 	"strings"
@@ -1070,6 +1071,7 @@ func createSeriesRequest(minT, maxT int64, matchers []storepb.LabelMatcher, shar
 		SkipChunks:              skipChunks,
 		ShardInfo:               shardingInfo,
 		Aggregates:              aggrs,
+		MaxResolutionWindow:     downsample.ResLevel1,
 	}, nil
 }
 
