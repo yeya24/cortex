@@ -2,6 +2,7 @@ package querier
 
 import (
 	"context"
+	"github.com/prometheus/prometheus/model/labels"
 	"path"
 	"path/filepath"
 	"sort"
@@ -108,7 +109,7 @@ func NewBucketScanBlocksFinder(cfg BucketScanBlocksFinderConfig, bucketClient ob
 
 // GetBlocks returns known blocks for userID containing samples within the range minT
 // and maxT (milliseconds, both included). Returned blocks are sorted by MaxTime descending.
-func (d *BucketScanBlocksFinder) GetBlocks(_ context.Context, userID string, minT, maxT int64) (bucketindex.Blocks, map[ulid.ULID]*bucketindex.BlockDeletionMark, error) {
+func (d *BucketScanBlocksFinder) GetBlocks(_ context.Context, userID string, minT, maxT int64, matchers []*labels.Matcher) (bucketindex.Blocks, map[ulid.ULID]*bucketindex.BlockDeletionMark, error) {
 	// We need to ensure the initial full bucket scan succeeded.
 	if d.State() != services.Running {
 		return nil, nil, errBucketScanBlocksFinderNotRunning
@@ -128,8 +129,16 @@ func (d *BucketScanBlocksFinder) GetBlocks(_ context.Context, userID string, min
 	// Given we do expect the large majority of queries to have a time range close
 	// to "now", we're going to find matching blocks iterating the list in reverse order.
 	var matchingMetas bucketindex.Blocks
+OUTER:
 	for i := len(userMetas) - 1; i >= 0; i-- {
 		if userMetas[i].Within(minT, maxT) {
+			for _, matcher := range matchers {
+				if value, ok := userMetas[i].Labels[matcher.Name]; ok {
+					if !matcher.Matches(value) {
+						continue OUTER
+					}
+				}
+			}
 			matchingMetas = append(matchingMetas, userMetas[i])
 		}
 

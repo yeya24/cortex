@@ -87,6 +87,9 @@ type Block struct {
 	// UploadedAt is a unix timestamp (seconds precision) of when the block has been completed to be uploaded
 	// to the storage.
 	UploadedAt int64 `json:"uploaded_at"`
+
+	// External labels of the block.
+	Labels map[string]string `json:"labels"`
 }
 
 // Within returns whether the block contains samples within the provided range.
@@ -104,7 +107,7 @@ func (m *Block) GetUploadedAt() time.Time {
 // The returned meta doesn't include all original meta.json data but only a subset
 // of it.
 func (m *Block) ThanosMeta(userID string) *metadata.Meta {
-	return &metadata.Meta{
+	meta := &metadata.Meta{
 		BlockMeta: tsdb.BlockMeta{
 			ULID:    m.ID,
 			MinTime: m.MinTime,
@@ -123,6 +126,10 @@ func (m *Block) ThanosMeta(userID string) *metadata.Meta {
 			},
 		},
 	}
+	for k, v := range m.Labels {
+		meta.Thanos.Labels[k] = v
+	}
+	return meta
 }
 
 func (m *Block) thanosMetaSegmentFiles() (files []string) {
@@ -145,6 +152,13 @@ func (m *Block) String() string {
 func BlockFromThanosMeta(meta metadata.Meta) *Block {
 	segmentsFormat, segmentsNum := detectBlockSegmentsFormat(meta)
 
+	labels := make(map[string]string, len(meta.Thanos.Labels))
+	for k, v := range meta.Thanos.Labels {
+		if k == cortex_tsdb.IngesterIDExternalLabel || k == cortex_tsdb.TenantIDExternalLabel {
+			continue
+		}
+		labels[k] = v
+	}
 	return &Block{
 		ID:             meta.ULID,
 		MinTime:        meta.MinTime,
@@ -153,6 +167,7 @@ func BlockFromThanosMeta(meta metadata.Meta) *Block {
 		SegmentsNum:    segmentsNum,
 		SeriesMaxSize:  meta.Thanos.IndexStats.SeriesMaxSize,
 		ChunkMaxSize:   meta.Thanos.IndexStats.ChunkMaxSize,
+		Labels:         labels,
 	}
 }
 

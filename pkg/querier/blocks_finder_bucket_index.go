@@ -2,6 +2,7 @@ package querier
 
 import (
 	"context"
+	"github.com/prometheus/prometheus/model/labels"
 	"time"
 
 	"github.com/go-kit/log"
@@ -49,7 +50,7 @@ func NewBucketIndexBlocksFinder(cfg BucketIndexBlocksFinderConfig, bkt objstore.
 }
 
 // GetBlocks implements BlocksFinder.
-func (f *BucketIndexBlocksFinder) GetBlocks(ctx context.Context, userID string, minT, maxT int64) (bucketindex.Blocks, map[ulid.ULID]*bucketindex.BlockDeletionMark, error) {
+func (f *BucketIndexBlocksFinder) GetBlocks(ctx context.Context, userID string, minT, maxT int64, matchers []*labels.Matcher) (bucketindex.Blocks, map[ulid.ULID]*bucketindex.BlockDeletionMark, error) {
 	if f.State() != services.Running {
 		return nil, nil, errBucketIndexBlocksFinderNotRunning
 	}
@@ -87,11 +88,19 @@ func (f *BucketIndexBlocksFinder) GetBlocks(ctx context.Context, userID string, 
 	)
 
 	// Filter blocks containing samples within the range.
+OUTER:
 	for _, block := range idx.Blocks {
 		if !block.Within(minT, maxT) {
 			continue
 		}
 
+		for _, matcher := range matchers {
+			if value, ok := block.Labels[matcher.Name]; ok {
+				if !matcher.Matches(value) {
+					continue OUTER
+				}
+			}
+		}
 		matchingBlocks[block.ID] = block
 	}
 
