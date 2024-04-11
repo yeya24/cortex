@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"github.com/prometheus/prometheus/model/labels"
+	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
@@ -94,6 +95,16 @@ OUTER:
 			continue
 		}
 
+		if value, ok := block.Labels["__shard_number__"]; ok {
+			shardIdx, _ := strconv.Atoi(value)
+			for _, matcher := range matchers {
+				if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
+					if int(hash(matcher.Value))%8 != shardIdx {
+						continue OUTER
+					}
+				}
+			}
+		}
 		for _, matcher := range matchers {
 			if value, ok := block.Labels[matcher.Name]; ok {
 				if !matcher.Matches(value) {

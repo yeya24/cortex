@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2027,6 +2028,31 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 	if i.cfg.BlocksStorageConfig.TSDB.WALCompressionEnabled {
 		walCompressType = wlog.CompressionSnappy
 	}
+	newCompactorFunc := func(ctx context.Context, r prometheus.Registerer, l log.Logger, ranges []int64, pool chunkenc.Pool, opts *tsdb.Options) (tsdb.Compactor, error) {
+		return &ExternalLabelCompactor{
+			logger:                   l,
+			ctx:                      ctx,
+			userID:                   userID,
+			chunkPool:                pool,
+			maxBlockChunkSegmentSize: opts.MaxBlockChunkSegmentSize,
+			metrics:                  tsdb.NewCompactorMetrics(r),
+			overrides:                i.limits,
+		}, nil
+	}
+	if i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
+		newCompactorFunc = func(ctx context.Context, r prometheus.Registerer, l log.Logger, ranges []int64, pool chunkenc.Pool, opts *tsdb.Options) (tsdb.Compactor, error) {
+			return &ShardByMetricNameCompactor{
+				shards:                   i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards,
+				logger:                   l,
+				ctx:                      ctx,
+				userID:                   userID,
+				chunkPool:                pool,
+				maxBlockChunkSegmentSize: opts.MaxBlockChunkSegmentSize,
+				metrics:                  tsdb.NewCompactorMetrics(r),
+				overrides:                i.limits,
+			}, nil
+		}
+	}
 	// Create a new user database
 	db, err := tsdb.Open(udir, userLogger, tsdbPromReg, &tsdb.Options{
 		RetentionDuration:              i.cfg.BlocksStorageConfig.TSDB.Retention.Milliseconds(),
@@ -2047,18 +2073,7 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 		OutOfOrderTimeWindow:           time.Duration(oooTimeWindow).Milliseconds(),
 		OutOfOrderCapMax:               i.cfg.BlocksStorageConfig.TSDB.OutOfOrderCapMax,
 		EnableOverlappingCompaction:    false, // Always let compactors handle overlapped blocks, e.g. OOO blocks.
-		NewCompactorFunc: func(ctx context.Context, r prometheus.Registerer, l log.Logger, ranges []int64, pool chunkenc.Pool, opts *tsdb.Options) (tsdb.Compactor, error) {
-			return &ExternalLabelCompactor{
-				logger:                   l,
-				ctx:                      ctx,
-				userID:                   userID,
-				chunkPool:                pool,
-				maxBlockChunkSegmentSize: opts.MaxBlockChunkSegmentSize,
-				mergeFunc:                storage.NewCompactingChunkSeriesMerger(storage.ChainedSeriesMerge),
-				metrics:                  tsdb.NewCompactorMetrics(r),
-				overrides:                i.limits,
-			}, nil
-		},
+		NewCompactorFunc:               newCompactorFunc,
 		BlockQuerierFunc: func(b tsdb.BlockReader, mint, maxt int64) (storage.Querier, error) {
 			hints := b.Meta().Compaction.Hints
 			q, err := tsdb.NewBlockQuerier(b, mint, maxt)
@@ -2068,7 +2083,12 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 
 			if len(hints) > 0 {
 				strs := strings.Split(hints[0], "=")
-				q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+				if strs[0] == "__shard_number__" && i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
+					shard, _ := strconv.Atoi(strs[1])
+					q = NewShardByMetricNameQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
+				} else {
+					q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+				}
 			}
 			return q, nil
 		},
@@ -2081,7 +2101,12 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 
 			if len(hints) > 0 {
 				strs := strings.Split(hints[0], "=")
-				q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+				if strs[0] == "__shard_number__" && i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
+					shard, _ := strconv.Atoi(strs[1])
+					q = NewShardByMetricNameChunkQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
+				} else {
+					q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+				}
 			}
 			return q, nil
 		},

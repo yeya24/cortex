@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"github.com/cespare/xxhash/v2"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/go-kit/log"
@@ -40,7 +42,6 @@ type ExternalLabelCompactor struct {
 	chunkPool                chunkenc.Pool
 	maxBlockChunkSegmentSize int64
 	metrics                  *tsdb.CompactorMetrics
-	mergeFunc                storage.VerticalChunkSeriesMergeFunc
 }
 
 // Plan is a noop since we disable compaction in Ingester.
@@ -131,7 +132,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 			}
 		}
 
-		err := c.write(dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, outputBlock.label, b)
+		err := write(c.ctx, c.metrics, c.logger, c.chunkPool, c.maxBlockChunkSegmentSize, dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, outputBlock.label, b)
 		if err != nil {
 			return []ulid.ULID{uid}, err
 		}
@@ -160,7 +161,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 }
 
 // write creates a new block that is the union of the provided blocks into dir.
-func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPopulator tsdb.BlockPopulator, postingsFunc tsdb.IndexReaderPostingsFunc, filterLabel labels.Label, blocks ...tsdb.BlockReader) (err error) {
+func write(ctx context.Context, metrics *tsdb.CompactorMetrics, logger log.Logger, chunkPool chunkenc.Pool, maxBlockChunkSegmentSize int64, dest string, meta *metadata.Meta, blockPopulator tsdb.BlockPopulator, postingsFunc tsdb.IndexReaderPostingsFunc, filterLabel labels.Label, blocks ...tsdb.BlockReader) (err error) {
 	dir := filepath.Join(dest, meta.ULID.String())
 	tmp := dir + tmpForCreationBlockDirSuffix
 	var closers []io.Closer
@@ -169,10 +170,10 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 
 		// RemoveAll returns no error when tmp doesn't exist so it is safe to always run it.
 		if err := os.RemoveAll(tmp); err != nil {
-			level.Error(c.logger).Log("msg", "removed tmp folder after failed compaction", "err", err.Error())
+			level.Error(logger).Log("msg", "removed tmp folder after failed compaction", "err", err.Error())
 		}
-		c.metrics.Ran.Inc()
-		c.metrics.Duration.Observe(time.Since(t).Seconds())
+		metrics.Ran.Inc()
+		metrics.Duration.Observe(time.Since(t).Seconds())
 	}(time.Now())
 
 	if err = os.RemoveAll(tmp); err != nil {
@@ -187,7 +188,7 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 	// data of all blocks.
 	var chunkw tsdb.ChunkWriter
 
-	chunkw, err = chunks.NewWriterWithSegSize(chunkDir(tmp), c.maxBlockChunkSegmentSize)
+	chunkw, err = chunks.NewWriterWithSegSize(chunkDir(tmp), maxBlockChunkSegmentSize)
 	if err != nil {
 		return fmt.Errorf("open chunk writer: %w", err)
 	}
@@ -196,13 +197,13 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 	if meta.Compaction.Level == 1 {
 		chunkw = &instrumentedChunkWriter{
 			ChunkWriter: chunkw,
-			size:        c.metrics.ChunkSize,
-			samples:     c.metrics.ChunkSamples,
-			trange:      c.metrics.ChunkRange,
+			size:        metrics.ChunkSize,
+			samples:     metrics.ChunkSamples,
+			trange:      metrics.ChunkRange,
 		}
 	}
 
-	indexw, err := index.NewWriterWithEncoder(c.ctx, filepath.Join(tmp, indexFilename), index.EncodePostingsRaw)
+	indexw, err := index.NewWriterWithEncoder(ctx, filepath.Join(tmp, indexFilename), index.EncodePostingsRaw)
 	if err != nil {
 		return fmt.Errorf("open index writer: %w", err)
 	}
@@ -214,13 +215,13 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 	if len(filterLabel.Name) > 0 {
 		indexWriter = &FilteredIndexWriter{IndexWriter: indexw, name: filterLabel.Name, builder: labels.NewBuilder(labels.EmptyLabels())}
 	}
-	if err := blockPopulator.PopulateBlock(c.ctx, c.metrics, c.logger, c.chunkPool, c.mergeFunc, blocks, &meta.BlockMeta, indexWriter, chunkw, postingsFunc); err != nil {
+	if err := blockPopulator.PopulateBlock(ctx, metrics, logger, chunkPool, storage.NewCompactingChunkSeriesMerger(storage.ChainedSeriesMerge), blocks, &meta.BlockMeta, indexWriter, chunkw, postingsFunc); err != nil {
 		return fmt.Errorf("populate block: %w", err)
 	}
 
 	select {
-	case <-c.ctx.Done():
-		return c.ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
 	default:
 	}
 
@@ -242,7 +243,7 @@ func (c *ExternalLabelCompactor) write(dest string, meta *metadata.Meta, blockPo
 		return nil
 	}
 
-	if err := meta.WriteToDir(c.logger, tmp); err != nil {
+	if err := meta.WriteToDir(logger, tmp); err != nil {
 		return fmt.Errorf("write merged meta: %w", err)
 	}
 
@@ -305,4 +306,122 @@ func (w *FilteredIndexWriter) AddSeries(ref storage.SeriesRef, l labels.Labels, 
 	w.builder.Reset(l)
 	w.builder.Del(w.name)
 	return w.IndexWriter.AddSeries(ref, w.builder.Labels(), chunks...)
+}
+
+type ShardByMetricNameCompactor struct {
+	ctx       context.Context
+	logger    log.Logger
+	userID    string
+	overrides *validation.Overrides
+	shards    int
+
+	chunkPool                chunkenc.Pool
+	maxBlockChunkSegmentSize int64
+	metrics                  *tsdb.CompactorMetrics
+}
+
+// Plan is a noop since we disable compaction in Ingester.
+func (c *ShardByMetricNameCompactor) Plan(dir string) ([]string, error) {
+	return nil, nil
+}
+
+// Compact is a noop since we disable compaction in Ingester.
+func (c *ShardByMetricNameCompactor) Compact(dest string, dirs []string, open []*tsdb.Block) (ulid.ULID, error) {
+	return ulid.ULID{}, nil
+}
+
+func (c *ShardByMetricNameCompactor) Write(dest string, b tsdb.BlockReader, mint, maxt int64, parent *tsdb.BlockMeta) ([]ulid.ULID, error) {
+	type outputBlock struct {
+		postingFunc tsdb.IndexReaderPostingsFunc
+		label       labels.Label
+	}
+	outputBlocks := []outputBlock{}
+	for i := 0; i < c.shards; i++ {
+		i := i
+		pf := func(ctx context.Context, reader tsdb.IndexReader) index.Postings {
+			k, v := index.AllPostingsKey()
+			allPostings, err := reader.Postings(ctx, k, v)
+			if err != nil {
+				return index.ErrPostings(err)
+			}
+			var builder labels.ScratchBuilder
+			var chks []chunks.Meta
+			postings := []storage.SeriesRef{}
+			for allPostings.Next() {
+				ref := allPostings.At()
+				if err := reader.Series(ref, &builder, &chks); err != nil {
+					return index.ErrPostings(err)
+				}
+				fmt.Println(i)
+				if int(hash(builder.Labels().Get(labels.MetricName)))%c.shards == i {
+					postings = append(postings, ref)
+				}
+			}
+			return reader.SortedPostings(index.NewListPostings(postings))
+		}
+		outputBlocks = append(outputBlocks, outputBlock{
+			postingFunc: pf,
+			label:       labels.Label{Name: "__shard_number__", Value: strconv.Itoa(i)},
+		})
+	}
+
+	uids := make([]ulid.ULID, 0, len(outputBlocks))
+	for _, outputBlock := range outputBlocks {
+		start := time.Now()
+
+		uid := ulid.MustNew(ulid.Now(), rand.Reader)
+
+		meta := &metadata.Meta{
+			BlockMeta: tsdb.BlockMeta{
+				Version: metadata.TSDBVersion1,
+				ULID:    uid,
+				MinTime: mint,
+				MaxTime: maxt,
+				Compaction: tsdb.BlockMetaCompaction{
+					Level:   1,
+					Sources: []ulid.ULID{uid},
+				},
+			},
+		}
+		meta.BlockMeta.Compaction.Hints = []string{outputBlock.label.Name + "=" + outputBlock.label.Value}
+		meta.Thanos.Labels = map[string]string{outputBlock.label.Name: outputBlock.label.Value}
+
+		if parent != nil {
+			meta.Compaction.Parents = []tsdb.BlockDesc{
+				{ULID: parent.ULID, MinTime: parent.MinTime, MaxTime: parent.MaxTime},
+			}
+		}
+
+		err := write(c.ctx, c.metrics, c.logger, c.chunkPool, c.maxBlockChunkSegmentSize, dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, outputBlock.label, b)
+		if err != nil {
+			return []ulid.ULID{uid}, err
+		}
+
+		if meta.Stats.NumSamples == 0 {
+			level.Info(c.logger).Log(
+				"msg", "write block resulted in empty block",
+				"mint", meta.MinTime,
+				"maxt", meta.MaxTime,
+				"duration", time.Since(start),
+			)
+			continue
+		}
+
+		uids = append(uids, uid)
+		level.Info(c.logger).Log(
+			"msg", "write block",
+			"mint", meta.MinTime,
+			"maxt", meta.MaxTime,
+			"ulid", meta.ULID,
+			"duration", time.Since(start),
+		)
+	}
+
+	return uids, nil
+}
+
+func hash(s string) uint64 {
+	h := xxhash.New()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
 }

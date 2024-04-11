@@ -2,10 +2,12 @@ package querier
 
 import (
 	"context"
+	"github.com/cespare/xxhash/v2"
 	"github.com/prometheus/prometheus/model/labels"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -132,6 +134,16 @@ func (d *BucketScanBlocksFinder) GetBlocks(_ context.Context, userID string, min
 OUTER:
 	for i := len(userMetas) - 1; i >= 0; i-- {
 		if userMetas[i].Within(minT, maxT) {
+			if value, ok := userMetas[i].Labels["__shard_number__"]; ok {
+				shardIdx, _ := strconv.Atoi(value)
+				for _, matcher := range matchers {
+					if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
+						if int(hash(matcher.Value))%8 != shardIdx {
+							continue OUTER
+						}
+					}
+				}
+			}
 			for _, matcher := range matchers {
 				if value, ok := userMetas[i].Labels[matcher.Name]; ok {
 					if !matcher.Matches(value) {
@@ -446,4 +458,10 @@ type userFetcher struct {
 	metadataFetcher    block.MetadataFetcher
 	deletionMarkFilter *block.IgnoreDeletionMarkFilter
 	userBucket         objstore.Bucket
+}
+
+func hash(s string) uint64 {
+	h := xxhash.New()
+	_, _ = h.Write([]byte(s))
+	return h.Sum64()
 }

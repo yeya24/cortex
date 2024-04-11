@@ -155,6 +155,9 @@ type TSDBConfig struct {
 
 	// OutOfOrderCapMax is maximum capacity for OOO chunks (in samples).
 	OutOfOrderCapMax int64 `yaml:"out_of_order_cap_max"`
+
+	ShardByMetricName       bool `yaml:"shard_by_metric_name"`
+	ShardByMetricNameShards int  `yaml:"shard_by_metric_name_shards"`
 }
 
 // RegisterFlags registers the TSDBConfig flags.

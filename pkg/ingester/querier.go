@@ -166,7 +166,6 @@ func (q *ExternalLabelChunkQuerier) Select(ctx context.Context, sortSeries bool,
 		ChunkSeriesSet: q.ChunkQuerier.Select(ctx, sortSeries, hints, newMatchers...),
 		builder:        labels.NewBuilder(labels.EmptyLabels()),
 	}
-
 }
 
 type ExternalLabelSeriesSet struct {
@@ -203,4 +202,52 @@ func (s ExternalLabelChunkSeriesSet) At() storage.ChunkSeries {
 		Lset:            s.builder.Labels(),
 		ChunkIteratorFn: series.Iterator,
 	}
+}
+
+type ShardByMetricNameQuerier struct {
+	storage.Querier
+	shardCount, shardIdx int
+}
+
+func NewShardByMetricNameQuerier(q storage.Querier, shardCount, shardIdx int) *ShardByMetricNameQuerier {
+	return &ShardByMetricNameQuerier{
+		Querier:    q,
+		shardCount: shardCount,
+		shardIdx:   shardIdx,
+	}
+}
+
+func (q *ShardByMetricNameQuerier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
+	for _, matcher := range matchers {
+		if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
+			if int(hash(matcher.Value))%q.shardCount != q.shardIdx {
+				return storage.EmptySeriesSet()
+			}
+		}
+	}
+	return q.Querier.Select(ctx, sortSeries, hints, matchers...)
+}
+
+type ShardByMetricNameChunkQuerier struct {
+	storage.ChunkQuerier
+	shardCount, shardIdx int
+}
+
+func NewShardByMetricNameChunkQuerier(q storage.ChunkQuerier, shardCount, shardIdx int) *ShardByMetricNameChunkQuerier {
+	return &ShardByMetricNameChunkQuerier{
+		ChunkQuerier: q,
+		shardCount:   shardCount,
+		shardIdx:     shardIdx,
+	}
+}
+
+func (q *ShardByMetricNameChunkQuerier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.ChunkSeriesSet {
+	for _, matcher := range matchers {
+		if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
+			if int(hash(matcher.Value))%q.shardCount != q.shardIdx {
+				return storage.EmptyChunkSeriesSet()
+			}
+		}
+	}
+	return q.ChunkQuerier.Select(ctx, sortSeries, hints, matchers...)
 }
