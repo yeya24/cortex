@@ -352,7 +352,6 @@ func (c *ShardByMetricNameCompactor) Write(dest string, b tsdb.BlockReader, mint
 				if err := reader.Series(ref, &builder, &chks); err != nil {
 					return index.ErrPostings(err)
 				}
-				fmt.Println(i)
 				if int(hash(builder.Labels().Get(labels.MetricName)))%c.shards == i {
 					postings = append(postings, ref)
 				}
