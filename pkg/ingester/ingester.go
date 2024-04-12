@@ -2081,14 +2081,18 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 				return nil, fmt.Errorf("open querier for block %s: %w", b, err)
 			}
 
-			if len(hints) > 0 {
-				strs := strings.Split(hints[0], "=")
+			for _, hint := range hints {
+				if hint == tsdb.CompactionHintFromOutOfOrder {
+					continue
+				}
+				strs := strings.Split(hint, "=")
 				if strs[0] == "__shard_number__" && i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
 					shard, _ := strconv.Atoi(strs[1])
 					q = NewShardByMetricNameQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
 				} else {
 					q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
 				}
+				break
 			}
 			return q, nil
 		},
@@ -2099,14 +2103,18 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 				return nil, fmt.Errorf("open querier for block %s: %w", b, err)
 			}
 
-			if len(hints) > 0 {
-				strs := strings.Split(hints[0], "=")
+			for _, hint := range hints {
+				if hint == tsdb.CompactionHintFromOutOfOrder {
+					continue
+				}
+				strs := strings.Split(hint, "=")
 				if strs[0] == "__shard_number__" && i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
 					shard, _ := strconv.Atoi(strs[1])
 					q = NewShardByMetricNameChunkQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
 				} else {
 					q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
 				}
+				break
 			}
 			return q, nil
 		},
