@@ -167,7 +167,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 		startT int64
 		endT   int64
 	)
-	for j := 0; j < 100; j++ {
+	for j := 0; j < 1000; j++ {
 		var exp []pair
 		startT = t
 		for i := 0; i < samplesPerChunk; i++ {
@@ -208,12 +208,11 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 
 	var res float64
 	var it chunkenc.Iterator
-	for i := 0; i < b.N; {
+	for i := 0; i < b.N; i++ {
 		it = iteratorFunc(chunks, startTT, endTT)
 		for it.Next() == chunkenc.ValFloat {
 			_, v := it.At()
 			res = v
-			i++
 		}
 		if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(b, err)
