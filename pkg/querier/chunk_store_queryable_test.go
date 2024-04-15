@@ -133,20 +133,22 @@ func (b sortedByLabels) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b sortedByLabels) Less(i, j int) bool { return labels.Compare(b[i], b[j]) < 0 }
 
 func BenchmarkIterator(b *testing.B) {
-	benchmarkChunkIteratorFunc(b, batch.NewChunkMergeIterator)
-}
+	b.Run("batch", func(b *testing.B) {
+		benchmarkChunkIteratorFunc(b, batch.NewChunkMergeIterator)
+	})
 
-func BenchmarkIterMergeIterator(b *testing.B) {
-	benchmarkChunkIteratorFunc(b, iterators.NewChunkMergeIterator)
-}
+	b.Run("iterators", func(b *testing.B) {
+		benchmarkChunkIteratorFunc(b, iterators.NewChunkMergeIterator)
+	})
 
-func BenchmarkPromStorageIterator(b *testing.B) {
-	benchmarkChunkIteratorFunc(b, func(chunks []chunk.Chunk, from, through model.Time) chunkenc.Iterator {
-		iterables := make([]chunkenc.Iterable, len(chunks))
-		for i, c := range chunks {
-			iterables[i] = c.Data.SampleIterable()
-		}
-		return storage.ChainSampleIteratorFromIterables(nil, iterables)
+	b.Run("prom_iterators", func(b *testing.B) {
+		benchmarkChunkIteratorFunc(b, func(chunks []chunk.Chunk, from, through model.Time) chunkenc.Iterator {
+			iterables := make([]chunkenc.Iterable, len(chunks))
+			for i, c := range chunks {
+				iterables[i] = c.Data.SampleIterable()
+			}
+			return storage.ChainSampleIteratorFromIterables(nil, iterables)
+		})
 	})
 }
 
