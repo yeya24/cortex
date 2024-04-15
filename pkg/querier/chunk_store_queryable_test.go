@@ -3,6 +3,13 @@ package querier
 import (
 	"context"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/querier/batch"
+	"github.com/cortexproject/cortex/pkg/querier/iterators"
+	"github.com/cortexproject/cortex/pkg/util"
+	"github.com/pkg/errors"
+	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	"io"
 	"sort"
 	"testing"
 	"time"
@@ -124,3 +131,90 @@ type sortedByLabels []labels.Labels
 func (b sortedByLabels) Len() int           { return len(b) }
 func (b sortedByLabels) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b sortedByLabels) Less(i, j int) bool { return labels.Compare(b[i], b[j]) < 0 }
+
+func BenchmarkBatchMergeIterator(b *testing.B) {
+	benchmarkChunkIteratorFunc(b, batch.NewChunkMergeIterator)
+}
+
+func BenchmarkIterMergeIterator(b *testing.B) {
+	benchmarkChunkIteratorFunc(b, iterators.NewChunkMergeIterator)
+}
+
+func BenchmarkPromStorageIterator(b *testing.B) {
+	benchmarkChunkIteratorFunc(b, func(chunks []chunk.Chunk, from, through model.Time) chunkenc.Iterator {
+		iterables := make([]chunkenc.Iterable, len(chunks))
+		for i, c := range chunks {
+			iterables[i] = c.Data.SampleIterable()
+		}
+		return storage.ChainSampleIteratorFromIterables(nil, iterables)
+	})
+}
+
+func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
+	const samplesPerChunk = 250
+	type pair struct {
+		t int64
+		v float64
+	}
+	var (
+		t      = int64(1234123324)
+		v      = 1243535.123
+		chunks []chunk.Chunk
+	)
+	var (
+		startT int64
+		endT   int64
+	)
+	for j := 0; j < 100; j++ {
+		var exp []pair
+		startT = t
+		for i := 0; i < samplesPerChunk; i++ {
+			// t += int64(rand.Intn(10000) + 1)
+			t += int64(1000)
+			// v = rand.Float64()
+			v += float64(100)
+			exp = append(exp, pair{t: t, v: v})
+		}
+		endT = t
+
+		chk := chunkenc.NewXORChunk()
+		{
+			a, err := chk.Appender()
+			if err != nil {
+				b.Fatalf("get appender: %s", err)
+			}
+			j := 0
+			for _, p := range exp {
+				if j > 250 {
+					break
+				}
+				a.Append(p.t, p.v)
+				j++
+			}
+		}
+		c, err := promchunk.NewForEncoding(promchunk.PrometheusXorChunk)
+		require.NoError(b, err)
+		chunks = append(chunks, chunk.NewChunk(nil, c, model.TimeFromUnix(util.TimeFromMillis(startT).Unix()), model.TimeFromUnix(util.TimeFromMillis(endT).Unix())))
+	}
+
+	startTT := model.TimeFromUnix(util.TimeFromMillis(startT).Unix())
+	endTT := model.TimeFromUnix(util.TimeFromMillis(endT).Unix())
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	var res float64
+	var it chunkenc.Iterator
+	for i := 0; i < b.N; {
+		it = iteratorFunc(chunks, startTT, endTT)
+		for it.Next() == chunkenc.ValFloat {
+			_, v := it.At()
+			res = v
+			i++
+		}
+		if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
+			require.NoError(b, err)
+		}
+		_ = res
+	}
+}

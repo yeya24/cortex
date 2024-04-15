@@ -78,6 +78,10 @@ func (p *prometheusXorChunk) Len() int {
 	return p.chunk.NumSamples()
 }
 
+func (p *prometheusXorChunk) SampleIterable() chunkenc.Iterable {
+	return p.chunk
+}
+
 type prometheusChunkIterator struct {
 	c  chunkenc.Chunk // we need chunk, because FindAtOrAfter needs to start with fresh iterator.
 	it chunkenc.Iterator
