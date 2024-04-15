@@ -132,7 +132,7 @@ func (b sortedByLabels) Len() int           { return len(b) }
 func (b sortedByLabels) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
 func (b sortedByLabels) Less(i, j int) bool { return labels.Compare(b[i], b[j]) < 0 }
 
-func BenchmarkBatchMergeIterator(b *testing.B) {
+func BenchmarkIterator(b *testing.B) {
 	benchmarkChunkIteratorFunc(b, batch.NewChunkMergeIterator)
 }
 
@@ -165,7 +165,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 		startT int64
 		endT   int64
 	)
-	for j := 0; j < 10; j++ {
+	for j := 0; j < 100; j++ {
 		var exp []pair
 		startT = t
 		for i := 0; i < samplesPerChunk; i++ {
@@ -194,6 +194,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 		}
 		c, err := promchunk.NewForEncoding(promchunk.PrometheusXorChunk)
 		require.NoError(b, err)
+		c.UnmarshalFromBuf(chk.Bytes())
 		chunks = append(chunks, chunk.NewChunk(nil, c, model.TimeFromUnix(util.TimeFromMillis(startT).Unix()), model.TimeFromUnix(util.TimeFromMillis(endT).Unix())))
 	}
 
