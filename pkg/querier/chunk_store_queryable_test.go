@@ -210,9 +210,14 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 	var it chunkenc.Iterator
 	for i := 0; i < b.N; i++ {
 		it = iteratorFunc(chunks, startTT, endTT)
+		j := 0
 		for it.Next() == chunkenc.ValFloat {
 			_, v := it.At()
 			res = v
+			j++
+			if j == 1400 {
+				break
+			}
 		}
 		if err := it.Err(); err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(b, err)
