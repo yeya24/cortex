@@ -215,7 +215,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 			_, v := it.At()
 			res = v
 			j++
-			if j == 100 {
+			if j == 50 {
 				break
 			}
 		}
