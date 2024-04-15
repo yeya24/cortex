@@ -2045,11 +2045,9 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 				shards:                   i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards,
 				logger:                   l,
 				ctx:                      ctx,
-				userID:                   userID,
 				chunkPool:                pool,
 				maxBlockChunkSegmentSize: opts.MaxBlockChunkSegmentSize,
 				metrics:                  tsdb.NewCompactorMetrics(r),
-				overrides:                i.limits,
 			}, nil
 		}
 	}
@@ -2090,7 +2088,12 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 					shard, _ := strconv.Atoi(strs[1])
 					q = NewShardByMetricNameQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
 				} else {
-					q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+					if len(strs) == 2 {
+						q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]}, true)
+					} else if strings.Contains(hint, "!~") {
+						strs = strings.Split(hint, "!~")
+						q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]}, false)
+					}
 				}
 				break
 			}
@@ -2112,7 +2115,12 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 					shard, _ := strconv.Atoi(strs[1])
 					q = NewShardByMetricNameChunkQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
 				} else {
-					q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]})
+					if len(strs) == 2 {
+						q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]}, true)
+					} else if strings.Contains(hint, "!~") {
+						strs = strings.Split(hint, "!~")
+						q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]}, false)
+					}
 				}
 				break
 			}

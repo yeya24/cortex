@@ -15,28 +15,43 @@ var (
 
 type ExternalLabelQuerier struct {
 	storage.Querier
-	label labels.Label
+	label      labels.Label
+	matchEqual bool
 }
 
-func NewExternalLabelQuerier(q storage.Querier, label labels.Label) *ExternalLabelQuerier {
+func NewExternalLabelQuerier(q storage.Querier, label labels.Label, matchEqual bool) *ExternalLabelQuerier {
 	return &ExternalLabelQuerier{
-		Querier: q,
-		label:   label,
+		Querier:    q,
+		label:      label,
+		matchEqual: matchEqual,
 	}
 }
 
 func (q *ExternalLabelQuerier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	if name == q.label.Name {
+	if q.matchEqual && name == q.label.Name {
 		return []string{q.label.Value}, nil, nil
 	}
 
+	var notRegexpMatcher *labels.Matcher
 	newMatchers := make([]*labels.Matcher, 0, len(matchers))
 	for _, matcher := range matchers {
 		if matcher.Name == q.label.Name {
-			if !matcher.Matches(q.label.Value) {
-				return nil, nil, nil
+			if q.matchEqual {
+				if !matcher.Matches(q.label.Value) {
+					return nil, nil, nil
+				}
+				continue
 			}
-			continue
+
+			if matcher.Type == labels.MatchEqual {
+				if notRegexpMatcher == nil {
+					notRegexpMatcher = labels.MustNewMatcher(labels.MatchNotRegexp, q.label.Name, q.label.Value)
+				}
+				if !notRegexpMatcher.Matches(matcher.Value) {
+					return nil, nil, nil
+				}
+				// If match, add the matcher
+			}
 		}
 		newMatchers = append(newMatchers, matcher)
 	}
@@ -46,12 +61,25 @@ func (q *ExternalLabelQuerier) LabelValues(ctx context.Context, name string, mat
 
 func (q *ExternalLabelQuerier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
 	newMatchers := make([]*labels.Matcher, 0, len(matchers))
+	var notRegexpMatcher *labels.Matcher
 	for _, matcher := range matchers {
 		if matcher.Name == q.label.Name {
-			if !matcher.Matches(q.label.Value) {
-				return nil, nil, nil
+			if q.matchEqual {
+				if !matcher.Matches(q.label.Value) {
+					return nil, nil, nil
+				}
+				continue
 			}
-			continue
+
+			if matcher.Type == labels.MatchEqual {
+				if notRegexpMatcher == nil {
+					notRegexpMatcher = labels.MustNewMatcher(labels.MatchNotRegexp, q.label.Name, q.label.Value)
+				}
+				if !notRegexpMatcher.Matches(matcher.Value) {
+					return nil, nil, nil
+				}
+				// If match, add the matcher
+			}
 		}
 		newMatchers = append(newMatchers, matcher)
 	}
@@ -59,9 +87,11 @@ func (q *ExternalLabelQuerier) LabelNames(ctx context.Context, matchers ...*labe
 	if err != nil {
 		return nil, warnings, err
 	}
-	// Attach external label name and sort.
-	names = append(names, q.label.Name)
-	sort.Strings(names)
+	if q.matchEqual {
+		// Attach external label name and sort.
+		names = append(names, q.label.Name)
+		sort.Strings(names)
+	}
 	return names, warnings, nil
 }
 
@@ -71,50 +101,81 @@ func (q *ExternalLabelQuerier) Close() error {
 
 func (q *ExternalLabelQuerier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
 	newMatchers := make([]*labels.Matcher, 0, len(matchers))
+	var notRegexpMatcher *labels.Matcher
 	for _, matcher := range matchers {
 		if matcher.Name == q.label.Name {
-			if !matcher.Matches(q.label.Value) {
-				return storage.EmptySeriesSet()
+			if q.matchEqual {
+				if !matcher.Matches(q.label.Value) {
+					return storage.EmptySeriesSet()
+				}
+				continue
 			}
-			continue
+
+			if matcher.Type == labels.MatchEqual {
+				if notRegexpMatcher == nil {
+					notRegexpMatcher = labels.MustNewMatcher(labels.MatchNotRegexp, q.label.Name, q.label.Value)
+				}
+				if !notRegexpMatcher.Matches(matcher.Value) {
+					return storage.EmptySeriesSet()
+				}
+				// If match, add the matcher
+			}
 		}
 		newMatchers = append(newMatchers, matcher)
 	}
 	if len(newMatchers) == 0 {
 		newMatchers = append(newMatchers, allPostingMatcher)
 	}
+
+	if !q.matchEqual {
+		return q.Querier.Select(ctx, sortSeries, hints, newMatchers...)
+	}
 	return &ExternalLabelSeriesSet{
 		label:     q.label,
 		SeriesSet: q.Querier.Select(ctx, sortSeries, hints, newMatchers...),
 		builder:   labels.NewBuilder(labels.EmptyLabels()),
 	}
-
 }
 
 type ExternalLabelChunkQuerier struct {
 	storage.ChunkQuerier
-	label labels.Label
+	label      labels.Label
+	matchEqual bool
 }
 
-func NewExternalLabelChunkQuerier(q storage.ChunkQuerier, label labels.Label) *ExternalLabelChunkQuerier {
+func NewExternalLabelChunkQuerier(q storage.ChunkQuerier, label labels.Label, matchEqual bool) *ExternalLabelChunkQuerier {
 	return &ExternalLabelChunkQuerier{
 		ChunkQuerier: q,
 		label:        label,
+		matchEqual:   matchEqual,
 	}
 }
 
 func (q *ExternalLabelChunkQuerier) LabelValues(ctx context.Context, name string, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	if name == q.label.Name {
+	if q.matchEqual && name == q.label.Name {
 		return []string{q.label.Value}, nil, nil
 	}
 
+	var notRegexpMatcher *labels.Matcher
 	newMatchers := make([]*labels.Matcher, 0, len(matchers))
 	for _, matcher := range matchers {
 		if matcher.Name == q.label.Name {
-			if !matcher.Matches(q.label.Value) {
-				return nil, nil, nil
+			if q.matchEqual {
+				if !matcher.Matches(q.label.Value) {
+					return nil, nil, nil
+				}
+				continue
 			}
-			continue
+
+			if matcher.Type == labels.MatchEqual {
+				if notRegexpMatcher == nil {
+					notRegexpMatcher = labels.MustNewMatcher(labels.MatchNotRegexp, q.label.Name, q.label.Value)
+				}
+				if !notRegexpMatcher.Matches(matcher.Value) {
+					return nil, nil, nil
+				}
+				// If match, add the matcher
+			}
 		}
 		newMatchers = append(newMatchers, matcher)
 	}
@@ -123,23 +184,39 @@ func (q *ExternalLabelChunkQuerier) LabelValues(ctx context.Context, name string
 }
 
 func (q *ExternalLabelChunkQuerier) LabelNames(ctx context.Context, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
+	var notRegexpMatcher *labels.Matcher
 	newMatchers := make([]*labels.Matcher, 0, len(matchers))
 	for _, matcher := range matchers {
 		if matcher.Name == q.label.Name {
-			if !matcher.Matches(q.label.Value) {
-				return nil, nil, nil
+			if q.matchEqual {
+				if !matcher.Matches(q.label.Value) {
+					return nil, nil, nil
+				}
+				continue
 			}
-			continue
+
+			if matcher.Type == labels.MatchEqual {
+				if notRegexpMatcher == nil {
+					notRegexpMatcher = labels.MustNewMatcher(labels.MatchNotRegexp, q.label.Name, q.label.Value)
+				}
+				if !notRegexpMatcher.Matches(matcher.Value) {
+					return nil, nil, nil
+				}
+				// If match, add the matcher
+			}
 		}
+
 		newMatchers = append(newMatchers, matcher)
 	}
 	names, warnings, err := q.ChunkQuerier.LabelNames(ctx, newMatchers...)
 	if err != nil {
 		return nil, warnings, err
 	}
-	// Attach external label name and sort.
-	names = append(names, q.label.Name)
-	sort.Strings(names)
+	if q.matchEqual {
+		// Attach external label name and sort.
+		names = append(names, q.label.Name)
+		sort.Strings(names)
+	}
 	return names, warnings, nil
 }
 
@@ -149,17 +226,33 @@ func (q *ExternalLabelChunkQuerier) Close() error {
 
 func (q *ExternalLabelChunkQuerier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.ChunkSeriesSet {
 	newMatchers := make([]*labels.Matcher, 0, len(matchers))
+	var notRegexpMatcher *labels.Matcher
 	for _, matcher := range matchers {
 		if matcher.Name == q.label.Name {
-			if !matcher.Matches(q.label.Value) {
-				return storage.EmptyChunkSeriesSet()
+			if q.matchEqual {
+				if !matcher.Matches(q.label.Value) {
+					return storage.EmptyChunkSeriesSet()
+				}
+				continue
 			}
-			continue
+			if matcher.Type == labels.MatchEqual {
+				if notRegexpMatcher == nil {
+					notRegexpMatcher = labels.MustNewMatcher(labels.MatchNotRegexp, q.label.Name, q.label.Value)
+				}
+				if !notRegexpMatcher.Matches(matcher.Value) {
+					return storage.EmptyChunkSeriesSet()
+				}
+				// If match, add the matcher
+			}
 		}
+
 		newMatchers = append(newMatchers, matcher)
 	}
 	if len(newMatchers) == 0 {
 		newMatchers = append(newMatchers, allPostingMatcher)
+	}
+	if !q.matchEqual {
+		return q.ChunkQuerier.Select(ctx, sortSeries, hints, newMatchers...)
 	}
 	return &ExternalLabelChunkSeriesSet{
 		label:          q.label,

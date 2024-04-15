@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-kit/log"
@@ -58,8 +59,8 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 	shardBy := c.overrides.GetShardBy(c.userID)
 
 	type outputBlock struct {
-		postingFunc tsdb.IndexReaderPostingsFunc
-		label       labels.Label
+		postingFunc  tsdb.IndexReaderPostingsFunc
+		labelMatcher *labels.Matcher
 	}
 	outputBlocks := []outputBlock{}
 	// Fallback to the default compactor write.
@@ -81,8 +82,8 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 				return reader.SortedPostings(postings)
 			}
 			outputBlocks = append(outputBlocks, outputBlock{
-				postingFunc: pf,
-				label:       labels.Label{Name: shardBy.LabelName, Value: val},
+				postingFunc:  pf,
+				labelMatcher: labels.MustNewMatcher(labels.MatchEqual, shardBy.LabelName, val),
 			})
 		}
 		rootPF := func(ctx context.Context, reader tsdb.IndexReader) index.Postings {
@@ -99,7 +100,8 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 			return reader.SortedPostings(index.Without(allPostings, valuesPostings))
 		}
 		outputBlocks = append(outputBlocks, outputBlock{
-			postingFunc: rootPF,
+			postingFunc:  rootPF,
+			labelMatcher: labels.MustNewMatcher(labels.MatchNotRegexp, shardBy.LabelName, strings.Join(values, "|")),
 		})
 	}
 
@@ -121,9 +123,15 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 				},
 			},
 		}
-		if len(outputBlock.label.Name) > 0 {
-			meta.BlockMeta.Compaction.Hints = []string{outputBlock.label.Name + "=" + outputBlock.label.Value}
-			meta.Thanos.Labels = map[string]string{outputBlock.label.Name: outputBlock.label.Value}
+		var filterLabelName string
+		if outputBlock.labelMatcher != nil {
+			if outputBlock.labelMatcher.Type == labels.MatchEqual {
+				filterLabelName = outputBlock.labelMatcher.Name
+				meta.BlockMeta.Compaction.Hints = []string{outputBlock.labelMatcher.Name + "=" + outputBlock.labelMatcher.Value}
+				meta.Thanos.Labels = map[string]string{outputBlock.labelMatcher.Name: outputBlock.labelMatcher.Value}
+			} else if outputBlock.labelMatcher.Type == labels.MatchNotRegexp {
+				meta.BlockMeta.Compaction.Hints = []string{outputBlock.labelMatcher.Name + "!~" + outputBlock.labelMatcher.Value}
+			}
 		}
 
 		if parent != nil {
@@ -132,7 +140,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 			}
 		}
 
-		err := write(c.ctx, c.metrics, c.logger, c.chunkPool, c.maxBlockChunkSegmentSize, dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, outputBlock.label, b)
+		err := write(c.ctx, c.metrics, c.logger, c.chunkPool, c.maxBlockChunkSegmentSize, dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, filterLabelName, b)
 		if err != nil {
 			return []ulid.ULID{uid}, err
 		}
@@ -161,7 +169,7 @@ func (c *ExternalLabelCompactor) Write(dest string, b tsdb.BlockReader, mint, ma
 }
 
 // write creates a new block that is the union of the provided blocks into dir.
-func write(ctx context.Context, metrics *tsdb.CompactorMetrics, logger log.Logger, chunkPool chunkenc.Pool, maxBlockChunkSegmentSize int64, dest string, meta *metadata.Meta, blockPopulator tsdb.BlockPopulator, postingsFunc tsdb.IndexReaderPostingsFunc, filterLabel labels.Label, blocks ...tsdb.BlockReader) (err error) {
+func write(ctx context.Context, metrics *tsdb.CompactorMetrics, logger log.Logger, chunkPool chunkenc.Pool, maxBlockChunkSegmentSize int64, dest string, meta *metadata.Meta, blockPopulator tsdb.BlockPopulator, postingsFunc tsdb.IndexReaderPostingsFunc, filterLabelName string, blocks ...tsdb.BlockReader) (err error) {
 	dir := filepath.Join(dest, meta.ULID.String())
 	tmp := dir + tmpForCreationBlockDirSuffix
 	var closers []io.Closer
@@ -212,8 +220,8 @@ func write(ctx context.Context, metrics *tsdb.CompactorMetrics, logger log.Logge
 	var indexWriter tsdb.IndexWriter
 	indexWriter = indexw
 	// Use FilteredIndexWriter to remove the external label from the series.
-	if len(filterLabel.Name) > 0 {
-		indexWriter = &FilteredIndexWriter{IndexWriter: indexw, name: filterLabel.Name, builder: labels.NewBuilder(labels.EmptyLabels())}
+	if len(filterLabelName) > 0 {
+		indexWriter = &FilteredIndexWriter{IndexWriter: indexw, name: filterLabelName, builder: labels.NewBuilder(labels.EmptyLabels())}
 	}
 	if err := blockPopulator.PopulateBlock(ctx, metrics, logger, chunkPool, storage.NewCompactingChunkSeriesMerger(storage.ChainedSeriesMerge), blocks, &meta.BlockMeta, indexWriter, chunkw, postingsFunc); err != nil {
 		return fmt.Errorf("populate block: %w", err)
@@ -309,11 +317,9 @@ func (w *FilteredIndexWriter) AddSeries(ref storage.SeriesRef, l labels.Labels, 
 }
 
 type ShardByMetricNameCompactor struct {
-	ctx       context.Context
-	logger    log.Logger
-	userID    string
-	overrides *validation.Overrides
-	shards    int
+	ctx    context.Context
+	logger log.Logger
+	shards int
 
 	chunkPool                chunkenc.Pool
 	maxBlockChunkSegmentSize int64
@@ -391,7 +397,7 @@ func (c *ShardByMetricNameCompactor) Write(dest string, b tsdb.BlockReader, mint
 			}
 		}
 
-		err := write(c.ctx, c.metrics, c.logger, c.chunkPool, c.maxBlockChunkSegmentSize, dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, outputBlock.label, b)
+		err := write(c.ctx, c.metrics, c.logger, c.chunkPool, c.maxBlockChunkSegmentSize, dest, meta, tsdb.DefaultBlockPopulator{}, outputBlock.postingFunc, "", b)
 		if err != nil {
 			return []ulid.ULID{uid}, err
 		}
