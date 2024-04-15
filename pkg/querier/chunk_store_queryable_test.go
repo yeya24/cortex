@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/cortexproject/cortex/pkg/querier/batch"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/storage"
@@ -137,10 +136,6 @@ func BenchmarkIterator(b *testing.B) {
 		benchmarkChunkIteratorFunc(b, batch.NewChunkMergeIterator)
 	})
 
-	b.Run("iterators", func(b *testing.B) {
-		benchmarkChunkIteratorFunc(b, iterators.NewChunkMergeIterator)
-	})
-
 	b.Run("prom_iterators", func(b *testing.B) {
 		benchmarkChunkIteratorFunc(b, func(chunks []chunk.Chunk, from, through model.Time) chunkenc.Iterator {
 			iterables := make([]chunkenc.Iterable, len(chunks))
@@ -153,7 +148,7 @@ func BenchmarkIterator(b *testing.B) {
 }
 
 func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
-	const samplesPerChunk = 250
+	const samplesPerChunk = 120
 	type pair struct {
 		t int64
 		v float64
@@ -187,7 +182,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 			}
 			k := 0
 			for _, p := range exp {
-				if k > 250 {
+				if k > 120 {
 					break
 				}
 				a.Append(p.t, p.v)
@@ -215,7 +210,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 			_, v := it.At()
 			res = v
 			j++
-			if j == 1400 {
+			if j == 100 {
 				break
 			}
 		}
