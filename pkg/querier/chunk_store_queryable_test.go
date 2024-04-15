@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/cortexproject/cortex/pkg/querier/batch"
+	"github.com/cortexproject/cortex/pkg/querier/iterators"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/pkg/errors"
 	"github.com/prometheus/prometheus/storage"
@@ -134,6 +135,10 @@ func (b sortedByLabels) Less(i, j int) bool { return labels.Compare(b[i], b[j]) 
 func BenchmarkIterator(b *testing.B) {
 	b.Run("batch", func(b *testing.B) {
 		benchmarkChunkIteratorFunc(b, batch.NewChunkMergeIterator)
+	})
+
+	b.Run("iterators", func(b *testing.B) {
+		benchmarkChunkIteratorFunc(b, iterators.NewChunkMergeIterator)
 	})
 
 	b.Run("prom_iterators", func(b *testing.B) {
