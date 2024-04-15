@@ -165,7 +165,7 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 		startT int64
 		endT   int64
 	)
-	for j := 0; j < 100; j++ {
+	for j := 0; j < 10; j++ {
 		var exp []pair
 		startT = t
 		for i := 0; i < samplesPerChunk; i++ {
@@ -183,13 +183,13 @@ func benchmarkChunkIteratorFunc(b *testing.B, iteratorFunc chunkIteratorFunc) {
 			if err != nil {
 				b.Fatalf("get appender: %s", err)
 			}
-			j := 0
+			k := 0
 			for _, p := range exp {
-				if j > 250 {
+				if k > 250 {
 					break
 				}
 				a.Append(p.t, p.v)
-				j++
+				k++
 			}
 		}
 		c, err := promchunk.NewForEncoding(promchunk.PrometheusXorChunk)
