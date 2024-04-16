@@ -35,5 +35,5 @@ message Stats {
   google.protobuf.Duration query_storage_wall_time = 10 [(gogoproto.stdduration) = true, (gogoproto.nullable) = false];
 
   uint64 store_gateway_touched_postings_count = 11;
-  uint64 store_gateway_touched_postings_bytes = 12;
+  uint64 store_gateway_touched_posting_bytes = 12;
 }
