@@ -295,6 +295,8 @@ func (f *Handler) reportQueryStats(r *http.Request, userID string, queryString u
 	numSamples := stats.LoadFetchedSamples()
 	numChunkBytes := stats.LoadFetchedChunkBytes()
 	numDataBytes := stats.LoadFetchedDataBytes()
+	numStoreGatewayTouchedPostings := stats.LoadStoreGatewayTouchedPostings()
+	numStoreGatewayTouchedPostingBytes := stats.LoadStoreGatewayTouchedPostingBytes()
 	splitQueries := stats.LoadSplitQueries()
 	dataSelectMaxTime := stats.LoadDataSelectMaxTime()
 	dataSelectMinTime := stats.LoadDataSelectMinTime()
@@ -328,6 +330,8 @@ func (f *Handler) reportQueryStats(r *http.Request, userID string, queryString u
 		"fetched_samples_count", numSamples,
 		"fetched_chunks_bytes", numChunkBytes,
 		"fetched_data_bytes", numDataBytes,
+		"store_gateway_touched_postings_count", numStoreGatewayTouchedPostings,
+		"store_gateway_touched_posting_bytes", numStoreGatewayTouchedPostingBytes,
 		"split_queries", splitQueries,
 		"status_code", statusCode,
 		"response_size", contentLength,
