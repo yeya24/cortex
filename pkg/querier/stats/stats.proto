@@ -33,4 +33,7 @@ message Stats {
   uint64 split_queries = 9;
   // The sum of wall time spent in the querier to fetch and merge data from storage.
   google.protobuf.Duration query_storage_wall_time = 10 [(gogoproto.stdduration) = true, (gogoproto.nullable) = false];
+
+  uint64 store_gateway_touched_postings_count = 11;
+  uint64 store_gateway_touched_postings_bytes = 12;
 }
