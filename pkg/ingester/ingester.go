@@ -2086,7 +2086,7 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 				strs := strings.Split(hint, "=")
 				if strs[0] == "__shard_number__" && i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
 					shard, _ := strconv.Atoi(strs[1])
-					q = NewShardByMetricNameQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
+					q = NewShardByMetricNameQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, uint64(shard))
 				} else {
 					if len(strs) == 2 {
 						q = NewExternalLabelQuerier(q, labels.Label{Name: strs[0], Value: strs[1]}, true)
@@ -2113,7 +2113,7 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 				strs := strings.Split(hint, "=")
 				if strs[0] == "__shard_number__" && i.cfg.BlocksStorageConfig.TSDB.ShardByMetricName {
 					shard, _ := strconv.Atoi(strs[1])
-					q = NewShardByMetricNameChunkQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, shard)
+					q = NewShardByMetricNameChunkQuerier(q, i.cfg.BlocksStorageConfig.TSDB.ShardByMetricNameShards, uint64(shard))
 				} else {
 					if len(strs) == 2 {
 						q = NewExternalLabelChunkQuerier(q, labels.Label{Name: strs[0], Value: strs[1]}, true)

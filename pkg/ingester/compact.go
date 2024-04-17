@@ -319,7 +319,7 @@ func (w *FilteredIndexWriter) AddSeries(ref storage.SeriesRef, l labels.Labels, 
 type ShardByMetricNameCompactor struct {
 	ctx    context.Context
 	logger log.Logger
-	shards int
+	shards uint64
 
 	chunkPool                chunkenc.Pool
 	maxBlockChunkSegmentSize int64
@@ -342,7 +342,7 @@ func (c *ShardByMetricNameCompactor) Write(dest string, b tsdb.BlockReader, mint
 		label       labels.Label
 	}
 	outputBlocks := []outputBlock{}
-	for i := 0; i < c.shards; i++ {
+	for i := 0; i < int(c.shards); i++ {
 		i := i
 		pf := func(ctx context.Context, reader tsdb.IndexReader) index.Postings {
 			k, v := index.AllPostingsKey()
@@ -358,7 +358,7 @@ func (c *ShardByMetricNameCompactor) Write(dest string, b tsdb.BlockReader, mint
 				if err := reader.Series(ref, &builder, &chks); err != nil {
 					return index.ErrPostings(err)
 				}
-				if int(hash(builder.Labels().Get(labels.MetricName)))%c.shards == i {
+				if hash(builder.Labels().Get(labels.MetricName))%c.shards == uint64(i) {
 					postings = append(postings, ref)
 				}
 			}

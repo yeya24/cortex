@@ -156,8 +156,8 @@ type TSDBConfig struct {
 	// OutOfOrderCapMax is maximum capacity for OOO chunks (in samples).
 	OutOfOrderCapMax int64 `yaml:"out_of_order_cap_max"`
 
-	ShardByMetricName       bool `yaml:"shard_by_metric_name"`
-	ShardByMetricNameShards int  `yaml:"shard_by_metric_name_shards"`
+	ShardByMetricName       bool   `yaml:"shard_by_metric_name"`
+	ShardByMetricNameShards uint64 `yaml:"shard_by_metric_name_shards"`
 }
 
 // RegisterFlags registers the TSDBConfig flags.
@@ -186,7 +186,7 @@ func (cfg *TSDBConfig) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&cfg.MemorySnapshotOnShutdown, "blocks-storage.tsdb.memory-snapshot-on-shutdown", false, "True to enable snapshotting of in-memory TSDB data on disk when shutting down.")
 	f.Int64Var(&cfg.OutOfOrderCapMax, "blocks-storage.tsdb.out-of-order-cap-max", tsdb.DefaultOutOfOrderCapMax, "[EXPERIMENTAL] Configures the maximum number of samples per chunk that can be out-of-order.")
 	f.BoolVar(&cfg.ShardByMetricName, "blocks-storage.tsdb.shardby-metric-name", false, "enable shard by metric name or not.")
-	f.IntVar(&cfg.ShardByMetricNameShards, "blocks-storage.tsdb.shardby-metric-name.shards", 8, "shards of shard by metric name.")
+	f.Uint64Var(&cfg.ShardByMetricNameShards, "blocks-storage.tsdb.shardby-metric-name.shards", 8, "shards of shard by metric name.")
 }
 
 // Validate the config.

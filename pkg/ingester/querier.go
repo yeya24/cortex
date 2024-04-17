@@ -299,10 +299,10 @@ func (s ExternalLabelChunkSeriesSet) At() storage.ChunkSeries {
 
 type ShardByMetricNameQuerier struct {
 	storage.Querier
-	shardCount, shardIdx int
+	shardCount, shardIdx uint64
 }
 
-func NewShardByMetricNameQuerier(q storage.Querier, shardCount, shardIdx int) *ShardByMetricNameQuerier {
+func NewShardByMetricNameQuerier(q storage.Querier, shardCount, shardIdx uint64) *ShardByMetricNameQuerier {
 	return &ShardByMetricNameQuerier{
 		Querier:    q,
 		shardCount: shardCount,
@@ -313,7 +313,7 @@ func NewShardByMetricNameQuerier(q storage.Querier, shardCount, shardIdx int) *S
 func (q *ShardByMetricNameQuerier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.SeriesSet {
 	for _, matcher := range matchers {
 		if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
-			if int(hash(matcher.Value))%q.shardCount != q.shardIdx {
+			if hash(matcher.Value)%q.shardCount != q.shardIdx {
 				return storage.EmptySeriesSet()
 			}
 		}
@@ -323,10 +323,10 @@ func (q *ShardByMetricNameQuerier) Select(ctx context.Context, sortSeries bool, 
 
 type ShardByMetricNameChunkQuerier struct {
 	storage.ChunkQuerier
-	shardCount, shardIdx int
+	shardCount, shardIdx uint64
 }
 
-func NewShardByMetricNameChunkQuerier(q storage.ChunkQuerier, shardCount, shardIdx int) *ShardByMetricNameChunkQuerier {
+func NewShardByMetricNameChunkQuerier(q storage.ChunkQuerier, shardCount, shardIdx uint64) *ShardByMetricNameChunkQuerier {
 	return &ShardByMetricNameChunkQuerier{
 		ChunkQuerier: q,
 		shardCount:   shardCount,
@@ -337,7 +337,7 @@ func NewShardByMetricNameChunkQuerier(q storage.ChunkQuerier, shardCount, shardI
 func (q *ShardByMetricNameChunkQuerier) Select(ctx context.Context, sortSeries bool, hints *storage.SelectHints, matchers ...*labels.Matcher) storage.ChunkSeriesSet {
 	for _, matcher := range matchers {
 		if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
-			if int(hash(matcher.Value))%q.shardCount != q.shardIdx {
+			if hash(matcher.Value)%q.shardCount != q.shardIdx {
 				return storage.EmptyChunkSeriesSet()
 			}
 		}
