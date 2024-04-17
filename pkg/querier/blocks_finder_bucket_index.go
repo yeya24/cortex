@@ -99,7 +99,7 @@ OUTER:
 			shardIdx, _ := strconv.Atoi(value)
 			for _, matcher := range matchers {
 				if matcher.Name == labels.MetricName && matcher.Type == labels.MatchEqual {
-					if int(hash(matcher.Value))%8 != shardIdx {
+					if hash(matcher.Value)%8 != uint64(shardIdx) {
 						continue OUTER
 					}
 				}
