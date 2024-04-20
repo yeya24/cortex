@@ -21,13 +21,13 @@ import (
 	"sort"
 
 	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 
 	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 )
 
 // ConcreteSeriesSet implements storage.SeriesSet.
@@ -101,17 +101,20 @@ type concreteSeriesIterator struct {
 
 // NewConcreteSeriesIterator instaniates an in memory chunkenc.Iterator
 func NewConcreteSeriesIterator(series *ConcreteSeries) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(&concreteSeriesIterator{
+	return &concreteSeriesIterator{
 		cur:    -1,
 		series: series,
-	})
+	}
 }
 
-func (c *concreteSeriesIterator) Seek(t int64) bool {
+func (c *concreteSeriesIterator) Seek(t int64) chunkenc.ValueType {
 	c.cur = sort.Search(len(c.series.samples), func(n int) bool {
 		return c.series.samples[n].Timestamp >= model.Time(t)
 	})
-	return c.cur < len(c.series.samples)
+	if c.cur < len(c.series.samples) {
+		return chunkenc.ValFloat
+	}
+	return chunkenc.ValNone
 }
 
 func (c *concreteSeriesIterator) At() (t int64, v float64) {
@@ -119,9 +122,24 @@ func (c *concreteSeriesIterator) At() (t int64, v float64) {
 	return int64(s.Timestamp), float64(s.Value)
 }
 
-func (c *concreteSeriesIterator) Next() bool {
+func (c *concreteSeriesIterator) Next() chunkenc.ValueType {
 	c.cur++
-	return c.cur < len(c.series.samples)
+	if c.cur < len(c.series.samples) {
+		return chunkenc.ValFloat
+	}
+	return chunkenc.ValNone
+}
+
+func (concreteSeriesIterator) AtHistogram(h *histogram.Histogram) (int64, *histogram.Histogram) {
+	panic("unimplemented")
+}
+
+func (concreteSeriesIterator) AtFloatHistogram(h *histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	panic("unimplemented")
+}
+
+func (c concreteSeriesIterator) AtT() int64 {
+	return int64(c.series.samples[c.cur].Timestamp)
 }
 
 func (c *concreteSeriesIterator) Err() error {
