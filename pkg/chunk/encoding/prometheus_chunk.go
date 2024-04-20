@@ -301,6 +301,7 @@ func (p *prometheusChunkIterator) Batch(size int, valType chunkenc.ValueType) Ba
 	}
 	batch.Index = 0
 	batch.Length = j
+	batch.ValType = valType
 	return batch
 }
 
