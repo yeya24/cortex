@@ -1148,12 +1148,14 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 			}
 
 			if ref != 0 {
-				if _, err = app.AppendHistogram(ref, tsLabels, hp.TimestampMs, h, fh); err != nil {
-
+				if _, err = app.AppendHistogram(ref, copiedLabels, hp.TimestampMs, h, fh); err != nil {
+					level.Error(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to append native histograms", "user", userID, "err", err)
 				}
 			} else {
-				if ref, err = app.AppendHistogram(0, tsLabels, hp.TimestampMs, h, fh); err != nil {
-
+				// Copy the label set because both TSDB and the active series tracker may retain it.
+				copiedLabels = cortexpb.FromLabelAdaptersToLabelsWithCopy(ts.Labels)
+				if ref, err = app.AppendHistogram(0, copiedLabels, hp.TimestampMs, h, fh); err != nil {
+					level.Error(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to append native histograms", "user", userID, "err", err)
 				}
 			}
 
