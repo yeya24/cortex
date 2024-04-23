@@ -27,32 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLen(t *testing.T) {
-	chunks := []Chunk{}
-	for _, encoding := range []Encoding{PrometheusXorChunk} {
-		c, err := NewForEncoding(encoding)
-		if err != nil {
-			t.Fatal(err)
-		}
-		chunks = append(chunks, c)
-	}
-
-	for _, c := range chunks {
-		for i := 0; i <= 10; i++ {
-			if c.Len() != i {
-				t.Errorf("chunk type %s should have %d samples, had %d", c.Encoding(), i, c.Len())
-			}
-
-			cs, err := c.Add(model.SamplePair{
-				Timestamp: model.Time(i),
-				Value:     model.SampleValue(i),
-			})
-			require.NoError(t, err)
-			require.Nil(t, cs)
-		}
-	}
-}
-
 var step = int(15 * time.Second / time.Millisecond)
 
 func TestChunk(t *testing.T) {
@@ -87,13 +61,11 @@ func mkChunk(t *testing.T, encoding Encoding, samples int) Chunk {
 	chunk, err := NewForEncoding(encoding)
 	require.NoError(t, err)
 
+	appender, err := chunk.ToPromChunk().Appender()
+	require.NoError(t, err)
 	for i := 0; i < samples; i++ {
-		newChunk, err := chunk.Add(model.SamplePair{
-			Timestamp: model.Time(i * step),
-			Value:     model.SampleValue(i),
-		})
+		appender.Append(int64(i*step), float64(i))
 		require.NoError(t, err)
-		require.Nil(t, newChunk)
 	}
 
 	return chunk

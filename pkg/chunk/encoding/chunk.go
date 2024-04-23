@@ -17,11 +17,10 @@
 package encoding
 
 import (
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"io"
 
 	"github.com/prometheus/common/model"
-
-	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 )
 
 const (
@@ -45,12 +44,7 @@ type Chunk interface {
 	UnmarshalFromBuf([]byte) error
 	Encoding() Encoding
 
-	// Len returns the number of samples in the chunk.  Implementations may be
-	// expensive.
-	Len() int
-
-	// Equals checks if this chunk holds the same data as another.
-	Equals(Chunk) (bool, error)
+	ToPromChunk() chunkenc.Chunk
 }
 
 // Iterator enables efficient access to the content of a chunk. It is
@@ -90,20 +84,4 @@ type Batch struct {
 	Values     [BatchSize]float64
 	Index      int
 	Length     int
-}
-
-// RangeValues is a utility function that retrieves all values within the given
-// range from an Iterator.
-func RangeValues(it Iterator, in metric.Interval) ([]model.SamplePair, error) {
-	result := []model.SamplePair{}
-	if !it.FindAtOrAfter(in.OldestInclusive) {
-		return result, it.Err()
-	}
-	for !it.Value().Timestamp.After(in.NewestInclusive) {
-		result = append(result, it.Value())
-		if !it.Scan() {
-			break
-		}
-	}
-	return result, it.Err()
 }

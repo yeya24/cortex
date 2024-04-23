@@ -162,7 +162,10 @@ func TestIngesterStreaming(t *testing.T) {
 	// else no series will be selected.
 	promChunk, err := encoding.NewForEncoding(encoding.PrometheusXorChunk)
 	require.NoError(t, err)
-	_, err = promChunk.Add(model.ZeroSamplePair)
+	chk := promChunk.ToPromChunk()
+	appender, err := chk.Appender()
+	require.NoError(t, err)
+	appender.Append(int64(model.ZeroSamplePair.Timestamp), float64(model.ZeroSamplePair.Value))
 	require.NoError(t, err)
 
 	clientChunks, err := chunkcompat.ToChunks([]chunk.Chunk{
@@ -344,10 +347,10 @@ func convertToChunks(t *testing.T, samples []cortexpb.Sample) []client.Chunk {
 	promChunk, err := encoding.NewForEncoding(encoding.PrometheusXorChunk)
 	require.NoError(t, err)
 
+	appender, err := promChunk.ToPromChunk().Appender()
+	require.NoError(t, err)
 	for _, s := range samples {
-		c, err := promChunk.Add(model.SamplePair{Value: model.SampleValue(s.Value), Timestamp: model.Time(s.TimestampMs)})
-		require.NoError(t, err)
-		require.Nil(t, c)
+		appender.Append(s.TimestampMs, s.Value)
 	}
 
 	clientChunks, err := chunkcompat.ToChunks([]chunk.Chunk{

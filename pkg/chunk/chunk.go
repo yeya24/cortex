@@ -5,7 +5,6 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 
 	prom_chunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
-	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 )
 
 // Chunk contains encoded timeseries data
@@ -30,11 +29,4 @@ func NewChunk(metric labels.Labels, c prom_chunk.Chunk, from, through model.Time
 		Encoding: c.Encoding(),
 		Data:     c,
 	}
-}
-
-// Samples returns all SamplePairs for the chunk.
-func (c *Chunk) Samples(from, through model.Time) ([]model.SamplePair, error) {
-	it := c.Data.NewIterator(nil)
-	interval := metric.Interval{OldestInclusive: from, NewestInclusive: through}
-	return prom_chunk.RangeValues(it, interval)
 }

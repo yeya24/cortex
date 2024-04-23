@@ -7,11 +7,6 @@ import (
 // Encoding defines which encoding we are using, delta, doubledelta, or varbit
 type Encoding byte
 
-var (
-	// DefaultEncoding exported for use in unit tests elsewhere
-	DefaultEncoding = PrometheusXorChunk
-)
-
 // String implements flag.Value.
 func (e Encoding) String() string {
 	if known, found := encodings[e]; found {

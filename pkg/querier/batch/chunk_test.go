@@ -51,13 +51,10 @@ func mkChunk(t require.TestingT, step time.Duration, from model.Time, points int
 	pc, err := promchunk.NewForEncoding(enc)
 	require.NoError(t, err)
 	ts := from
+	appender, err := pc.ToPromChunk().Appender()
+	require.NoError(t, err)
 	for i := 0; i < points; i++ {
-		npc, err := pc.Add(model.SamplePair{
-			Timestamp: ts,
-			Value:     model.SampleValue(float64(ts)),
-		})
-		require.NoError(t, err)
-		require.Nil(t, npc)
+		appender.Append(int64(ts), float64(ts))
 		ts = ts.Add(step)
 	}
 	ts = ts.Add(-step) // undo the add that we did just before exiting the loop

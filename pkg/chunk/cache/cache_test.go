@@ -27,12 +27,9 @@ func fillCache(t *testing.T, cache cache.Cache) ([]string, []prom_chunk.Chunk) {
 		ts := model.TimeFromUnix(int64(i * chunkLen))
 		promChunk, err := prom_chunk.NewForEncoding(prom_chunk.PrometheusXorChunk)
 		require.NoError(t, err)
-		nc, err := promChunk.Add(model.SamplePair{
-			Timestamp: ts,
-			Value:     model.SampleValue(i),
-		})
+		appender, err := promChunk.ToPromChunk().Appender()
 		require.NoError(t, err)
-		require.Nil(t, nc)
+		appender.Append(int64(ts), float64(i))
 
 		buf := bytes.NewBuffer(nil)
 		err = promChunk.Marshal(buf)

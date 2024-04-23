@@ -1022,9 +1022,7 @@ func TestDistributor_PushQuery(t *testing.T) {
 			series, err := ds[0].QueryStream(ctx, 0, 10, tc.matchers...)
 			assert.Equal(t, tc.expectedError, err)
 
-			if series == nil {
-				response, err = chunkcompat.SeriesChunksToMatrix(0, 10, nil)
-			} else {
+			if series != nil {
 				response, err = chunkcompat.SeriesChunksToMatrix(0, 10, series.Chunkseries)
 			}
 			assert.NoError(t, err)
@@ -2916,19 +2914,13 @@ func (i *mockIngester) QueryStream(ctx context.Context, req *client.QueryRequest
 		if err != nil {
 			return nil, err
 		}
+		appender, err := c.ToPromChunk().Appender()
+		if err != nil {
+			return nil, err
+		}
 		chunks := []encoding.Chunk{c}
 		for _, sample := range ts.Samples {
-			newChunk, err := c.Add(model.SamplePair{
-				Timestamp: model.Time(sample.TimestampMs),
-				Value:     model.SampleValue(sample.Value),
-			})
-			if err != nil {
-				panic(err)
-			}
-			if newChunk != nil {
-				c = newChunk
-				chunks = append(chunks, newChunk)
-			}
+			appender.Append(sample.TimestampMs, sample.Value)
 		}
 
 		wireChunks := []client.Chunk{}

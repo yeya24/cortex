@@ -2320,8 +2320,7 @@ func TestIngester_QueryStreamManySamplesChunks(t *testing.T) {
 				ch, err := encoding.NewForEncoding(encoding.Encoding(c.Encoding))
 				require.NoError(t, err)
 				require.NoError(t, ch.UnmarshalFromBuf(c.Data))
-
-				totalSamples += ch.Len()
+				totalSamples += ch.ToPromChunk().NumSamples()
 			}
 		}
 	}

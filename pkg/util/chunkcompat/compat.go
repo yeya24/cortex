@@ -2,6 +2,7 @@ package chunkcompat
 
 import (
 	"bytes"
+	"github.com/prometheus/prometheus/tsdb/chunkenc"
 
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/labels"
@@ -10,7 +11,6 @@ import (
 	prom_chunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
 	"github.com/cortexproject/cortex/pkg/cortexpb"
 	"github.com/cortexproject/cortex/pkg/ingester/client"
-	"github.com/cortexproject/cortex/pkg/util"
 )
 
 // SeriesChunksToMatrix converts slice of []client.TimeSeriesChunk to a model.Matrix.
@@ -20,6 +20,7 @@ func SeriesChunksToMatrix(from, through model.Time, serieses []client.TimeSeries
 	}
 
 	result := model.Matrix{}
+	var it chunkenc.Iterator
 	for _, series := range serieses {
 		metric := cortexpb.FromLabelAdaptersToMetric(series.Labels)
 		chunks, err := FromChunks(cortexpb.FromLabelAdaptersToLabels(series.Labels), series.Chunks)
@@ -28,12 +29,21 @@ func SeriesChunksToMatrix(from, through model.Time, serieses []client.TimeSeries
 		}
 
 		samples := []model.SamplePair{}
-		for _, chunk := range chunks {
-			ss, err := chunk.Samples(from, through)
-			if err != nil {
+		for _, chk := range chunks {
+			it = chk.Data.ToPromChunk().Iterator(it)
+			for it.Next() != chunkenc.ValNone {
+				t, v := it.At()
+				if model.Time(t) < from {
+					continue
+				}
+				if model.Time(t) > through {
+					break
+				}
+				samples = append(samples, model.SamplePair{Timestamp: model.Time(t), Value: model.SampleValue(v)})
+			}
+			if err := it.Err(); err != nil {
 				return nil, err
 			}
-			samples = util.MergeSampleSets(samples, ss)
 		}
 
 		result = append(result, &model.SampleStream{

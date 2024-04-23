@@ -71,11 +71,11 @@ func (p *prometheusXorChunk) Encoding() Encoding {
 	return PrometheusXorChunk
 }
 
-func (p *prometheusXorChunk) Len() int {
+func (p *prometheusXorChunk) ToPromChunk() chunkenc.Chunk {
 	if p.chunk == nil {
-		return 0
+		p.chunk = chunkenc.NewXORChunk()
 	}
-	return p.chunk.NumSamples()
+	return p.chunk
 }
 
 type prometheusChunkIterator struct {
