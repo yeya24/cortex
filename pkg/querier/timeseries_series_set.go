@@ -3,13 +3,13 @@ package querier
 import (
 	"sort"
 
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 
 	"github.com/cortexproject/cortex/pkg/cortexpb"
-	"github.com/cortexproject/cortex/pkg/querier/iterators"
 )
 
 // timeSeriesSeriesSet is a wrapper around a cortexpb.TimeSeries slice to implement to SeriesSet interface
@@ -73,14 +73,14 @@ func (t *timeseries) Labels() labels.Labels {
 
 // Iterator implements the storage.Series interface
 func (t *timeseries) Iterator(chunkenc.Iterator) chunkenc.Iterator {
-	return iterators.NewCompatibleChunksIterator(&timeSeriesSeriesIterator{
+	return &timeSeriesSeriesIterator{
 		ts: t,
 		i:  -1,
-	})
+	}
 }
 
 // Seek implements SeriesIterator interface
-func (t *timeSeriesSeriesIterator) Seek(s int64) bool {
+func (t *timeSeriesSeriesIterator) Seek(s int64) chunkenc.ValueType {
 	offset := 0
 	if t.i > 0 {
 		offset = t.i // only advance via Seek
@@ -90,7 +90,10 @@ func (t *timeSeriesSeriesIterator) Seek(s int64) bool {
 		return t.ts.series.Samples[offset+i].TimestampMs >= s
 	}) + offset
 
-	return t.i < len(t.ts.series.Samples)
+	if t.i < len(t.ts.series.Samples) {
+		return chunkenc.ValFloat
+	}
+	return chunkenc.ValNone
 }
 
 // At implements the SeriesIterator interface
@@ -101,8 +104,30 @@ func (t *timeSeriesSeriesIterator) At() (int64, float64) {
 	return t.ts.series.Samples[t.i].TimestampMs, t.ts.series.Samples[t.i].Value
 }
 
+func (t *timeSeriesSeriesIterator) AtHistogram(*histogram.Histogram) (int64, *histogram.Histogram) {
+	// timeSeriesSeriesIterator is legacy code, keep the interface for compatibility.
+	// TODO: remove timeSeriesSeriesIterator and backward compatibility on TimeSeries field.
+	panic("unimplemented")
+}
+
+func (t *timeSeriesSeriesIterator) AtFloatHistogram(*histogram.FloatHistogram) (int64, *histogram.FloatHistogram) {
+	// timeSeriesSeriesIterator is legacy code, keep the interface for compatibility.
+	// TODO: remove timeSeriesSeriesIterator and backward compatibility on TimeSeries field.
+	panic("unimplemented")
+}
+
+func (t *timeSeriesSeriesIterator) AtT() int64 {
+	return t.ts.series.Samples[t.i].TimestampMs
+}
+
 // Next implements the SeriesIterator interface
-func (t *timeSeriesSeriesIterator) Next() bool { t.i++; return t.i < len(t.ts.series.Samples) }
+func (t *timeSeriesSeriesIterator) Next() chunkenc.ValueType {
+	t.i++
+	if t.i < len(t.ts.series.Samples) {
+		return chunkenc.ValFloat
+	}
+	return chunkenc.ValNone
+}
 
 // Err implements the SeriesIterator interface
 func (t *timeSeriesSeriesIterator) Err() error { return nil }
