@@ -3,6 +3,7 @@ package batch
 import (
 	"strconv"
 	"testing"
+	"unsafe"
 
 	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/stretchr/testify/require"
@@ -66,9 +67,9 @@ func mkBatch(from int64, enc encoding.Encoding) promchunk.Batch {
 		case encoding.PrometheusXorChunk:
 			result.Values[i] = float64(from + i)
 		case encoding.PrometheusHistogramChunk:
-			result.Histograms[i] = testHistogram(int(from+i), 5, 20)
+			result.HistogramValues[i] = unsafe.Pointer(testHistogram(int(from+i), 5, 20))
 		case encoding.PrometheusFloatHistogramChunk:
-			result.FloatHistograms[i] = testHistogram(int(from+i), 5, 20).ToFloat(nil)
+			result.HistogramValues[i] = unsafe.Pointer(testHistogram(int(from+i), 5, 20).ToFloat(nil))
 		}
 	}
 	result.Length = promchunk.BatchSize
