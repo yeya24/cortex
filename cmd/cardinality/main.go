@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/tsdb/index"
 	"github.com/thanos-io/objstore"
+	"golang.org/x/sync/errgroup"
 	"os"
 	"path/filepath"
 	"sort"
@@ -84,6 +85,8 @@ func run(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
+	eg := errgroup.Group{}
+	eg.SetLimit(8)
 	cacheDir := "data"
 	for _, block := range blockIDs {
 		p := filepath.Join(cacheDir, block.String())
@@ -94,19 +97,32 @@ func run(ctx context.Context, logger log.Logger) error {
 		}
 		indexPath := filepath.Join(p, "index")
 		if _, err := os.Stat(indexPath); err != nil {
-			if err := objstore.DownloadFile(ctx, logger, c, filepath.Join(block.String(), "index"), p); err != nil {
-				return err
-			}
+			eg.Go(func() error {
+				if err := objstore.DownloadFile(ctx, logger, c, filepath.Join(block.String(), "index"), p); err != nil {
+					return err
+				}
+				return nil
+			})
 		} else {
 			level.Info(logger).Log("msg", "index file already exists", "path", indexPath)
 		}
 	}
+	if err := eg.Wait(); err != nil {
+		return err
+	}
 
+	eg.SetLimit(4)
 	for _, block := range blockIDs {
-		level.Info(logger).Log("msg", "start running cardinality analysis", "block", block.String())
-		if err := Cardinality(ctx, "data", block.String(), 500, logger); err != nil {
-			return err
-		}
+		eg.Go(func() error {
+			level.Info(logger).Log("msg", "start running cardinality analysis", "block", block.String())
+			if err := Cardinality(ctx, "data", block.String(), 500, logger); err != nil {
+				return err
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return err
 	}
 	//if err := objstore.DownloadDir(ctx, logger, c, id.String(), id.String(), dst, objstore.WithDownloadIgnoredPaths(ignoredPaths...))); err != nil {
 	//	return err
