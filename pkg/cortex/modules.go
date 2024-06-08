@@ -29,6 +29,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/alertmanager"
 	"github.com/cortexproject/cortex/pkg/alertmanager/alertstore"
 	"github.com/cortexproject/cortex/pkg/api"
+	"github.com/cortexproject/cortex/pkg/cardinality"
 	"github.com/cortexproject/cortex/pkg/compactor"
 	configAPI "github.com/cortexproject/cortex/pkg/configs/api"
 	"github.com/cortexproject/cortex/pkg/configs/db"
@@ -94,6 +95,7 @@ const (
 	TenantDeletion           string = "tenant-deletion"
 	Purger                   string = "purger"
 	QueryScheduler           string = "query-scheduler"
+	Cardinality              string = "cardinality"
 	TenantFederation         string = "tenant-federation"
 	ResourceMonitor          string = "resource-monitor"
 	All                      string = "all"
@@ -771,6 +773,16 @@ func (t *Cortex) initParquetConverter() (serv services.Service, err error) {
 	return parquetconverter.NewConverter(t.Cfg.ParquetConverter, t.Cfg.BlocksStorage, t.Cfg.Compactor.BlockRanges.ToMilliseconds(), util_log.Logger, prometheus.DefaultRegisterer, t.Overrides)
 }
 
+func (t *Cortex) initCardinality() (services.Service, error) {
+	c, err := cardinality.NewCardinalityExplorer(t.Cfg.Cardinality, t.Cfg.BlocksStorage.Bucket, t.Overrides, util_log.Logger, prometheus.DefaultRegisterer)
+	if err != nil {
+		return nil, errors.Wrap(err, "cardinality init")
+	}
+
+	t.API.RegisterCardinality(c)
+	return c, nil
+}
+
 func (t *Cortex) initCompactor() (serv services.Service, err error) {
 	t.Cfg.Compactor.ShardingRing.ListenPort = t.Cfg.Server.GRPCListenPort
 	ingestionReplicationFactor := t.Cfg.Ingester.LifecyclerConfig.RingConfig.ReplicationFactor
@@ -912,6 +924,7 @@ func (t *Cortex) setupModuleManager() error {
 	mm.RegisterModule(TenantDeletion, t.initTenantDeletionAPI, modules.UserInvisibleModule)
 	mm.RegisterModule(Purger, nil)
 	mm.RegisterModule(QueryScheduler, t.initQueryScheduler)
+	mm.RegisterModule(Cardinality, t.initCardinality)
 	mm.RegisterModule(TenantFederation, t.initTenantFederation, modules.UserInvisibleModule)
 	mm.RegisterModule(All, nil)
 
@@ -934,6 +947,7 @@ func (t *Cortex) setupModuleManager() error {
 		QueryFrontendTripperware: {API, Overrides},
 		QueryFrontend:            {QueryFrontendTripperware},
 		QueryScheduler:           {API, Overrides},
+		Cardinality:              {API, Overrides},
 		Ruler:                    {DistributorService, Overrides, StoreQueryable, RulerStorage},
 		RulerStorage:             {Overrides},
 		Configs:                  {API},

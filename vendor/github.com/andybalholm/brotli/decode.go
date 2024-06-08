@@ -1304,21 +1304,26 @@ func wrapRingBuffer(s *Reader) {
    Last two bytes of ring-buffer are initialized to 0, so context calculation
    could be done uniformly for the first two and all other positions. */
 func ensureRingBuffer(s *Reader) bool {
-	var old_ringbuffer []byte
+	var old_ringbuffer []byte = s.ringbuffer
 	if s.ringbuffer_size == s.new_ringbuffer_size {
 		return true
 	}
-	spaceNeeded := int(s.new_ringbuffer_size) + int(kRingBufferWriteAheadSlack)
-	if len(s.ringbuffer) < spaceNeeded {
-		old_ringbuffer = s.ringbuffer
-		s.ringbuffer = make([]byte, spaceNeeded)
+
+	s.ringbuffer = make([]byte, uint(s.new_ringbuffer_size)+uint(kRingBufferWriteAheadSlack))
+	if s.ringbuffer == nil {
+		/* Restore previous value. */
+		s.ringbuffer = old_ringbuffer
+
+		return false
 	}
 
 	s.ringbuffer[s.new_ringbuffer_size-2] = 0
 	s.ringbuffer[s.new_ringbuffer_size-1] = 0
 
-	if old_ringbuffer != nil {
+	if !(old_ringbuffer == nil) {
 		copy(s.ringbuffer, old_ringbuffer[:uint(s.pos)])
+
+		old_ringbuffer = nil
 	}
 
 	s.ringbuffer_size = s.new_ringbuffer_size
