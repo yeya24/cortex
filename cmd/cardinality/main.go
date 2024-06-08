@@ -1,4 +1,4 @@
-package cardinality
+package main
 
 import (
 	"bytes"
@@ -25,7 +25,9 @@ import (
 
 func main() {
 	ctx := context.Background()
-	if err := run(ctx); err != nil {
+	logger := log.NewLogfmtLogger(os.Stdout)
+	if err := run(ctx, logger); err != nil {
+		level.Error(logger).Log("msg", "failed to run", "err", err)
 		os.Exit(1)
 	}
 }
@@ -48,8 +50,7 @@ func (m *mockTenantConfigProvider) S3SSEKMSEncryptionContext(_ string) string {
 	return m.s3KmsEncryptionContext
 }
 
-func run(ctx context.Context) error {
-	logger := log.NewLogfmtLogger(os.Stdout)
+func run(ctx context.Context, logger log.Logger) error {
 	c, err := bucket.NewClient(ctx, bucket.Config{}, "cardinality", logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return err
