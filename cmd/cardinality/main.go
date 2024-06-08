@@ -71,6 +71,7 @@ func run(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+	c = bucket.NewUserBucketClient(tenant, c, cfgProvider)
 	dateStr := "2024-06-06"
 	dateT, _ := time.Parse(time.DateOnly, dateStr)
 	minT := time.Date(dateT.Year(), dateT.Month(), dateT.Day(), 0, 0, 0, 0, time.UTC)
