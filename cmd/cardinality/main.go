@@ -4,11 +4,13 @@ import (
 	"container/heap"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	"github.com/cortexproject/cortex/pkg/storage/bucket/s3"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	"github.com/cortexproject/cortex/pkg/util"
+	"github.com/cortexproject/cortex/pkg/util/flagext"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/oklog/ulid"
@@ -24,10 +26,26 @@ import (
 	"time"
 )
 
+type Config struct {
+	Date   string
+	Tenant string
+	DryRun bool
+}
+
+// RegisterFlags does what it says.
+func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
+	f.StringVar(&cfg.Date, "date", "", "Date")
+	f.StringVar(&cfg.Tenant, "tenant", "136742829649_ws-e312cc13-0ea0-4486-9f5f-8769e4023140", "Tenant")
+	f.BoolVar(&cfg.DryRun, "dryrun", true, "Don't actually do anything")
+}
+
 func main() {
+	var cfg Config
 	ctx := context.Background()
+	flagext.RegisterFlags(&cfg)
+	flag.Parse()
 	logger := log.NewLogfmtLogger(os.Stdout)
-	if err := run(ctx, logger); err != nil {
+	if err := run(ctx, logger, cfg); err != nil {
 		level.Error(logger).Log("msg", "failed to run", "err", err)
 		os.Exit(1)
 	}
@@ -51,7 +69,7 @@ func (m *mockTenantConfigProvider) S3SSEKMSEncryptionContext(_ string) string {
 	return m.s3KmsEncryptionContext
 }
 
-func run(ctx context.Context, logger log.Logger) error {
+func run(ctx context.Context, logger log.Logger, cfg Config) error {
 	c, err := bucket.NewClient(ctx, bucket.Config{
 		Backend: "s3",
 		S3: s3.Config{
@@ -66,13 +84,13 @@ func run(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	cfgProvider := &mockTenantConfigProvider{}
-	tenant := "136742829649_ws-e312cc13-0ea0-4486-9f5f-8769e4023140"
+	tenant := cfg.Tenant
 	bucketIndex, err := bucketindex.ReadIndex(ctx, c, tenant, cfgProvider, logger)
 	if err != nil {
 		return err
 	}
 	c = bucket.NewUserBucketClient(tenant, c, cfgProvider)
-	dateStr := "2024-06-06"
+	dateStr := cfg.Date
 	dateT, _ := time.Parse(time.DateOnly, dateStr)
 	minT := time.Date(dateT.Year(), dateT.Month(), dateT.Day(), 0, 0, 0, 0, time.UTC)
 	maxT := minT.Add(time.Hour * 24)
@@ -90,6 +108,10 @@ func run(ctx context.Context, logger log.Logger) error {
 			fmt.Println(block.ID.String(), block.MinTime, block.MaxTime)
 			blockIDs = append(blockIDs, block.ID)
 		}
+	}
+
+	if cfg.DryRun {
+		return nil
 	}
 
 	eg := errgroup.Group{}
