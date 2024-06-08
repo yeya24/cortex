@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
+	"github.com/cortexproject/cortex/pkg/storage/bucket/s3"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/go-kit/log"
@@ -51,7 +52,13 @@ func (m *mockTenantConfigProvider) S3SSEKMSEncryptionContext(_ string) string {
 }
 
 func run(ctx context.Context, logger log.Logger) error {
-	c, err := bucket.NewClient(ctx, bucket.Config{}, "cardinality", logger, prometheus.DefaultRegisterer)
+	c, err := bucket.NewClient(ctx, bucket.Config{
+		Backend: "s3",
+		S3: s3.Config{
+			Region:     "us-west-2",
+			BucketName: "cortex-block-storage-148585390640",
+		},
+	}, "cardinality", logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return err
 	}
