@@ -55,6 +55,7 @@ func run(ctx context.Context, logger log.Logger) error {
 	c, err := bucket.NewClient(ctx, bucket.Config{
 		Backend: "s3",
 		S3: s3.Config{
+			Endpoint:         "s3-us-west-2.amazonaws.com",
 			Region:           "us-west-2",
 			BucketName:       "cortex-block-storage-148585390640",
 			BucketLookupType: s3.BucketAutoLookup,
