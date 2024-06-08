@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"container/heap"
 	"context"
 	"encoding/json"
@@ -100,10 +99,15 @@ func run(ctx context.Context, logger log.Logger) error {
 			}
 		}
 	}
+
+	for _, block := range blockIDs {
+		if err := Cardinality(ctx, "data", block.String(), 500, logger); err != nil {
+			return err
+		}
+	}
 	//if err := objstore.DownloadDir(ctx, logger, c, id.String(), id.String(), dst, objstore.WithDownloadIgnoredPaths(ignoredPaths...))); err != nil {
 	//	return err
 	//}
-	//return Cardinality(ctx, "data", "", 500, c, logger)
 	return nil
 }
 
@@ -111,7 +115,7 @@ const (
 	cardinalityFolderName = "cardinality"
 )
 
-func Cardinality(ctx context.Context, path, blockID string, limit int, bucket objstore.InstrumentedBucket, logger log.Logger, dateStr string) error {
+func Cardinality(ctx context.Context, path, blockID string, limit int, logger log.Logger) error {
 	var (
 		err error
 	)
@@ -269,9 +273,17 @@ func Cardinality(ctx context.Context, path, blockID string, limit int, bucket ob
 	if err != nil {
 		return err
 	}
-	if err := bucket.Upload(ctx, filepath.Join(cardinalityFolderName, dateStr, fmt.Sprintf("metric-cardinalities-%s.json", blockID)), bytes.NewReader(output)); err != nil {
+	f, err := os.OpenFile(filepath.Join(path, blockID, "metric-cardinalities.json"), os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
 		return err
 	}
+	if _, err := f.Write(output); err != nil {
+		return err
+	}
+	f.Close()
+	//if err := bucket.Upload(ctx, filepath.Join(cardinalityFolderName, dateStr, fmt.Sprintf("metric-cardinalities-%s.json", blockID)), bytes.NewReader(output)); err != nil {
+	//	return err
+	//}
 
 	stats.TotalSeries = totalSeries
 	stats.SeriesCountByLabelName = seriesCountByLabelName.getSortedResult()
@@ -289,9 +301,18 @@ func Cardinality(ctx context.Context, path, blockID string, limit int, bucket ob
 		return err
 	}
 
-	if err := bucket.Upload(ctx, filepath.Join(cardinalityFolderName, dateStr, fmt.Sprintf("overall-%s.json", blockID)), bytes.NewReader(output)); err != nil {
+	f, err = os.OpenFile(filepath.Join(path, blockID, "overview.json"), os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
 		return err
 	}
+	if _, err := f.Write(output); err != nil {
+		return err
+	}
+	f.Close()
+
+	//if err := bucket.Upload(ctx, filepath.Join(cardinalityFolderName, dateStr, fmt.Sprintf("overall-%s.json", blockID)), bytes.NewReader(output)); err != nil {
+	//	return err
+	//}
 
 	level.Info(logger).Log("msg", "finished uploading cardinality files", "duration", time.Since(start))
 	return nil
