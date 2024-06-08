@@ -119,6 +119,7 @@ const (
 )
 
 func Cardinality(ctx context.Context, path, blockID string, limit int, logger log.Logger) error {
+	logger = log.With(logger, "block", blockID)
 	var (
 		err error
 	)
@@ -141,11 +142,13 @@ func Cardinality(ctx context.Context, path, blockID string, limit int, logger lo
 	if err != nil {
 		return err
 	}
+	level.Info(logger).Log("msg", "all label names", "count", len(allLabelNames))
 
 	allMetricNames, err := ir.LabelValues(ctx, labels.MetricName)
 	if err != nil {
 		return err
 	}
+	level.Info(logger).Log("msg", "all metric names", "count", len(allMetricNames))
 
 	var (
 		p index.Postings
@@ -169,7 +172,7 @@ func Cardinality(ctx context.Context, path, blockID string, limit int, logger lo
 	if p.Err() != nil {
 		return p.Err()
 	}
-	level.Info(logger).Log("msg", "finished iterating all postings")
+	level.Info(logger).Log("msg", "all metric names", "count", len(allMetricNames))
 
 	for _, n := range allLabelNames {
 		values, err := ir.LabelValues(ctx, n)
