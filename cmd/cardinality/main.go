@@ -97,10 +97,13 @@ func run(ctx context.Context, logger log.Logger) error {
 			if err := objstore.DownloadFile(ctx, logger, c, filepath.Join(block.String(), "index"), p); err != nil {
 				return err
 			}
+		} else {
+			level.Info(logger).Log("msg", "index file already exists", "path", indexPath)
 		}
 	}
 
 	for _, block := range blockIDs {
+		level.Info(logger).Log("msg", "start running cardinality analysis", "block", block.String())
 		if err := Cardinality(ctx, "data", block.String(), 500, logger); err != nil {
 			return err
 		}
