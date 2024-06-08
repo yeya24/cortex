@@ -1,4 +1,4 @@
-package cardinalit
+package cardinality
 
 import (
 	"context"

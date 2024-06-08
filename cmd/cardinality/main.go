@@ -118,7 +118,8 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 	eg.SetLimit(8)
 	cacheDir := "data"
 	for _, block := range blockIDs {
-		p := filepath.Join(cacheDir, block.String())
+		b := block
+		p := filepath.Join(cacheDir, b.String())
 		if _, err := os.Stat(p); err != nil {
 			if err := os.MkdirAll(p, os.ModePerm); err != nil {
 				return err
@@ -127,7 +128,7 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 		indexPath := filepath.Join(p, "index")
 		if _, err := os.Stat(indexPath); err != nil {
 			eg.Go(func() error {
-				if err := objstore.DownloadFile(ctx, logger, c, filepath.Join(block.String(), "index"), p); err != nil {
+				if err := objstore.DownloadFile(ctx, logger, c, filepath.Join(b.String(), "index"), p); err != nil {
 					return err
 				}
 				return nil
@@ -142,9 +143,10 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 
 	eg.SetLimit(4)
 	for _, block := range blockIDs {
+		b := block
 		eg.Go(func() error {
-			level.Info(logger).Log("msg", "start running cardinality analysis", "block", block.String())
-			if err := Cardinality(ctx, "data", block.String(), 500, logger); err != nil {
+			level.Info(logger).Log("msg", "start running cardinality analysis", "block", b.String())
+			if err := Cardinality(ctx, "data", b.String(), 500, logger); err != nil {
 				return err
 			}
 			return nil
