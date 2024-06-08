@@ -78,8 +78,15 @@ func run(ctx context.Context, logger log.Logger) error {
 	maxT := minT.Add(time.Hour * 24)
 
 	blockIDs := make([]ulid.ULID, 0)
+	deletedBlockSet := make(map[string]struct{})
+	for _, id := range bucketIndex.BlockDeletionMarks.GetULIDs() {
+		deletedBlockSet[id.String()] = struct{}{}
+	}
 	for _, block := range bucketIndex.Blocks {
 		if block.MinTime >= util.TimeToMillis(minT) && block.MaxTime <= util.TimeToMillis(maxT) {
+			if _, ok := deletedBlockSet[block.ID.String()]; ok {
+				continue
+			}
 			fmt.Println(block.ID.String(), block.MinTime, block.MaxTime)
 			blockIDs = append(blockIDs, block.ID)
 		}
