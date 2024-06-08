@@ -128,6 +128,7 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 		indexPath := filepath.Join(p, "index")
 		if _, err := os.Stat(indexPath); err != nil {
 			eg.Go(func() error {
+				level.Info(logger).Log("msg", "start downloading index file", "path", indexPath)
 				if err := objstore.DownloadFile(ctx, logger, c, filepath.Join(b.String(), "index"), p); err != nil {
 					return err
 				}
