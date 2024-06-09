@@ -582,20 +582,20 @@ func (m *MetricNameCardinality) merge(other MetricNameCardinality) {
 	if m.TotalLabelValuePairs < other.TotalLabelValuePairs {
 		m.TotalLabelValuePairs = other.TotalLabelValuePairs
 	}
-	lblsMap := make(map[string]*LabelNameCardinality)
+	lblsMap := make(map[string]LabelNameCardinality)
 	for _, lbl := range m.AllLabels {
-		lblsMap[lbl.Name] = &lbl
+		lblsMap[lbl.Name] = lbl
 	}
 	for _, lbl := range other.AllLabels {
 		if _, ok := lblsMap[lbl.Name]; !ok {
-			lblsMap[lbl.Name] = &lbl
+			lblsMap[lbl.Name] = lbl
 		} else {
-			lblsMap[lbl.Name].merge(lbl)
+			lblsMap[lbl.Name] = lblsMap[lbl.Name].merge(lbl)
 		}
 	}
 	lblsC := make([]LabelNameCardinality, 0, len(lblsMap))
 	for _, lbl := range lblsMap {
-		lblsC = append(lblsC, *lbl)
+		lblsC = append(lblsC, lbl)
 	}
 	sort.Slice(lblsC, func(i, j int) bool {
 		if lblsC[i].TotalSeries == lblsC[j].TotalSeries {
@@ -611,9 +611,9 @@ func (m *MetricNameCardinality) merge(other MetricNameCardinality) {
 	m.SeriesCountByLabelValuePair = mergeTopHeap(m.SeriesCountByLabelValuePair, other.SeriesCountByLabelValuePair, 500)
 }
 
-func (m *LabelNameCardinality) merge(other LabelNameCardinality) {
+func (m LabelNameCardinality) merge(other LabelNameCardinality) LabelNameCardinality {
 	if m.Name != other.Name {
-		return
+		return LabelNameCardinality{}
 	}
 	m.TotalSeries += other.TotalSeries
 	if m.LabelValueCount < other.LabelValueCount {
@@ -635,6 +635,7 @@ func (m *LabelNameCardinality) merge(other LabelNameCardinality) {
 	}
 
 	m.LabelValueCardinality = h.getSortedResult()
+	return m
 }
 
 type MetricNameCardinality struct {
