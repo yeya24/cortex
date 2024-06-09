@@ -19,6 +19,7 @@ import (
 	"github.com/prometheus/prometheus/tsdb/index"
 	"github.com/thanos-io/objstore"
 	"golang.org/x/sync/errgroup"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -145,20 +146,134 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 	eg.SetLimit(4)
 	for _, block := range blockIDs {
 		b := block
-		eg.Go(func() error {
-			level.Info(logger).Log("msg", "start running cardinality analysis", "block", b.String())
-			if err := Cardinality(ctx, "data", b.String(), 500, logger); err != nil {
-				return err
-			}
-			return nil
-		})
+		overviewPath := filepath.Join(cacheDir, b.String(), "overview.json")
+		if _, err := os.Stat(overviewPath); err != nil {
+			eg.Go(func() error {
+				level.Info(logger).Log("msg", "start running cardinality analysis", "block", b.String())
+				if err := Cardinality(ctx, "data", b.String(), 500, logger); err != nil {
+					return err
+				}
+				return nil
+			})
+		} else {
+			level.Info(logger).Log("msg", "overview file already exists", "path", overviewPath)
+		}
 	}
 	if err := eg.Wait(); err != nil {
 		return err
 	}
-	//if err := objstore.DownloadDir(ctx, logger, c, id.String(), id.String(), dst, objstore.WithDownloadIgnoredPaths(ignoredPaths...))); err != nil {
-	//	return err
-	//}
+
+	overviews := make([]string, len(blockIDs))
+	metricCardinalities := make([]string, len(blockIDs))
+	for i, block := range blockIDs {
+		b := block
+		overviewPath := filepath.Join(cacheDir, b.String(), "overview.json")
+		metricCardinalityPath := filepath.Join(cacheDir, b.String(), "metric-cardinalities.json")
+		overviews[i] = overviewPath
+		metricCardinalities[i] = metricCardinalityPath
+	}
+
+	f, err := os.OpenFile(overviews[0], os.O_RDONLY, 0600)
+	if err != nil {
+		return err
+	}
+	out, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	var mergedOverview TSDBStatus
+	if err := json.Unmarshal(out, &mergedOverview); err != nil {
+		return err
+	}
+	f.Close()
+
+	for i := 1; i < len(overviews); i++ {
+		f, err := os.OpenFile(overviews[i], os.O_RDONLY, 0600)
+		if err != nil {
+			return err
+		}
+		out, err = io.ReadAll(f)
+		if err != nil {
+			return err
+		}
+		var o TSDBStatus
+		if err := json.Unmarshal(out, &o); err != nil {
+			return err
+		}
+
+		mergedOverview.merge(o)
+		f.Close()
+	}
+
+	if _, err := os.Stat(dateStr); err != nil {
+		if err := os.Mkdir(dateStr, os.ModePerm); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(filepath.Join(dateStr, "overview.json"), os.O_CREATE|os.O_WRONLY, os.ModePerm)
+		if err != nil {
+			return err
+		}
+		out, err := json.Marshal(mergedOverview)
+		if err != nil {
+			return err
+		}
+		if _, err := f.Write(out); err != nil {
+			return err
+		}
+		f.Close()
+	}
+
+	f, err = os.OpenFile(metricCardinalities[0], os.O_RDONLY, 0600)
+	if err != nil {
+		return err
+	}
+	out, err = io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	var mergedMetricCardinalities MetricNameCardinalities
+	if err := json.Unmarshal(out, &mergedMetricCardinalities); err != nil {
+		return err
+	}
+	f.Close()
+
+	for i := 1; i < len(metricCardinalities); i++ {
+		f, err := os.OpenFile(metricCardinalities[i], os.O_RDONLY, 0600)
+		if err != nil {
+			return err
+		}
+		out, err = io.ReadAll(f)
+		if err != nil {
+			return err
+		}
+		var o MetricNameCardinalities
+		if err := json.Unmarshal(out, &o); err != nil {
+			return err
+		}
+
+		mergedMetricCardinalities.merge(o)
+		f.Close()
+	}
+
+	if _, err := os.Stat(dateStr); err != nil {
+		if err := os.Mkdir(dateStr, os.ModePerm); err != nil {
+			return err
+		}
+	}
+
+	f, err = os.OpenFile(filepath.Join(dateStr, "metric-cardinalities.json"), os.O_CREATE|os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	out, err = json.Marshal(mergedMetricCardinalities)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(out); err != nil {
+		return err
+	}
+	f.Close()
+
 	return nil
 }
 
@@ -386,44 +501,23 @@ func (t *TSDBStatus) merge(other TSDBStatus) {
 	if t.TotalLabelValuePairs < other.TotalLabelValuePairs {
 		t.TotalLabelValuePairs = other.TotalLabelValuePairs
 	}
-	seriesCountByLabelMap := make(map[string]uint64)
-	for _, item := range t.SeriesCountByLabelName {
-		seriesCountByLabelMap[item.Name] = item.Count
-	}
+	h := &topHeap{topN: 500, a: t.SeriesCountByLabelName}
 	for _, item := range other.SeriesCountByLabelName {
-		seriesCountByLabelMap[item.Name] += item.Count
+		h.push(item.Name, item.Count)
 	}
-	seriesCountByLabelName := newTopHeap(500)
-	for k, v := range seriesCountByLabelMap {
-		seriesCountByLabelName.push(k, v)
-	}
-	t.SeriesCountByLabelName = seriesCountByLabelName.getSortedResult()
+	t.SeriesCountByLabelName = h.getSortedResult()
 
-	seriesCountByMetricNameMap := make(map[string]uint64)
-	for _, item := range t.SeriesCountByMetricName {
-		seriesCountByMetricNameMap[item.Name] = item.Count
-	}
+	h = &topHeap{topN: 500, a: t.SeriesCountByMetricName}
 	for _, item := range other.SeriesCountByMetricName {
-		seriesCountByMetricNameMap[item.Name] += item.Count
+		h.push(item.Name, item.Count)
 	}
-	seriesCountByMetricName := newTopHeap(500)
-	for k, v := range seriesCountByMetricNameMap {
-		seriesCountByMetricName.push(k, v)
-	}
-	t.SeriesCountByMetricName = seriesCountByMetricName.getSortedResult()
+	t.SeriesCountByMetricName = h.getSortedResult()
 
-	seriesCountByLabelValuePairMap := make(map[string]uint64)
-	for _, item := range t.SeriesCountByLabelValuePair {
-		seriesCountByLabelValuePairMap[item.Name] = item.Count
-	}
+	h = &topHeap{topN: 500, a: t.SeriesCountByLabelValuePair}
 	for _, item := range other.SeriesCountByLabelValuePair {
-		seriesCountByLabelValuePairMap[item.Name] += item.Count
+		h.push(item.Name, item.Count)
 	}
-	seriesCountByLabelValuePair := newTopHeap(500)
-	for k, v := range seriesCountByMetricNameMap {
-		seriesCountByLabelValuePair.push(k, v)
-	}
-	t.SeriesCountByLabelValuePair = seriesCountByLabelValuePair.getSortedResult()
+	t.SeriesCountByLabelValuePair = h.getSortedResult()
 
 	labelValueCountByLabelNameMap := make(map[string]uint64)
 	labelValueCountByLabelName := newTopHeap(500)
@@ -442,7 +536,86 @@ func (t *TSDBStatus) merge(other TSDBStatus) {
 type MetricNameCardinalities []*MetricNameCardinality
 
 func (m *MetricNameCardinalities) merge(other MetricNameCardinalities) {
+	mm := make(map[string]*MetricNameCardinality)
+	for _, item := range *m {
+		mm[item.Name] = item
+	}
+	for _, item := range other {
+		if _, ok := mm[item.Name]; !ok {
+			mm[item.Name] = item
+		} else {
+			mm[item.Name].merge(*item)
+		}
+	}
+	mmc := make([]*MetricNameCardinality, 0, len(mm))
+	for _, item := range mm {
+		mmc = append(mmc, item)
+	}
+	sort.Slice(mmc, func(i, j int) bool {
+		if mmc[i].TotalSeries == mmc[j].TotalSeries {
+			if mmc[i].TotalLabelValuePairs == mmc[j].TotalLabelValuePairs {
+				return strings.Compare(mmc[i].Name, mmc[j].Name) < 0
+			}
+			return mmc[i].TotalLabelValuePairs > mmc[j].TotalLabelValuePairs
+		}
+		return mmc[i].TotalSeries > mmc[j].TotalSeries
+	})
+}
 
+func (m *MetricNameCardinality) merge(other MetricNameCardinality) {
+	if m.Name != other.Name {
+		return
+	}
+	m.TotalSeries += other.TotalSeries
+	if m.TotalLabelValuePairs < other.TotalLabelValuePairs {
+		m.TotalLabelValuePairs = other.TotalLabelValuePairs
+	}
+	lblsMap := make(map[string]*LabelNameCardinality)
+	for _, lbl := range m.AllLabels {
+		lblsMap[lbl.Name] = &lbl
+	}
+	for _, lbl := range other.AllLabels {
+		if _, ok := lblsMap[lbl.Name]; !ok {
+			lblsMap[lbl.Name] = &lbl
+		} else {
+			lblsMap[lbl.Name].merge(lbl)
+		}
+	}
+	lblsC := make([]LabelNameCardinality, 0, len(lblsMap))
+	for _, lbl := range lblsMap {
+		lblsC = append(lblsC, *lbl)
+	}
+	sort.Slice(lblsC, func(i, j int) bool {
+		if lblsC[i].TotalSeries == lblsC[j].TotalSeries {
+			if lblsC[i].LabelValueCount == lblsC[j].LabelValueCount {
+				return strings.Compare(lblsC[i].Name, lblsC[j].Name) < 0
+			}
+			return lblsC[i].LabelValueCount > lblsC[j].LabelValueCount
+		}
+		return lblsC[i].TotalSeries > lblsC[j].TotalSeries
+	})
+	m.AllLabels = lblsC
+
+	h := &topHeap{topN: 500, a: m.SeriesCountByLabelValuePair}
+	for _, item := range other.SeriesCountByLabelValuePair {
+		h.push(item.Name, item.Count)
+	}
+	m.SeriesCountByLabelValuePair = h.getSortedResult()
+}
+
+func (m *LabelNameCardinality) merge(other LabelNameCardinality) {
+	if m.Name != other.Name {
+		return
+	}
+	m.TotalSeries += other.TotalSeries
+	if m.LabelValueCount < other.LabelValueCount {
+		m.LabelValueCount = other.LabelValueCount
+	}
+	h := &topHeap{topN: 5, a: m.LabelValueCardinality}
+	for _, item := range other.LabelValueCardinality {
+		h.push(item.Name, item.Count)
+	}
+	m.LabelValueCardinality = h.getSortedResult()
 }
 
 type MetricNameCardinality struct {
