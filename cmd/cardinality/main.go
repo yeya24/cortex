@@ -163,6 +163,7 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 		return err
 	}
 
+	start := time.Now()
 	overviews := make([]string, len(blockIDs))
 	metricCardinalities := make([]string, len(blockIDs))
 	for i, block := range blockIDs {
@@ -222,7 +223,9 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 		}
 		f.Close()
 	}
+	level.Info(logger).Log("msg", "finished merging and writing overview.json", "duration", time.Since(start))
 
+	start = time.Now()
 	f, err = os.OpenFile(metricCardinalities[0], os.O_RDONLY, 0600)
 	if err != nil {
 		return err
@@ -273,6 +276,7 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 		return err
 	}
 	f.Close()
+	level.Info(logger).Log("msg", "finished merging and writing metrics cardinality", "duration", time.Since(start))
 
 	return nil
 }
@@ -496,28 +500,36 @@ type TSDBStatus struct {
 	LabelValueCountByLabelName  []TopHeapEntry `json:"label_value_count_by_label_name"`
 }
 
+func mergeTopHeap(h1 []TopHeapEntry, h2 []TopHeapEntry, topN int) []TopHeapEntry {
+	m := make(map[string]uint64)
+	for _, item := range h1 {
+		m[item.Name] = item.Count
+	}
+	for _, item := range h2 {
+		if _, ok := m[item.Name]; ok {
+			m[item.Name] += item.Count
+		} else {
+			m[item.Name] = item.Count
+		}
+	}
+	h := newTopHeap(topN)
+	for k, v := range m {
+		h.push(k, v)
+	}
+	return h.getSortedResult()
+}
+
 func (t *TSDBStatus) merge(other TSDBStatus) {
 	t.TotalSeries += other.TotalSeries
 	if t.TotalLabelValuePairs < other.TotalLabelValuePairs {
 		t.TotalLabelValuePairs = other.TotalLabelValuePairs
 	}
-	h := &topHeap{topN: 500, a: t.SeriesCountByLabelName}
-	for _, item := range other.SeriesCountByLabelName {
-		h.push(item.Name, item.Count)
-	}
-	t.SeriesCountByLabelName = h.getSortedResult()
 
-	h = &topHeap{topN: 500, a: t.SeriesCountByMetricName}
-	for _, item := range other.SeriesCountByMetricName {
-		h.push(item.Name, item.Count)
-	}
-	t.SeriesCountByMetricName = h.getSortedResult()
+	t.SeriesCountByLabelName = mergeTopHeap(t.SeriesCountByLabelName, other.SeriesCountByLabelName, 500)
 
-	h = &topHeap{topN: 500, a: t.SeriesCountByLabelValuePair}
-	for _, item := range other.SeriesCountByLabelValuePair {
-		h.push(item.Name, item.Count)
-	}
-	t.SeriesCountByLabelValuePair = h.getSortedResult()
+	t.SeriesCountByMetricName = mergeTopHeap(t.SeriesCountByMetricName, other.SeriesCountByMetricName, 500)
+
+	t.SeriesCountByLabelValuePair = mergeTopHeap(t.SeriesCountByLabelValuePair, other.SeriesCountByLabelValuePair, 500)
 
 	labelValueCountByLabelNameMap := make(map[string]uint64)
 	labelValueCountByLabelName := newTopHeap(500)
@@ -596,11 +608,7 @@ func (m *MetricNameCardinality) merge(other MetricNameCardinality) {
 	})
 	m.AllLabels = lblsC
 
-	h := &topHeap{topN: 500, a: m.SeriesCountByLabelValuePair}
-	for _, item := range other.SeriesCountByLabelValuePair {
-		h.push(item.Name, item.Count)
-	}
-	m.SeriesCountByLabelValuePair = h.getSortedResult()
+	m.SeriesCountByLabelValuePair = mergeTopHeap(m.SeriesCountByLabelValuePair, other.SeriesCountByLabelValuePair, 500)
 }
 
 func (m *LabelNameCardinality) merge(other LabelNameCardinality) {
@@ -611,10 +619,21 @@ func (m *LabelNameCardinality) merge(other LabelNameCardinality) {
 	if m.LabelValueCount < other.LabelValueCount {
 		m.LabelValueCount = other.LabelValueCount
 	}
-	h := &topHeap{topN: 5, a: m.LabelValueCardinality}
-	for _, item := range other.LabelValueCardinality {
-		h.push(item.Name, item.Count)
+
+	labelValueCardinalityMap := make(map[string]uint64)
+	for _, item := range m.LabelValueCardinality {
+		labelValueCardinalityMap[item.Name] = item.Count
 	}
+	for _, item := range other.LabelValueCardinality {
+		if c, ok := labelValueCardinalityMap[item.Name]; !ok || item.Count > c {
+			labelValueCardinalityMap[item.Name] = item.Count
+		}
+	}
+	h := newTopHeap(5)
+	for k, v := range labelValueCardinalityMap {
+		h.push(k, v)
+	}
+
 	m.LabelValueCardinality = h.getSortedResult()
 }
 
