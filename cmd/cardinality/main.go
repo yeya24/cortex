@@ -254,7 +254,7 @@ func run(ctx context.Context, logger log.Logger, cfg Config) error {
 			return err
 		}
 
-		mergedMetricCardinalities.merge(o)
+		mergedMetricCardinalities = mergedMetricCardinalities.merge(o)
 		f.Close()
 	}
 
@@ -545,21 +545,21 @@ func (t *TSDBStatus) merge(other TSDBStatus) {
 	t.LabelValueCountByLabelName = labelValueCountByLabelName.getSortedResult()
 }
 
-type MetricNameCardinalities []*MetricNameCardinality
+type MetricNameCardinalities []MetricNameCardinality
 
-func (m *MetricNameCardinalities) merge(other MetricNameCardinalities) {
-	mm := make(map[string]*MetricNameCardinality)
-	for _, item := range *m {
+func (m MetricNameCardinalities) merge(other MetricNameCardinalities) MetricNameCardinalities {
+	mm := make(map[string]MetricNameCardinality)
+	for _, item := range m {
 		mm[item.Name] = item
 	}
 	for _, item := range other {
 		if _, ok := mm[item.Name]; !ok {
 			mm[item.Name] = item
 		} else {
-			mm[item.Name].merge(*item)
+			mm[item.Name] = mm[item.Name].merge(item)
 		}
 	}
-	mmc := make([]*MetricNameCardinality, 0, len(mm))
+	mmc := make([]MetricNameCardinality, 0, len(mm))
 	for _, item := range mm {
 		mmc = append(mmc, item)
 	}
@@ -572,11 +572,12 @@ func (m *MetricNameCardinalities) merge(other MetricNameCardinalities) {
 		}
 		return mmc[i].TotalSeries > mmc[j].TotalSeries
 	})
+	return mmc
 }
 
-func (m *MetricNameCardinality) merge(other MetricNameCardinality) {
+func (m MetricNameCardinality) merge(other MetricNameCardinality) MetricNameCardinality {
 	if m.Name != other.Name {
-		return
+		return MetricNameCardinality{}
 	}
 	m.TotalSeries += other.TotalSeries
 	if m.TotalLabelValuePairs < other.TotalLabelValuePairs {
@@ -609,6 +610,7 @@ func (m *MetricNameCardinality) merge(other MetricNameCardinality) {
 	m.AllLabels = lblsC
 
 	m.SeriesCountByLabelValuePair = mergeTopHeap(m.SeriesCountByLabelValuePair, other.SeriesCountByLabelValuePair, 500)
+	return m
 }
 
 func (m LabelNameCardinality) merge(other LabelNameCardinality) LabelNameCardinality {
