@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/cardinality"
 	"net/http"
 
 	"github.com/go-kit/log"
@@ -83,6 +84,7 @@ const (
 	TenantDeletion           string = "tenant-deletion"
 	Purger                   string = "purger"
 	QueryScheduler           string = "query-scheduler"
+	Cardinality              string = "cardinality"
 	TenantFederation         string = "tenant-federation"
 	All                      string = "all"
 )
@@ -648,6 +650,16 @@ func (t *Cortex) initAlertManager() (serv services.Service, err error) {
 	return t.Alertmanager, nil
 }
 
+func (t *Cortex) initCardinality() (services.Service, error) {
+	c, err := cardinality.NewCardinalityExplorer(t.Cfg.Cardinality, t.Cfg.BlocksStorage.Bucket, t.Overrides, util_log.Logger, prometheus.DefaultRegisterer)
+	if err != nil {
+		return nil, errors.Wrap(err, "cardinality init")
+	}
+
+	t.API.RegisterCardinality(c)
+	return c, nil
+}
+
 func (t *Cortex) initCompactor() (serv services.Service, err error) {
 	t.Cfg.Compactor.ShardingRing.ListenPort = t.Cfg.Server.GRPCListenPort
 
@@ -755,6 +767,7 @@ func (t *Cortex) setupModuleManager() error {
 	mm.RegisterModule(TenantDeletion, t.initTenantDeletionAPI, modules.UserInvisibleModule)
 	mm.RegisterModule(Purger, nil)
 	mm.RegisterModule(QueryScheduler, t.initQueryScheduler)
+	mm.RegisterModule(Cardinality, t.initCardinality)
 	mm.RegisterModule(TenantFederation, t.initTenantFederation, modules.UserInvisibleModule)
 	mm.RegisterModule(All, nil)
 
@@ -777,6 +790,7 @@ func (t *Cortex) setupModuleManager() error {
 		QueryFrontendTripperware: {API, Overrides},
 		QueryFrontend:            {QueryFrontendTripperware},
 		QueryScheduler:           {API, Overrides},
+		Cardinality:              {API, Overrides},
 		Ruler:                    {DistributorService, Overrides, StoreQueryable, RulerStorage},
 		RulerStorage:             {Overrides},
 		Configs:                  {API},

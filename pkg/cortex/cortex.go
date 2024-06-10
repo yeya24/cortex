@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/cardinality"
 	"net/http"
 	"os"
 	"reflect"
@@ -112,6 +113,7 @@ type Config struct {
 	Compactor        compactor.Config                `yaml:"compactor"`
 	StoreGateway     storegateway.Config             `yaml:"store_gateway"`
 	TenantFederation tenantfederation.Config         `yaml:"tenant_federation"`
+	Cardinality      cardinality.Config              `yaml:"cardinality,omitempty"`
 
 	Ruler               ruler.Config                               `yaml:"ruler"`
 	RulerStorage        rulestore.Config                           `yaml:"ruler_storage"`
@@ -156,6 +158,7 @@ func (c *Config) RegisterFlags(f *flag.FlagSet) {
 	c.QueryRange.RegisterFlags(f)
 	c.BlocksStorage.RegisterFlags(f)
 	c.Compactor.RegisterFlags(f)
+	c.Cardinality.RegisterFlags(f)
 	c.StoreGateway.RegisterFlags(f)
 	c.TenantFederation.RegisterFlags(f)
 

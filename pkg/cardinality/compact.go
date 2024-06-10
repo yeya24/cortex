@@ -281,10 +281,6 @@ func (t *TSDBStatus) merge(other TSDBStatus) {
 
 type MetricNameCardinalities []*MetricNameCardinality
 
-func (m *MetricNameCardinalities) merge(other MetricNameCardinalities) {
-
-}
-
 type MetricNameCardinality struct {
 	Name        string `json:"name"`
 	TotalSeries uint64 `json:"total_series"`
