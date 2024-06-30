@@ -28,6 +28,8 @@ const (
 	// IndexCacheBackendRedis is the value for the redis index cache backend.
 	IndexCacheBackendRedis = "redis"
 
+	IndexCacheBackendBadger = "badger"
+
 	// IndexCacheBackendDefault is the value for the default index cache backend.
 	IndexCacheBackendDefault = IndexCacheBackendInMemory
 
@@ -37,7 +39,7 @@ const (
 )
 
 var (
-	supportedIndexCacheBackends = []string{IndexCacheBackendInMemory, IndexCacheBackendMemcached, IndexCacheBackendRedis}
+	supportedIndexCacheBackends = []string{IndexCacheBackendInMemory, IndexCacheBackendMemcached, IndexCacheBackendRedis, IndexCacheBackendBadger}
 
 	errUnsupportedIndexCacheBackend = errors.New("unsupported index cache backend")
 	errDuplicatedIndexCacheBackend  = errors.New("duplicated index cache backend")
@@ -52,6 +54,7 @@ type IndexCacheConfig struct {
 	InMemory   InMemoryIndexCacheConfig   `yaml:"inmemory"`
 	Memcached  MemcachedIndexCacheConfig  `yaml:"memcached"`
 	Redis      RedisIndexCacheConfig      `yaml:"redis"`
+	Badger     BadgerIndexCacheConfig     `yaml:"badger"`
 	MultiLevel MultiLevelIndexCacheConfig `yaml:"multilevel"`
 }
 
@@ -68,6 +71,7 @@ func (cfg *IndexCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix str
 	cfg.InMemory.RegisterFlagsWithPrefix(f, prefix+"inmemory.")
 	cfg.Memcached.RegisterFlagsWithPrefix(f, prefix+"memcached.")
 	cfg.Redis.RegisterFlagsWithPrefix(f, prefix+"redis.")
+	cfg.Badger.RegisterFlagsWithPrefix(f, prefix+"badger.")
 	cfg.MultiLevel.RegisterFlagsWithPrefix(f, prefix+"multilevel.")
 }
 
@@ -98,6 +102,10 @@ func (cfg *IndexCacheConfig) Validate() error {
 			}
 		} else if backend == IndexCacheBackendRedis {
 			if err := cfg.Redis.Validate(); err != nil {
+				return err
+			}
+		} else if backend == IndexCacheBackendBadger {
+			if err := cfg.Badger.Validate(); err != nil {
 				return err
 			}
 		} else {
@@ -188,6 +196,23 @@ func (cfg *RedisIndexCacheConfig) Validate() error {
 	return storecache.ValidateEnabledItems(cfg.EnabledItems)
 }
 
+type BadgerIndexCacheConfig struct {
+	MaxSizeBytes uint64   `yaml:"max_size_bytes"`
+	EnabledItems []string `yaml:"enabled_items"`
+}
+
+func (cfg *BadgerIndexCacheConfig) Validate() error {
+	if err := storecache.ValidateEnabledItems(cfg.EnabledItems); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cfg *BadgerIndexCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix string) {
+	f.Uint64Var(&cfg.MaxSizeBytes, prefix+"max-size-bytes", uint64(1*units.Gibibyte), "Maximum size in bytes of in-memory index cache used to speed up blocks index lookups (shared between all tenants).")
+	f.Var((*flagext.StringSlice)(&cfg.EnabledItems), prefix+"enabled-items", "Selectively cache index item types. Supported values are Postings, ExpandedPostings and Series")
+}
+
 // NewIndexCache creates a new index cache based on the input configuration.
 func NewIndexCache(cfg IndexCacheConfig, logger log.Logger, registerer prometheus.Registerer) (storecache.IndexCache, error) {
 	splitBackends := strings.Split(cfg.Backend, ",")
@@ -236,6 +261,13 @@ func NewIndexCache(cfg IndexCacheConfig, logger log.Logger, registerer prometheu
 			}
 			caches = append(caches, cache)
 			enabledItems = append(enabledItems, cfg.Redis.EnabledItems)
+		case IndexCacheBackendBadger:
+			c, err := newBadgerIndexCache(cfg.Badger, logger, registerer)
+			if err != nil {
+				return nil, err
+			}
+			caches = append(caches, c)
+			enabledItems = append(enabledItems, cfg.Badger.EnabledItems)
 		default:
 			return nil, errUnsupportedIndexCacheBackend
 		}
@@ -257,6 +289,18 @@ func newInMemoryIndexCache(cfg InMemoryIndexCacheConfig, logger log.Logger, regi
 		MaxSize:     maxCacheSize,
 		MaxItemSize: maxItemSize,
 	})
+}
+
+func newBadgerIndexCache(cfg BadgerIndexCacheConfig, logger log.Logger, registerer prometheus.Registerer) (storecache.IndexCache, error) {
+	maxCacheSize := model.Bytes(cfg.MaxSizeBytes)
+
+	// Calculate the max item size.
+	maxItemSize := defaultMaxItemSize
+	if maxItemSize > maxCacheSize {
+		maxItemSize = maxCacheSize
+	}
+
+	return NewBadgerIndexCache(logger, nil, registerer)
 }
 
 func newMemcachedIndexCacheClient(cfg MemcachedClientConfig, logger log.Logger, registerer prometheus.Registerer) (cacheutil.RemoteCacheClient, error) {
