@@ -41,13 +41,17 @@ import (
 
 // Config contains the configuration require to create a querier
 type Config struct {
-	MaxConcurrent             int           `yaml:"max_concurrent"`
-	Timeout                   time.Duration `yaml:"timeout"`
-	IngesterStreaming         bool          `yaml:"ingester_streaming" doc:"hidden"`
-	IngesterMetadataStreaming bool          `yaml:"ingester_metadata_streaming"`
-	MaxSamples                int           `yaml:"max_samples"`
-	QueryIngestersWithin      time.Duration `yaml:"query_ingesters_within"`
-	EnablePerStepStats        bool          `yaml:"per_step_stats_enabled"`
+	MaxConcurrent                  int           `yaml:"max_concurrent"`
+	Timeout                        time.Duration `yaml:"timeout"`
+	IngesterStreaming              bool          `yaml:"ingester_streaming" doc:"hidden"`
+	IngesterMetadataStreaming      bool          `yaml:"ingester_metadata_streaming"`
+	IngesterLabelNamesWithMatchers bool          `yaml:"ingester_label_names_with_matchers"`
+	MaxSamples                     int           `yaml:"max_samples"`
+	QueryIngestersWithin           time.Duration `yaml:"query_ingesters_within"`
+	EnablePerStepStats             bool          `yaml:"per_step_stats_enabled"`
+
+	// Use compression for metrics query API or instant and range query APIs.
+	ResponseCompression string `yaml:"response_compression"`
 
 	// QueryStoreAfter the time after which queries should also be sent to the store and not just ingesters.
 	QueryStoreAfter    time.Duration `yaml:"query_store_after"`
@@ -89,6 +93,7 @@ var (
 	errBadLookbackConfigs                             = errors.New("bad settings, query_store_after >= query_ingesters_within which can result in queries not being sent")
 	errShuffleShardingLookbackLessThanQueryStoreAfter = errors.New("the shuffle-sharding lookback period should be greater or equal than the configured 'query store after'")
 	errEmptyTimeRange                                 = errors.New("empty time range")
+	errUnsupportedResponseCompression                 = errors.New("unsupported response compression. Supported compression 'gzip' and '' (disable compression)")
 )
 
 // RegisterFlags adds the flags required to config this to the given FlagSet.
@@ -106,9 +111,11 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.IntVar(&cfg.MaxConcurrent, "querier.max-concurrent", 20, "The maximum number of concurrent queries.")
 	f.DurationVar(&cfg.Timeout, "querier.timeout", 2*time.Minute, "The timeout for a query.")
 	f.BoolVar(&cfg.IngesterMetadataStreaming, "querier.ingester-metadata-streaming", true, "Deprecated (This feature will be always on after v1.18): Use streaming RPCs for metadata APIs from ingester.")
+	f.BoolVar(&cfg.IngesterLabelNamesWithMatchers, "querier.ingester-label-names-with-matchers", false, "Use LabelNames ingester RPCs with match params.")
 	f.IntVar(&cfg.MaxSamples, "querier.max-samples", 50e6, "Maximum number of samples a single query can load into memory.")
 	f.DurationVar(&cfg.QueryIngestersWithin, "querier.query-ingesters-within", 0, "Maximum lookback beyond which queries are not sent to ingester. 0 means all queries are sent to ingester.")
 	f.BoolVar(&cfg.EnablePerStepStats, "querier.per-step-stats-enabled", false, "Enable returning samples stats per steps in query response.")
+	f.StringVar(&cfg.ResponseCompression, "querier.response-compression", "gzip", "Use compression for metrics query API or instant and range query APIs. Supports 'gzip' and '' (disable compression)")
 	f.DurationVar(&cfg.MaxQueryIntoFuture, "querier.max-query-into-future", 10*time.Minute, "Maximum duration into the future you can query. 0 to disable.")
 	f.DurationVar(&cfg.DefaultEvaluationInterval, "querier.default-evaluation-interval", time.Minute, "The default evaluation interval or step size for subqueries.")
 	f.DurationVar(&cfg.QueryStoreAfter, "querier.query-store-after", 0, "The time after which a metric should be queried from storage and not just ingesters. 0 means all queries are sent to store. When running the blocks storage, if this option is enabled, the time range of the query sent to the store will be manipulated to ensure the query end is not more recent than 'now - query-store-after'.")
@@ -129,6 +136,10 @@ func (cfg *Config) Validate() error {
 		if cfg.QueryStoreAfter >= cfg.QueryIngestersWithin {
 			return errBadLookbackConfigs
 		}
+	}
+
+	if cfg.ResponseCompression != "" && cfg.ResponseCompression != "gzip" {
+		return errUnsupportedResponseCompression
 	}
 
 	if cfg.ShuffleShardingIngestersLookbackPeriod > 0 {
@@ -156,7 +167,7 @@ func getChunksIteratorFunction(_ Config) chunkIteratorFunc {
 func New(cfg Config, limits *validation.Overrides, distributor Distributor, stores []QueryableWithFilter, reg prometheus.Registerer, logger log.Logger) (storage.SampleAndChunkQueryable, storage.ExemplarQueryable, promql.QueryEngine) {
 	iteratorFunc := getChunksIteratorFunction(cfg)
 
-	distributorQueryable := newDistributorQueryable(distributor, cfg.IngesterMetadataStreaming, iteratorFunc, cfg.QueryIngestersWithin)
+	distributorQueryable := newDistributorQueryable(distributor, cfg.IngesterMetadataStreaming, cfg.IngesterLabelNamesWithMatchers, iteratorFunc, cfg.QueryIngestersWithin)
 
 	ns := make([]QueryableWithFilter, len(stores))
 	for ix, s := range stores {
@@ -420,7 +431,7 @@ func (q querier) Select(ctx context.Context, sortSeries bool, sp *storage.Select
 
 // LabelValues implements storage.Querier.
 func (q querier) LabelValues(ctx context.Context, name string, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	ctx, stats, _, _, _, _, queriers, err := q.setupFromCtx(ctx)
+	ctx, stats, userID, mint, maxt, _, queriers, err := q.setupFromCtx(ctx)
 	if err == errEmptyTimeRange {
 		return nil, nil, nil
 	} else if err != nil {
@@ -430,6 +441,14 @@ func (q querier) LabelValues(ctx context.Context, name string, hints *storage.La
 	defer func() {
 		stats.AddQueryStorageWallTime(time.Since(startT))
 	}()
+
+	startTime := model.Time(mint)
+	endTime := model.Time(maxt)
+
+	if maxQueryLength := q.limits.MaxQueryLength(userID); maxQueryLength > 0 && endTime.Sub(startTime) > maxQueryLength {
+		limitErr := validation.LimitError(fmt.Sprintf(validation.ErrQueryTooLong, endTime.Sub(startTime), maxQueryLength))
+		return nil, nil, limitErr
+	}
 
 	if len(queriers) == 1 {
 		return queriers[0].LabelValues(ctx, name, hints, matchers...)
@@ -470,7 +489,7 @@ func (q querier) LabelValues(ctx context.Context, name string, hints *storage.La
 }
 
 func (q querier) LabelNames(ctx context.Context, hints *storage.LabelHints, matchers ...*labels.Matcher) ([]string, annotations.Annotations, error) {
-	ctx, stats, _, _, _, _, queriers, err := q.setupFromCtx(ctx)
+	ctx, stats, userID, mint, maxt, _, queriers, err := q.setupFromCtx(ctx)
 	if err == errEmptyTimeRange {
 		return nil, nil, nil
 	} else if err != nil {
@@ -480,6 +499,14 @@ func (q querier) LabelNames(ctx context.Context, hints *storage.LabelHints, matc
 	defer func() {
 		stats.AddQueryStorageWallTime(time.Since(startT))
 	}()
+
+	startTime := model.Time(mint)
+	endTime := model.Time(maxt)
+
+	if maxQueryLength := q.limits.MaxQueryLength(userID); maxQueryLength > 0 && endTime.Sub(startTime) > maxQueryLength {
+		limitErr := validation.LimitError(fmt.Sprintf(validation.ErrQueryTooLong, endTime.Sub(startTime), maxQueryLength))
+		return nil, nil, limitErr
+	}
 
 	if len(queriers) == 1 {
 		return queriers[0].LabelNames(ctx, hints, matchers...)

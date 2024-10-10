@@ -20,8 +20,8 @@ import (
 )
 
 var (
-	PrometheusCodec        = NewPrometheusCodec(false)
-	ShardedPrometheusCodec = NewPrometheusCodec(false)
+	PrometheusCodec        = NewPrometheusCodec(false, "", "protobuf")
+	ShardedPrometheusCodec = NewPrometheusCodec(false, "", "protobuf")
 )
 
 func TestRoundTrip(t *testing.T) {
@@ -34,6 +34,8 @@ func TestRoundTrip(t *testing.T) {
 					_, err = w.Write([]byte(responseBody))
 				} else if r.RequestURI == queryWithWarnings {
 					_, err = w.Write([]byte(responseBodyWithWarnings))
+				} else if r.RequestURI == queryWithInfos {
+					_, err = w.Write([]byte(responseBodyWithInfos))
 				} else {
 					_, err = w.Write([]byte("bar"))
 				}

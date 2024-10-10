@@ -903,9 +903,18 @@ blocks_storage:
         [max_backfill_items: <int> | default = 10000]
 
     chunks_cache:
-      # Backend for chunks cache, if not empty. Supported values: memcached.
+      # The chunks cache backend type. Single or Multiple cache backend can be
+      # provided. Supported values in single cache: memcached, redis, inmemory,
+      # and '' (disable). Supported values in multi level cache: a
+      # comma-separated list of (inmemory, memcached, redis)
       # CLI flag: -blocks-storage.bucket-store.chunks-cache.backend
       [backend: <string> | default = ""]
+
+      inmemory:
+        # Maximum size in bytes of in-memory chunk cache used to speed up chunk
+        # lookups (shared between all tenants).
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.inmemory.max-size-bytes
+        [max_size_bytes: <int> | default = 1073741824]
 
       memcached:
         # Comma separated list of memcached addresses. Supported prefixes are:
@@ -1108,6 +1117,21 @@ blocks_storage:
           # CLI flag: -blocks-storage.bucket-store.chunks-cache.redis.set-async.circuit-breaker.failure-percent
           [failure_percent: <float> | default = 0.05]
 
+      multilevel:
+        # The maximum number of concurrent asynchronous operations can occur
+        # when backfilling cache items.
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.multilevel.max-async-concurrency
+        [max_async_concurrency: <int> | default = 3]
+
+        # The maximum number of enqueued asynchronous operations allowed when
+        # backfilling cache items.
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.multilevel.max-async-buffer-size
+        [max_async_buffer_size: <int> | default = 10000]
+
+        # The maximum number of items to backfill per asynchronous operation.
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.multilevel.max-backfill-items
+        [max_backfill_items: <int> | default = 10000]
+
       # Size of each subrange that bucket object is split into for better
       # caching.
       # CLI flag: -blocks-storage.bucket-store.chunks-cache.subrange-size
@@ -1128,7 +1152,8 @@ blocks_storage:
       [subrange_ttl: <duration> | default = 24h]
 
     metadata_cache:
-      # Backend for metadata cache, if not empty. Supported values: memcached.
+      # Backend for metadata cache, if not empty. Supported values: memcached,
+      # redis, and '' (disable).
       # CLI flag: -blocks-storage.bucket-store.metadata-cache.backend
       [backend: <string> | default = ""]
 
@@ -1538,9 +1563,15 @@ blocks_storage:
     # CLI flag: -blocks-storage.tsdb.stripe-size
     [stripe_size: <int> | default = 16384]
 
-    # True to enable TSDB WAL compression.
+    # Deprecated (use blocks-storage.tsdb.wal-compression-type instead): True to
+    # enable TSDB WAL compression.
     # CLI flag: -blocks-storage.tsdb.wal-compression-enabled
     [wal_compression_enabled: <boolean> | default = false]
+
+    # TSDB WAL type. Supported values are: 'snappy', 'zstd' and '' (disable
+    # compression)
+    # CLI flag: -blocks-storage.tsdb.wal-compression-type
+    [wal_compression_type: <string> | default = ""]
 
     # TSDB WAL segments files max size (bytes).
     # CLI flag: -blocks-storage.tsdb.wal-segment-size-bytes

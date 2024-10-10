@@ -109,6 +109,10 @@ querier:
   # CLI flag: -querier.ingester-metadata-streaming
   [ingester_metadata_streaming: <boolean> | default = true]
 
+  # Use LabelNames ingester RPCs with match params.
+  # CLI flag: -querier.ingester-label-names-with-matchers
+  [ingester_label_names_with_matchers: <boolean> | default = false]
+
   # Maximum number of samples a single query can load into memory.
   # CLI flag: -querier.max-samples
   [max_samples: <int> | default = 50000000]
@@ -121,6 +125,11 @@ querier:
   # Enable returning samples stats per steps in query response.
   # CLI flag: -querier.per-step-stats-enabled
   [per_step_stats_enabled: <boolean> | default = false]
+
+  # Use compression for metrics query API or instant and range query APIs.
+  # Supports 'gzip' and '' (disable compression)
+  # CLI flag: -querier.response-compression
+  [response_compression: <string> | default = "gzip"]
 
   # The time after which a metric should be queried from storage and not just
   # ingesters. 0 means all queries are sent to store. When running the blocks
@@ -194,6 +203,24 @@ querier:
     # 'snappy' and '' (disable compression)
     # CLI flag: -querier.store-gateway-client.grpc-compression
     [grpc_compression: <string> | default = ""]
+
+    # EXPERIMENTAL: If enabled, gRPC clients perform health checks for each
+    # target and fail the request if the target is marked as unhealthy.
+    healthcheck_config:
+      # The number of consecutive failed health checks required before
+      # considering a target unhealthy. 0 means disabled.
+      # CLI flag: -querier.store-gateway-client.unhealthy-threshold
+      [unhealthy_threshold: <int> | default = 0]
+
+      # The approximate amount of time between health checks of an individual
+      # target.
+      # CLI flag: -querier.store-gateway-client.interval
+      [interval: <duration> | default = 5s]
+
+      # The amount of time during which no response from a target means a failed
+      # health check.
+      # CLI flag: -querier.store-gateway-client.timeout
+      [timeout: <duration> | default = 1s]
 
   # If enabled, store gateway query stats will be logged using `info` log level.
   # CLI flag: -querier.store-gateway-query-stats-enabled
@@ -779,9 +806,18 @@ blocks_storage:
         [max_backfill_items: <int> | default = 10000]
 
     chunks_cache:
-      # Backend for chunks cache, if not empty. Supported values: memcached.
+      # The chunks cache backend type. Single or Multiple cache backend can be
+      # provided. Supported values in single cache: memcached, redis, inmemory,
+      # and '' (disable). Supported values in multi level cache: a
+      # comma-separated list of (inmemory, memcached, redis)
       # CLI flag: -blocks-storage.bucket-store.chunks-cache.backend
       [backend: <string> | default = ""]
+
+      inmemory:
+        # Maximum size in bytes of in-memory chunk cache used to speed up chunk
+        # lookups (shared between all tenants).
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.inmemory.max-size-bytes
+        [max_size_bytes: <int> | default = 1073741824]
 
       memcached:
         # Comma separated list of memcached addresses. Supported prefixes are:
@@ -984,6 +1020,21 @@ blocks_storage:
           # CLI flag: -blocks-storage.bucket-store.chunks-cache.redis.set-async.circuit-breaker.failure-percent
           [failure_percent: <float> | default = 0.05]
 
+      multilevel:
+        # The maximum number of concurrent asynchronous operations can occur
+        # when backfilling cache items.
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.multilevel.max-async-concurrency
+        [max_async_concurrency: <int> | default = 3]
+
+        # The maximum number of enqueued asynchronous operations allowed when
+        # backfilling cache items.
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.multilevel.max-async-buffer-size
+        [max_async_buffer_size: <int> | default = 10000]
+
+        # The maximum number of items to backfill per asynchronous operation.
+        # CLI flag: -blocks-storage.bucket-store.chunks-cache.multilevel.max-backfill-items
+        [max_backfill_items: <int> | default = 10000]
+
       # Size of each subrange that bucket object is split into for better
       # caching.
       # CLI flag: -blocks-storage.bucket-store.chunks-cache.subrange-size
@@ -1004,7 +1055,8 @@ blocks_storage:
       [subrange_ttl: <duration> | default = 24h]
 
     metadata_cache:
-      # Backend for metadata cache, if not empty. Supported values: memcached.
+      # Backend for metadata cache, if not empty. Supported values: memcached,
+      # redis, and '' (disable).
       # CLI flag: -blocks-storage.bucket-store.metadata-cache.backend
       [backend: <string> | default = ""]
 
@@ -1414,9 +1466,15 @@ blocks_storage:
     # CLI flag: -blocks-storage.tsdb.stripe-size
     [stripe_size: <int> | default = 16384]
 
-    # True to enable TSDB WAL compression.
+    # Deprecated (use blocks-storage.tsdb.wal-compression-type instead): True to
+    # enable TSDB WAL compression.
     # CLI flag: -blocks-storage.tsdb.wal-compression-enabled
     [wal_compression_enabled: <boolean> | default = false]
+
+    # TSDB WAL type. Supported values are: 'snappy', 'zstd' and '' (disable
+    # compression)
+    # CLI flag: -blocks-storage.tsdb.wal-compression-type
+    [wal_compression_type: <string> | default = ""]
 
     # TSDB WAL segments files max size (bytes).
     # CLI flag: -blocks-storage.tsdb.wal-segment-size-bytes
