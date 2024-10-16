@@ -612,6 +612,124 @@ func TestBlocksStoreReplicationSet_GetClientsFor(t *testing.T) {
 	}
 }
 
+func TestSGAutoForget(t *testing.T) {
+	// The following block IDs have been picked to have increasing hash values
+	// in order to simplify the tests.
+	block1 := ulid.MustNew(4, nil) // hash: 122298081
+
+	block1Hash := cortex_tsdb.HashBlockID(block1)
+
+	userID := "user-A"
+	registeredAt := time.Now()
+
+	tests := map[string]struct {
+		shardingStrategy     string
+		tenantShardSize      float64
+		replicationFactor    int
+		setup                func(*ring.Desc)
+		queryBlocks          []ulid.ULID
+		exclude              map[ulid.ULID][]string
+		attemptedBlocksZones map[ulid.ULID]map[string]int
+		zoneAwarenessEnabled bool
+		expectedClients      map[string][]ulid.ULID
+		expectedErr          error
+	}{
+		"shuffle sharding, multiple instances in the ring with RF = 6, SS = 6, one exclude block but attempted 2 zones and zone awareness enabled": {
+			shardingStrategy:  util.ShardingStrategyShuffle,
+			tenantShardSize:   0.4,
+			replicationFactor: 9,
+			setup: func(d *ring.Desc) {
+				d.AddIngester("instance-01", "127.0.0.1", "1", []uint32{block1Hash - 5}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-02", "127.0.0.2", "2", []uint32{block1Hash - 4}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-03", "127.0.0.3", "3", []uint32{block1Hash - 3}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-04", "127.0.0.4", "1", []uint32{block1Hash - 2}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-05", "127.0.0.5", "2", []uint32{block1Hash + 5}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-06", "127.0.0.6", "3", []uint32{block1Hash + 6}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-07", "127.0.0.7", "1", []uint32{block1Hash + 7}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-08", "127.0.0.8", "2", []uint32{block1Hash + 8}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-09", "127.0.0.9", "3", []uint32{block1Hash + 9}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-10", "127.0.0.10", "1", []uint32{block1Hash + 10}, ring.ACTIVE, registeredAt)
+				// d.AddIngester("instance-11", "127.0.0.11", "2", []uint32{block1Hash + 11}, ring.PENDING, registeredAt) // REMOVE
+				// d.AddIngester("instance-12", "127.0.0.12", "3", []uint32{block1Hash + 12}, ring.PENDING, registeredAt) // REMOVE
+				d.AddIngester("instance-13", "127.0.0.13", "1", []uint32{block1Hash + 13}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-14", "127.0.0.14", "2", []uint32{block1Hash + 14}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-15", "127.0.0.15", "3", []uint32{block1Hash + 15}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-16", "127.0.0.16", "1", []uint32{block1Hash + 16}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-17", "127.0.0.17", "2", []uint32{block1Hash + 17}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-18", "127.0.0.18", "3", []uint32{block1Hash + 18}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-19", "127.0.0.19", "1", []uint32{block1Hash + 19}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-20", "127.0.0.20", "2", []uint32{block1Hash + 20}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-21", "127.0.0.21", "3", []uint32{block1Hash + 21}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-22", "127.0.0.22", "1", []uint32{block1Hash + 22}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-23", "127.0.0.23", "2", []uint32{block1Hash + 23}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-24", "127.0.0.24", "3", []uint32{block1Hash + 24}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-25", "127.0.0.25", "1", []uint32{block1Hash + 25}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-26", "127.0.0.26", "2", []uint32{block1Hash + 26}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-27", "127.0.0.27", "3", []uint32{block1Hash + 27}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-28", "127.0.0.28", "1", []uint32{block1Hash + 28}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-29", "127.0.0.29", "2", []uint32{block1Hash + 29}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-30", "127.0.0.30", "3", []uint32{block1Hash + 30}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-31", "127.0.0.31", "1", []uint32{block1Hash + 31}, ring.ACTIVE, registeredAt)
+				d.AddIngester("instance-32", "127.0.0.32", "2", []uint32{block1Hash + 32}, ring.ACTIVE, registeredAt)
+			},
+			queryBlocks:          []ulid.ULID{block1},
+			zoneAwarenessEnabled: true,
+			exclude:              map[ulid.ULID][]string{},
+			attemptedBlocksZones: map[ulid.ULID]map[string]int{},
+			expectedClients: map[string][]ulid.ULID{
+				"127.0.0.8": {block1},
+			},
+		},
+	}
+
+	for testName, testData := range tests {
+		testData := testData
+
+		t.Run(testName, func(t *testing.T) {
+			ctx := context.Background()
+
+			// Setup the ring state.
+			ringStore, closer := consul.NewInMemoryClient(ring.GetCodec(), log.NewNopLogger(), nil)
+			t.Cleanup(func() { assert.NoError(t, closer.Close()) })
+
+			require.NoError(t, ringStore.CAS(ctx, "test", func(in interface{}) (interface{}, bool, error) {
+				d := ring.NewDesc()
+				testData.setup(d)
+				return d, true, nil
+			}))
+
+			ringCfg := ring.Config{}
+			flagext.DefaultValues(&ringCfg)
+			ringCfg.ReplicationFactor = testData.replicationFactor
+			ringCfg.HeartbeatTimeout = time.Hour
+			ringCfg.ZoneAwarenessEnabled = true
+
+			r, err := ring.NewWithStoreClientAndStrategy(ringCfg, "test", "test", ringStore, ring.NewIgnoreUnhealthyInstancesReplicationStrategy(), nil, nil)
+			require.NoError(t, err)
+
+			limits := &blocksStoreLimitsMock{
+				storeGatewayTenantShardSize: testData.tenantShardSize,
+			}
+
+			reg := prometheus.NewPedanticRegistry()
+			s, err := newBlocksStoreReplicationSet(r, testData.shardingStrategy, noLoadBalancing, limits, ClientConfig{}, log.NewNopLogger(), reg, testData.zoneAwarenessEnabled, true)
+			require.NoError(t, err)
+			require.NoError(t, services.StartAndAwaitRunning(ctx, s))
+			defer services.StopAndAwaitTerminated(ctx, s) //nolint:errcheck
+
+			// Wait until the ring client has initialised the state.
+			test.Poll(t, time.Second, true, func() interface{} {
+				all, err := r.GetAllHealthy(ring.Read)
+				return err == nil && len(all.Instances) > 0
+			})
+
+			clients, err := s.GetClientsFor(userID, testData.queryBlocks, testData.exclude, testData.attemptedBlocksZones)
+			assert.Equal(t, testData.expectedErr, err)
+			fmt.Printf("%v", clients)
+		})
+	}
+}
+
 func TestBlocksStoreReplicationSet_GetClientsFor_ShouldSupportRandomLoadBalancingStrategy(t *testing.T) {
 	t.Parallel()
 

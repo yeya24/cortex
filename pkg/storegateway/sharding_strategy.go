@@ -2,6 +2,8 @@ package storegateway
 
 import (
 	"context"
+	"fmt"
+	"slices"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -153,12 +155,19 @@ func (s *ShuffleShardingStrategy) FilterBlocks(_ context.Context, userID string,
 
 func filterBlocksByRingSharding(r ring.ReadRing, instanceAddr string, metas map[ulid.ULID]*metadata.Meta, loaded map[ulid.ULID]struct{}, synced block.GaugeVec, logger log.Logger) {
 	bufDescs, bufHosts, bufZones := ring.MakeBuffersForGet()
+	ringInstances, _ := r.GetAllHealthy(BlocksOwnerSync)
+	addrs := ringInstances.GetAddresses()
+	slices.Sort(addrs)
+	fmt.Printf("rng: %v\n", addrs)
 
 	for blockID := range metas {
 		key := cortex_tsdb.HashBlockID(blockID)
 
 		// Check if the block is owned by the store-gateway
 		set, err := r.Get(key, BlocksOwnerSync, bufDescs, bufHosts, bufZones)
+		addrs := set.GetAddresses()
+		slices.Sort(addrs)
+		fmt.Printf("blk: %v\n", addrs)
 
 		// If an error occurs while checking the ring, we keep the previously loaded blocks.
 		if err != nil {

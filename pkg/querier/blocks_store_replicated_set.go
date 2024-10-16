@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 
 	"github.com/go-kit/log"
 	"github.com/oklog/ulid"
@@ -106,6 +107,14 @@ func (s *blocksStoreReplicationSet) stopping(_ error) error {
 func (s *blocksStoreReplicationSet) GetClientsFor(userID string, blockIDs []ulid.ULID, exclude map[ulid.ULID][]string, attemptedBlocksZones map[ulid.ULID]map[string]int) (map[BlocksStoreClient][]ulid.ULID, error) {
 	shards := map[string][]ulid.ULID{}
 
+	ringInstances, err := s.storesRing.GetAllHealthy(storegateway.BlocksOwnerSync)
+	if err != nil {
+		return nil, err
+	}
+	addrs := ringInstances.GetAddresses()
+	slices.Sort(addrs)
+	fmt.Printf("[blocksStoreReplicationSet.GetClientsFor] storesRingInstances: %v\n", addrs)
+
 	// If shuffle sharding is enabled, we should build a subring for the user,
 	// otherwise we just use the full ring.
 	var userRing ring.ReadRing
@@ -114,6 +123,14 @@ func (s *blocksStoreReplicationSet) GetClientsFor(userID string, blockIDs []ulid
 	} else {
 		userRing = s.storesRing
 	}
+
+	ringInstances, err = userRing.GetAllHealthy(storegateway.BlocksOwnerSync)
+	if err != nil {
+		return nil, err
+	}
+	addrs = ringInstances.GetAddresses()
+	slices.Sort(addrs)
+	fmt.Printf("rng: %v\n", addrs)
 
 	// Find the replication set of each block we need to query.
 	for _, blockID := range blockIDs {
@@ -125,6 +142,11 @@ func (s *blocksStoreReplicationSet) GetClientsFor(userID string, blockIDs []ulid
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to get store-gateway replication set owning the block %s", blockID.String())
 		}
+
+		addrs := set.GetAddresses()
+		slices.Sort(addrs)
+
+		fmt.Printf("blk: %v\n", addrs)
 
 		// Pick a non excluded store-gateway instance.
 		instance := getNonExcludedInstance(set, exclude[blockID], s.balancingStrategy, s.zoneAwarenessEnabled, attemptedBlocksZones[blockID])
