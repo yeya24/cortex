@@ -612,6 +612,7 @@ func TestBlocksStoreReplicationSet_GetClientsFor(t *testing.T) {
 	}
 }
 
+// 11/13 replicas alive
 func TestSGAutoForget(t *testing.T) {
 	// The following block IDs have been picked to have increasing hash values
 	// in order to simplify the tests.
@@ -649,8 +650,8 @@ func TestSGAutoForget(t *testing.T) {
 				d.AddIngester("instance-08", "127.0.0.8", "2", []uint32{block1Hash + 8}, ring.ACTIVE, registeredAt)
 				d.AddIngester("instance-09", "127.0.0.9", "3", []uint32{block1Hash + 9}, ring.ACTIVE, registeredAt)
 				d.AddIngester("instance-10", "127.0.0.10", "1", []uint32{block1Hash + 10}, ring.ACTIVE, registeredAt)
-				// d.AddIngester("instance-11", "127.0.0.11", "2", []uint32{block1Hash + 11}, ring.PENDING, registeredAt) // REMOVE
-				// d.AddIngester("instance-12", "127.0.0.12", "3", []uint32{block1Hash + 12}, ring.PENDING, registeredAt) // REMOVE
+				d.AddIngester("instance-11", "127.0.0.11", "2", []uint32{block1Hash + 11}, ring.LEAVING, registeredAt) // REMOVE
+				d.AddIngester("instance-12", "127.0.0.12", "3", []uint32{block1Hash + 12}, ring.LEAVING, registeredAt) // REMOVE
 				d.AddIngester("instance-13", "127.0.0.13", "1", []uint32{block1Hash + 13}, ring.ACTIVE, registeredAt)
 				d.AddIngester("instance-14", "127.0.0.14", "2", []uint32{block1Hash + 14}, ring.ACTIVE, registeredAt)
 				d.AddIngester("instance-15", "127.0.0.15", "3", []uint32{block1Hash + 15}, ring.ACTIVE, registeredAt)
@@ -670,7 +671,7 @@ func TestSGAutoForget(t *testing.T) {
 				d.AddIngester("instance-29", "127.0.0.29", "2", []uint32{block1Hash + 29}, ring.ACTIVE, registeredAt)
 				d.AddIngester("instance-30", "127.0.0.30", "3", []uint32{block1Hash + 30}, ring.ACTIVE, registeredAt)
 				d.AddIngester("instance-31", "127.0.0.31", "1", []uint32{block1Hash + 31}, ring.ACTIVE, registeredAt)
-				d.AddIngester("instance-32", "127.0.0.32", "2", []uint32{block1Hash + 32}, ring.ACTIVE, registeredAt)
+				//d.AddIngester("instance-32", "127.0.0.32", "2", []uint32{block1Hash + 32}, ring.ACTIVE, registeredAt)
 			},
 			queryBlocks:          []ulid.ULID{block1},
 			zoneAwarenessEnabled: true,
