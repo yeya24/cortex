@@ -1016,3 +1016,23 @@ func MaxDurationPerTenant(tenantIDs []string, f func(string) time.Duration) time
 	}
 	return result
 }
+
+func LimitsPerLabelSetsForSeries(limitsPerLabelSets []LimitsPerLabelSet, metric labels.Labels) []LimitsPerLabelSet {
+	// returning early to not have any overhead
+	if len(limitsPerLabelSets) == 0 {
+		return nil
+	}
+
+	r := make([]LimitsPerLabelSet, 0, len(limitsPerLabelSets))
+outer:
+	for _, lbls := range limitsPerLabelSets {
+		for _, lbl := range lbls.LabelSet {
+			// We did not find some of the labels on  the set
+			if v := metric.Get(lbl.Name); v != lbl.Value {
+				continue outer
+			}
+		}
+		r = append(r, lbls)
+	}
+	return r
+}

@@ -190,25 +190,7 @@ func (l *Limiter) formatMaxSeriesPerLabelSetError(err errMaxSeriesPerLabelSetLim
 }
 
 func (l *Limiter) limitsPerLabelSets(userID string, metric labels.Labels) []validation.LimitsPerLabelSet {
-	m := l.limits.LimitsPerLabelSet(userID)
-
-	// returning early to not have any overhead
-	if len(m) == 0 {
-		return nil
-	}
-
-	r := make([]validation.LimitsPerLabelSet, 0, len(m))
-outer:
-	for _, lbls := range m {
-		for _, lbl := range lbls.LabelSet {
-			// We did not find some of the labels on  the set
-			if v := metric.Get(lbl.Name); v != lbl.Value {
-				continue outer
-			}
-		}
-		r = append(r, lbls)
-	}
-	return r
+	return validation.LimitsPerLabelSetsForSeries(l.limits.LimitsPerLabelSet(userID), metric)
 }
 
 func (l *Limiter) maxSeriesPerMetric(userID string) int {

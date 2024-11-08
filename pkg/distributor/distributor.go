@@ -66,7 +66,7 @@ const (
 
 	instanceIngestionRateTickInterval = time.Second
 
-	clearStaleIngesterMetricsInterval = time.Minute
+	clearStaleMetricsInterval = time.Minute
 
 	// mergeSlicesParallelism is a constant of how much go routines we should use to merge slices, and
 	// it was based on empirical observation: See BenchmarkMergeSlicesParallel
@@ -110,6 +110,7 @@ type Distributor struct {
 	// Metrics
 	queryDuration                    *instrument.HistogramCollector
 	receivedSamples                  *prometheus.CounterVec
+	receivedSamplesPerLabelSet       *prometheus.CounterVec
 	receivedExemplars                *prometheus.CounterVec
 	receivedMetadata                 *prometheus.CounterVec
 	incomingSamples                  *prometheus.CounterVec
@@ -293,6 +294,11 @@ func New(cfg Config, clientConfig ingester_client.Config, limits *validation.Ove
 			Name:      "distributor_received_samples_total",
 			Help:      "The total number of received samples, excluding rejected and deduped samples.",
 		}, []string{"user", "type"}),
+		receivedSamplesPerLabelSet: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
+			Namespace: "cortex",
+			Name:      "distributor_received_samples_per_labelset_total",
+			Help:      "The total number of received samples per label set, excluding rejected and deduped samples.",
+		}, []string{"user", "type", "labelset"}),
 		receivedExemplars: promauto.With(reg).NewCounterVec(prometheus.CounterOpts{
 			Namespace: "cortex",
 			Name:      "distributor_received_exemplars_total",
@@ -419,8 +425,8 @@ func (d *Distributor) running(ctx context.Context) error {
 	ingestionRateTicker := time.NewTicker(instanceIngestionRateTickInterval)
 	defer ingestionRateTicker.Stop()
 
-	staleIngesterMetricTicker := time.NewTicker(clearStaleIngesterMetricsInterval)
-	defer staleIngesterMetricTicker.Stop()
+	staleMetricTicker := time.NewTicker(clearStaleMetricsInterval)
+	defer staleMetricTicker.Stop()
 
 	for {
 		select {
@@ -430,8 +436,8 @@ func (d *Distributor) running(ctx context.Context) error {
 		case <-ingestionRateTicker.C:
 			d.ingestionRate.Tick()
 
-		case <-staleIngesterMetricTicker.C:
-			d.cleanStaleIngesterMetrics()
+		case <-staleMetricTicker.C:
+			d.cleanStaleMetrics()
 
 		case err := <-d.subservicesWatcher.Chan():
 			return errors.Wrap(err, "distributor subservice failed")
@@ -457,6 +463,10 @@ func (d *Distributor) cleanupInactiveUser(userID string) {
 
 	if err := util.DeleteMatchingLabels(d.dedupedSamples, map[string]string{"user": userID}); err != nil {
 		level.Warn(d.log).Log("msg", "failed to remove cortex_distributor_deduped_samples_total metric for user", "user", userID, "err", err)
+	}
+
+	if err := util.DeleteMatchingLabels(d.receivedSamplesPerLabelSet, map[string]string{"user": userID}); err != nil {
+		level.Warn(d.log).Log("msg", "failed to remove cortex_distributor_received_samples_per_labelset_total metric for user", "user", userID, "err", err)
 	}
 
 	validation.DeletePerUserValidationMetrics(d.validateMetrics, userID, d.log)
@@ -690,7 +700,7 @@ func (d *Distributor) Push(ctx context.Context, req *cortexpb.WriteRequest) (*co
 	}
 
 	// A WriteRequest can only contain series or metadata but not both. This might change in the future.
-	seriesKeys, validatedTimeseries, validatedFloatSamples, validatedHistogramSamples, validatedExemplars, firstPartialErr, err := d.prepareSeriesKeys(ctx, req, userID, limits, removeReplica)
+	seriesKeys, validatedTimeseries, validatedFloatSamples, validatedHistogramSamples, validatedExemplars, labelSetCounters, firstPartialErr, err := d.prepareSeriesKeys(ctx, req, userID, limits, removeReplica)
 	if err != nil {
 		return nil, err
 	}
@@ -700,6 +710,10 @@ func (d *Distributor) Push(ctx context.Context, req *cortexpb.WriteRequest) (*co
 	d.receivedSamples.WithLabelValues(userID, sampleMetricTypeHistogram).Add(float64(validatedHistogramSamples))
 	d.receivedExemplars.WithLabelValues(userID).Add(float64(validatedExemplars))
 	d.receivedMetadata.WithLabelValues(userID).Add(float64(len(validatedMetadata)))
+	for _, counter := range labelSetCounters {
+		d.receivedSamplesPerLabelSet.WithLabelValues(userID, sampleMetricTypeFloat, counter.labels.String()).Add(float64(counter.floatSamples))
+		d.receivedSamplesPerLabelSet.WithLabelValues(userID, sampleMetricTypeHistogram, counter.labels.String()).Add(float64(counter.histogramSamples))
+	}
 
 	if len(seriesKeys) == 0 && len(metadataKeys) == 0 {
 		// Ensure the request slice is reused if there's no series or metadata passing the validation.
@@ -742,6 +756,21 @@ func (d *Distributor) Push(ctx context.Context, req *cortexpb.WriteRequest) (*co
 	}
 
 	return &cortexpb.WriteResponse{}, firstPartialErr
+}
+
+func (d *Distributor) cleanStaleMetrics() {
+	d.cleanStaleIngesterMetrics()
+
+	for _, userId := range d.activeUsers.AllUsers() {
+		limits := d.limits.LimitsPerLabelSet(userId)
+		for _, limit := range limits {
+			err := util.DeleteMatchingLabels(d.receivedSamplesPerLabelSet, map[string]string{"user": userId, "labelset": limit.LabelSet.String()})
+			if err != nil {
+				level.Warn(d.log).Log("msg", "error cleaning metrics: cortex_distributor_received_samples_per_labelset_total", "err", err)
+				return
+			}
+		}
+	}
 }
 
 func (d *Distributor) cleanStaleIngesterMetrics() {
@@ -844,7 +873,7 @@ func (d *Distributor) prepareMetadataKeys(req *cortexpb.WriteRequest, limits *va
 	return metadataKeys, validatedMetadata, firstPartialErr
 }
 
-func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.WriteRequest, userID string, limits *validation.Limits, removeReplica bool) ([]uint32, []cortexpb.PreallocTimeseries, int, int, int, error, error) {
+func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.WriteRequest, userID string, limits *validation.Limits, removeReplica bool) ([]uint32, []cortexpb.PreallocTimeseries, int, int, int, map[uint64]*samplesPerLabelSetEntry, error, error) {
 	pSpan, _ := opentracing.StartSpanFromContext(ctx, "prepareSeriesKeys")
 	defer pSpan.Finish()
 
@@ -855,7 +884,9 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 	validatedFloatSamples := 0
 	validatedHistogramSamples := 0
 	validatedExemplars := 0
+	limitsPerLabelSet := d.limits.LimitsPerLabelSet(userID)
 
+	labelSetCounters := make(map[uint64]*samplesPerLabelSetEntry)
 	var firstPartialErr error
 
 	latestSampleTimestampMs := int64(0)
@@ -932,7 +963,7 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 		// label and dropped labels (if any)
 		key, err := d.tokenForLabels(userID, ts.Labels)
 		if err != nil {
-			return nil, nil, 0, 0, 0, nil, err
+			return nil, nil, 0, 0, 0, nil, nil, err
 		}
 		validatedSeries, validationErr := d.validateSeries(ts, userID, skipLabelNameValidation, limits)
 
@@ -949,13 +980,26 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 			continue
 		}
 
+		for _, l := range validation.LimitsPerLabelSetsForSeries(limitsPerLabelSet, cortexpb.FromLabelAdaptersToLabels(validatedSeries.Labels)) {
+			if c, exists := labelSetCounters[l.Hash]; exists {
+				c.floatSamples += len(ts.Samples)
+				c.histogramSamples += len(ts.Histograms)
+			} else {
+				labelSetCounters[l.Hash] = &samplesPerLabelSetEntry{
+					floatSamples:     len(ts.Samples),
+					histogramSamples: len(ts.Histograms),
+					labels:           l.LabelSet,
+				}
+			}
+		}
+
 		seriesKeys = append(seriesKeys, key)
 		validatedTimeseries = append(validatedTimeseries, validatedSeries)
 		validatedFloatSamples += len(ts.Samples)
 		validatedHistogramSamples += len(ts.Histograms)
 		validatedExemplars += len(ts.Exemplars)
 	}
-	return seriesKeys, validatedTimeseries, validatedFloatSamples, validatedHistogramSamples, validatedExemplars, firstPartialErr, nil
+	return seriesKeys, validatedTimeseries, validatedFloatSamples, validatedHistogramSamples, validatedExemplars, labelSetCounters, firstPartialErr, nil
 }
 
 func sortLabelsIfNeeded(labels []cortexpb.LabelAdapter) {
