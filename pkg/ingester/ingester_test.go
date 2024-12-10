@@ -405,6 +405,82 @@ func TestIngesterPerLabelsetLimitExceeded(t *testing.T) {
 
 }
 
+func TestPushRace(t *testing.T) {
+	cfg := defaultIngesterTestConfig(t)
+	l := defaultLimitsTestConfig()
+	cfg.LabelsStringInterningEnabled = true
+	cfg.LifecyclerConfig.JoinAfter = 0
+
+	l.LimitsPerLabelSet = []validation.LimitsPerLabelSet{
+		{
+			LabelSet: labels.FromMap(map[string]string{
+				labels.MetricName: "foo",
+			}),
+			Limits: validation.LimitsPerLabelSetEntry{
+				MaxSeries: 10e10,
+			},
+		},
+	}
+
+	dir := t.TempDir()
+	blocksDir := filepath.Join(dir, "blocks")
+	require.NoError(t, os.Mkdir(blocksDir, os.ModePerm))
+
+	ing, err := prepareIngesterWithBlocksStorageAndLimits(t, cfg, l, nil, blocksDir, prometheus.NewRegistry(), true)
+	require.NoError(t, err)
+	defer services.StopAndAwaitTerminated(context.Background(), ing) //nolint:errcheck
+	require.NoError(t, services.StartAndAwaitRunning(context.Background(), ing))
+	// Wait until it's ACTIVE
+	test.Poll(t, time.Second, ring.ACTIVE, func() interface{} {
+		return ing.lifecycler.GetState()
+	})
+
+	ctx := user.InjectOrgID(context.Background(), userID)
+	sample1 := cortexpb.Sample{
+		TimestampMs: 0,
+		Value:       1,
+	}
+
+	concurrentRequest := 100
+	numberOfSeries := 100
+	wg := sync.WaitGroup{}
+	wg.Add(numberOfSeries * concurrentRequest)
+	for k := 0; k < numberOfSeries; k++ {
+		for i := 0; i < concurrentRequest; i++ {
+			go func() {
+				defer wg.Done()
+				_, err := ing.Push(ctx, cortexpb.ToWriteRequest([]labels.Labels{labels.FromStrings(labels.MetricName, "foo", "userId", userID, "k", strconv.Itoa(k))}, []cortexpb.Sample{sample1}, nil, nil, cortexpb.API))
+				require.NoError(t, err)
+			}()
+		}
+	}
+
+	wg.Wait()
+
+	db := ing.getTSDB(userID)
+	ir, err := db.db.Head().Index()
+	require.NoError(t, err)
+
+	p, err := ir.Postings(ctx, "", "")
+	require.NoError(t, err)
+	p = ir.SortedPostings(p)
+	total := 0
+	var builder labels.ScratchBuilder
+
+	for p.Next() {
+		total++
+		err = ir.Series(p.At(), &builder, nil)
+		require.NoError(t, err)
+		lbls := builder.Labels()
+		require.Equal(t, "foo", lbls.Get(labels.MetricName))
+		require.Equal(t, "1", lbls.Get("userId"))
+		require.NotEmpty(t, lbls.Get("k"))
+		builder.Reset()
+	}
+	require.Equal(t, numberOfSeries, total)
+	require.Equal(t, uint64(numberOfSeries), db.Head().NumSeries())
+}
+
 func TestIngesterUserLimitExceeded(t *testing.T) {
 	limits := defaultLimitsTestConfig()
 	limits.MaxLocalSeriesPerUser = 1
@@ -3087,7 +3163,8 @@ func TestIngester_QueryStreamManySamplesChunks(t *testing.T) {
 	// Create ingester.
 	cfg := defaultIngesterTestConfig(t)
 
-	i, err := prepareIngesterWithBlocksStorage(t, cfg, prometheus.NewRegistry())
+	reg := prometheus.NewRegistry()
+	i, err := prepareIngesterWithBlocksStorage(t, cfg, reg)
 	require.NoError(t, err)
 	require.NoError(t, services.StartAndAwaitRunning(context.Background(), i))
 	defer services.StopAndAwaitTerminated(context.Background(), i) //nolint:errcheck
@@ -3154,6 +3231,7 @@ func TestIngester_QueryStreamManySamplesChunks(t *testing.T) {
 	recvMsgs := 0
 	series := 0
 	totalSamples := 0
+	totalChunks := 0
 
 	for {
 		resp, err := s.Recv()
@@ -3174,6 +3252,7 @@ func TestIngester_QueryStreamManySamplesChunks(t *testing.T) {
 				require.NoError(t, err)
 				totalSamples += chk.NumSamples()
 			}
+			totalChunks += len(ts.Chunks)
 		}
 	}
 
@@ -3183,6 +3262,21 @@ func TestIngester_QueryStreamManySamplesChunks(t *testing.T) {
 	require.True(t, 2 <= recvMsgs && recvMsgs <= 3)
 	require.Equal(t, 3, series)
 	require.Equal(t, 100000+500000+samplesCount, totalSamples)
+	require.Equal(t, 13335, totalChunks)
+	require.NoError(t, testutil.GatherAndCompare(reg, bytes.NewBufferString(`
+		# HELP cortex_ingester_queried_chunks The total number of chunks returned from queries.
+		# TYPE cortex_ingester_queried_chunks histogram
+		cortex_ingester_queried_chunks_bucket{le="10"} 0
+		cortex_ingester_queried_chunks_bucket{le="80"} 0
+		cortex_ingester_queried_chunks_bucket{le="640"} 0
+		cortex_ingester_queried_chunks_bucket{le="5120"} 0
+		cortex_ingester_queried_chunks_bucket{le="40960"} 1
+		cortex_ingester_queried_chunks_bucket{le="327680"} 1
+		cortex_ingester_queried_chunks_bucket{le="2.62144e+06"} 1
+		cortex_ingester_queried_chunks_bucket{le="+Inf"} 1
+		cortex_ingester_queried_chunks_sum 13335
+		cortex_ingester_queried_chunks_count 1
+	`), `cortex_ingester_queried_chunks`))
 }
 
 func writeRequestSingleSeries(lbls labels.Labels, samples []cortexpb.Sample) *cortexpb.WriteRequest {
