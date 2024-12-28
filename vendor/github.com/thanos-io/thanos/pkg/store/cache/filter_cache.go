@@ -6,11 +6,11 @@ package storecache
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/oklog/ulid"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
-	"golang.org/x/exp/slices"
 )
 
 type FilteredIndexCache struct {
@@ -53,12 +53,13 @@ func (c *FilteredIndexCache) StoreExpandedPostings(blockID ulid.ULID, matchers [
 	}
 }
 
-// FetchExpandedPostings fetches expanded postings and returns cached data and a boolean value representing whether it is a cache hit or not.
-func (c *FilteredIndexCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers []*labels.Matcher, tenant string) ([]byte, bool) {
+// FetchExpandedPostings fetches expanded postings and returns a slice of bytes. If cache miss, the corresponding index
+// of the response slice will be nil.
+func (c *FilteredIndexCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers [][]*labels.Matcher, tenant string) [][]byte {
 	if c.expandedPostingsEnabled {
 		return c.cache.FetchExpandedPostings(ctx, blockID, matchers, tenant)
 	}
-	return nil, false
+	return nil
 }
 
 // StoreSeries sets the series identified by the ulid and id to the value v,

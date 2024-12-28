@@ -152,11 +152,13 @@ func Test_MultiLevelCache(t *testing.T) {
 		Value: "test3",
 	}
 
-	matcher, err := labels.NewMatcher(labels.MatchEqual, "name", "value")
-	require.NoError(t, err)
+	matcher := labels.MustNewMatcher(labels.MatchEqual, "name", "value")
+	matcher2 := labels.MustNewMatcher(labels.MatchEqual, "foo", "bar")
+	matcher3 := labels.MustNewMatcher(labels.MatchEqual, "foo", "baz")
 
 	v := make([]byte, 100)
 	v2 := make([]byte, 200)
+	v3 := make([]byte, 200)
 
 	testCases := map[string]struct {
 		m1ExpectedCalls map[string][][]interface{}
@@ -395,46 +397,67 @@ func Test_MultiLevelCache(t *testing.T) {
 		},
 		"[FetchExpandedPostings] Should fallback and backfill when miss": {
 			m1ExpectedCalls: map[string][][]interface{}{
-				"StoreExpandedPostings": {{bID, []*labels.Matcher{matcher}, v}},
-				"FetchExpandedPostings": {{bID, []*labels.Matcher{matcher}}},
+				"StoreExpandedPostings": {{bID, []*labels.Matcher{matcher}, v}, {bID, []*labels.Matcher{matcher2}, v2}},
+				"FetchExpandedPostings": {{bID, [][]*labels.Matcher{{matcher}, {matcher2}}}},
+			},
+			m1MockedCalls: map[string][]interface{}{
+				"FetchExpandedPostings": {[][]byte{nil, nil}},
 			},
 			m2ExpectedCalls: map[string][][]interface{}{
-				"FetchExpandedPostings": {{bID, []*labels.Matcher{matcher}}},
+				"FetchExpandedPostings": {{bID, [][]*labels.Matcher{{matcher}, {matcher2}}}},
 			},
 			m2MockedCalls: map[string][]interface{}{
-				"FetchExpandedPostings": {v, true},
+				"FetchExpandedPostings": {[][]byte{v, v2}},
 			},
 			call: func(cache storecache.IndexCache) {
-				cache.FetchExpandedPostings(ctx, bID, []*labels.Matcher{matcher}, "")
+				cache.FetchExpandedPostings(ctx, bID, [][]*labels.Matcher{{matcher}, {matcher2}}, "")
+			},
+		},
+		"[FetchExpandedPostings] Should fallback and backfill when miss for partial items": {
+			m1ExpectedCalls: map[string][][]interface{}{
+				"StoreExpandedPostings": {{bID, []*labels.Matcher{matcher2}, v2}, {bID, []*labels.Matcher{matcher3}, v3}},
+				"FetchExpandedPostings": {{bID, [][]*labels.Matcher{{matcher}, {matcher2}, {matcher3}}}},
+			},
+			m1MockedCalls: map[string][]interface{}{
+				"FetchExpandedPostings": {[][]byte{v, nil, nil}},
+			},
+			m2ExpectedCalls: map[string][][]interface{}{
+				"FetchExpandedPostings": {{bID, [][]*labels.Matcher{{matcher2}, {matcher3}}}},
+			},
+			m2MockedCalls: map[string][]interface{}{
+				"FetchExpandedPostings": {[][]byte{v2, v3}},
+			},
+			call: func(cache storecache.IndexCache) {
+				cache.FetchExpandedPostings(ctx, bID, [][]*labels.Matcher{{matcher}, {matcher2}, {matcher3}}, "")
 			},
 		},
 		"[FetchExpandedPostings] should not fallback when all hit on l1": {
 			m1ExpectedCalls: map[string][][]interface{}{
-				"FetchExpandedPostings": {{bID, []*labels.Matcher{matcher}}},
+				"FetchExpandedPostings": {{bID, [][]*labels.Matcher{{matcher}, {matcher2}}}},
 			},
 			m2ExpectedCalls: map[string][][]interface{}{},
 			m1MockedCalls: map[string][]interface{}{
-				"FetchExpandedPostings": {[]byte{}, true},
+				"FetchExpandedPostings": {[][]byte{v, v2}},
 			},
 			call: func(cache storecache.IndexCache) {
-				cache.FetchExpandedPostings(ctx, bID, []*labels.Matcher{matcher}, "")
+				cache.FetchExpandedPostings(ctx, bID, [][]*labels.Matcher{{matcher}, {matcher2}}, "")
 			},
 		},
 		"[FetchExpandedPostings] m1 doesn't enable expanded postings": {
 			m1ExpectedCalls: map[string][][]interface{}{},
 			m2ExpectedCalls: map[string][][]interface{}{
-				"FetchExpandedPostings": {{bID, []*labels.Matcher{matcher}}},
+				"FetchExpandedPostings": {{bID, [][]*labels.Matcher{{matcher}, {matcher2}}}},
 			},
 			m1MockedCalls: map[string][]interface{}{},
 			m2MockedCalls: map[string][]interface{}{
-				"FetchExpandedPostings": {[]byte{}, true},
+				"FetchExpandedPostings": {[][]byte{v, v2}},
 			},
 			enabledItems: [][]string{
 				{storecache.CacheTypePostings},
 				{},
 			},
 			call: func(cache storecache.IndexCache) {
-				cache.FetchExpandedPostings(ctx, bID, []*labels.Matcher{matcher}, "")
+				cache.FetchExpandedPostings(ctx, bID, [][]*labels.Matcher{{matcher}, {matcher2}}, "")
 			},
 		},
 	}
@@ -511,15 +534,15 @@ func (m *mockIndexCache) StoreExpandedPostings(blockID ulid.ULID, matchers []*la
 	m.calls["StoreExpandedPostings"] = append(m.calls["StoreExpandedPostings"], []interface{}{blockID, matchers, v})
 }
 
-func (m *mockIndexCache) FetchExpandedPostings(_ context.Context, blockID ulid.ULID, matchers []*labels.Matcher, tenant string) ([]byte, bool) {
+func (m *mockIndexCache) FetchExpandedPostings(_ context.Context, blockID ulid.ULID, matchers [][]*labels.Matcher, tenant string) [][]byte {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.calls["FetchExpandedPostings"] = append(m.calls["FetchExpandedPostings"], []interface{}{blockID, matchers})
 	if m, ok := m.mockedCalls["FetchExpandedPostings"]; ok {
-		return m[0].([]byte), m[1].(bool)
+		return m[0].([][]byte)
 	}
 
-	return []byte{}, false
+	return [][]byte{}
 }
 
 func (m *mockIndexCache) StoreSeries(blockID ulid.ULID, id storage.SeriesRef, v []byte, tenant string) {

@@ -967,7 +967,7 @@ github.com/thanos-io/objstore/providers/gcs
 github.com/thanos-io/objstore/providers/s3
 github.com/thanos-io/objstore/providers/swift
 github.com/thanos-io/objstore/tracing/opentracing
-# github.com/thanos-io/promql-engine v0.0.0-20241203103240-2f49f80c7c68
+# github.com/thanos-io/promql-engine v0.0.0-20241217103156-9dbff30059cf
 ## explicit; go 1.22.0
 github.com/thanos-io/promql-engine/api
 github.com/thanos-io/promql-engine/engine
@@ -990,7 +990,7 @@ github.com/thanos-io/promql-engine/query
 github.com/thanos-io/promql-engine/ringbuffer
 github.com/thanos-io/promql-engine/storage
 github.com/thanos-io/promql-engine/storage/prometheus
-# github.com/thanos-io/thanos v0.37.2-0.20241210234302-0ea6bac096ce
+# github.com/thanos-io/thanos v0.37.2-0.20241210234302-0ea6bac096ce => github.com/yeya24/thanos v0.2.2-0.20241227235800-ff747fa6ed95
 ## explicit; go 1.23.0
 github.com/thanos-io/thanos/pkg/api/query/querypb
 github.com/thanos-io/thanos/pkg/block
@@ -1307,7 +1307,6 @@ golang.org/x/crypto/pkcs12/internal/rc2
 # golang.org/x/exp v0.0.0-20240613232115-7f521ea00fb8
 ## explicit; go 1.20
 golang.org/x/exp/constraints
-golang.org/x/exp/maps
 golang.org/x/exp/slices
 # golang.org/x/mod v0.21.0
 ## explicit; go 1.22.0
@@ -1579,3 +1578,4 @@ k8s.io/utils/clock
 # github.com/google/gnostic => github.com/googleapis/gnostic v0.6.9
 # gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0.20210301060133-17f40c25f497
 # google.golang.org/grpc => google.golang.org/grpc v1.65.0
+# github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20241227235800-ff747fa6ed95

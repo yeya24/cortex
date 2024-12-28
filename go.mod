@@ -52,7 +52,7 @@ require (
 	github.com/spf13/afero v1.11.0
 	github.com/stretchr/testify v1.10.0
 	github.com/thanos-io/objstore v0.0.0-20241111205755-d1dd89d41f97
-	github.com/thanos-io/promql-engine v0.0.0-20241203103240-2f49f80c7c68
+	github.com/thanos-io/promql-engine v0.0.0-20241217103156-9dbff30059cf
 	github.com/thanos-io/thanos v0.37.2-0.20241210234302-0ea6bac096ce
 	github.com/uber/jaeger-client-go v2.30.0+incompatible
 	github.com/weaveworks/common v0.0.0-20230728070032-dd9e68f319d5
@@ -279,3 +279,5 @@ replace gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0
 
 // gRPC 1.66 introduced memory pooling which breaks Cortex queries. Pin 1.65.0 until we have a fix.
 replace google.golang.org/grpc => google.golang.org/grpc v1.65.0
+
+replace github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20241227235800-ff747fa6ed95

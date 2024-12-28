@@ -106,29 +106,89 @@ func (m *multiLevelCache) StoreExpandedPostings(blockID ulid.ULID, matchers []*l
 	}
 }
 
-func (m *multiLevelCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers []*labels.Matcher, tenant string) ([]byte, bool) {
+type matchersData struct {
+	matchers []*labels.Matcher
+	data     []byte
+}
+
+func (m *multiLevelCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers [][]*labels.Matcher, tenant string) [][]byte {
 	timer := prometheus.NewTimer(m.fetchLatency.WithLabelValues(storecache.CacheTypeExpandedPostings))
 	defer timer.ObserveDuration()
 
+	output := make([][]byte, len(matchers))
+	caches := len(m.expandedPostingCaches)
+	backfillItems := make([][]matchersData, len(m.expandedPostingCaches)-1)
 	for i, c := range m.expandedPostingCaches {
 		if ctx.Err() != nil {
-			return nil, false
+			return output
 		}
-		if d, h := c.FetchExpandedPostings(ctx, blockID, matchers, tenant); h {
+		var (
+			newMatchers  [][]*labels.Matcher
+			resultIdxMap map[int]int
+		)
+
+		// Backfill required.
+		if i < caches-1 {
+			newMatchers = [][]*labels.Matcher{}
+			resultIdxMap = map[int]int{}
+			backfillItems[i] = []matchersData{}
+		}
+
+		d := c.FetchExpandedPostings(ctx, blockID, matchers, tenant)
+		for j, data := range d {
+			idx := j
 			if i > 0 {
-				backFillTimer := prometheus.NewTimer(m.backFillLatency.WithLabelValues(storecache.CacheTypeExpandedPostings))
-				if err := m.backfillProcessor.EnqueueAsync(func() {
-					m.expandedPostingCaches[i-1].StoreExpandedPostings(blockID, matchers, d, tenant)
-				}); errors.Is(err, cacheutil.ErrAsyncBufferFull) {
-					m.backfillDroppedItems[storecache.CacheTypeExpandedPostings].Inc()
-				}
-				backFillTimer.ObserveDuration()
+				idx = resultIdxMap[j]
 			}
-			return d, h
+			if data != nil {
+				output[idx] = data
+				if i > 0 {
+					backfillItems[i-1] = append(backfillItems[i-1], matchersData{
+						matchers: matchers[j],
+						data:     data,
+					})
+				}
+				continue
+			}
+			// Cache miss at current level.
+			if i < caches-1 {
+				newMatchers = append(newMatchers, matchers[j])
+				resultIdxMap[len(newMatchers)-1] = idx
+			}
 		}
+		// No miss.
+		if len(newMatchers) == 0 {
+			break
+		}
+		matchers = newMatchers
 	}
 
-	return []byte{}, false
+	defer func() {
+		backFillTimer := prometheus.NewTimer(m.backFillLatency.WithLabelValues(storecache.CacheTypeExpandedPostings))
+		defer backFillTimer.ObserveDuration()
+		for i, values := range backfillItems {
+			i := i
+			values := values
+			if len(values) == 0 {
+				continue
+			}
+			if err := m.backfillProcessor.EnqueueAsync(func() {
+				cnt := 0
+				for _, value := range values {
+					m.expandedPostingCaches[i].StoreExpandedPostings(blockID, value.matchers, value.data, tenant)
+					cnt++
+					if cnt == m.maxBackfillItems {
+						m.backfillDroppedItems[storecache.CacheTypeExpandedPostings].Add(float64(len(values) - cnt))
+						return
+					}
+				}
+			}); errors.Is(err, cacheutil.ErrAsyncBufferFull) {
+				m.backfillDroppedItems[storecache.CacheTypeExpandedPostings].Add(float64(len(values)))
+			}
+		}
+	}()
+
+	return output
 }
 
 func (m *multiLevelCache) StoreSeries(blockID ulid.ULID, id storage.SeriesRef, v []byte, tenant string) {

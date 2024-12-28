@@ -176,20 +176,34 @@ func (c *InMemoryIndexCache) StoreExpandedPostings(blockID ulid.ULID, matchers [
 	c.set(storecache.CacheTypeExpandedPostings, storecache.CacheKey{Block: blockID.String(), Key: storecache.CacheKeyExpandedPostings(storecache.LabelMatchersToString(matchers))}, v)
 }
 
-// FetchExpandedPostings fetches expanded postings and returns cached data and a boolean value representing whether it is a cache hit or not.
-func (c *InMemoryIndexCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers []*labels.Matcher, tenant string) ([]byte, bool) {
+// FetchExpandedPostings fetches expanded postings and returns a slice of bytes. If cache miss, the corresponding index
+// of the response slice will be nil.
+func (c *InMemoryIndexCache) FetchExpandedPostings(ctx context.Context, blockID ulid.ULID, matchers [][]*labels.Matcher, tenant string) [][]byte {
 	timer := prometheus.NewTimer(c.commonMetrics.FetchLatency.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant))
 	defer timer.ObserveDuration()
 
-	if ctx.Err() != nil {
-		return nil, false
+	blockIDKey := blockID.String()
+	requests := 0
+	hits := 0
+	data := make([][]byte, len(matchers))
+	for i, matcher := range matchers {
+		if (i+1)%util.CheckContextEveryNIterations == 0 {
+			if ctx.Err() != nil {
+				c.commonMetrics.HitsTotal.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant).Add(float64(hits))
+				c.commonMetrics.RequestTotal.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant).Add(float64(requests))
+				return data
+			}
+		}
+
+		requests++
+		if b, ok := c.get(storecache.CacheKey{blockIDKey, storecache.CacheKeyExpandedPostings(storecache.LabelMatchersToString(matcher)), ""}); ok {
+			hits++
+			data[i] = b
+		}
 	}
-	c.commonMetrics.RequestTotal.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant).Inc()
-	if b, ok := c.get(storecache.CacheKey{Block: blockID.String(), Key: storecache.CacheKeyExpandedPostings(storecache.LabelMatchersToString(matchers))}); ok {
-		c.commonMetrics.HitsTotal.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant).Inc()
-		return b, true
-	}
-	return nil, false
+	c.commonMetrics.HitsTotal.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant).Add(float64(hits))
+	c.commonMetrics.RequestTotal.WithLabelValues(storecache.CacheTypeExpandedPostings, tenant).Add(float64(requests))
+	return data
 }
 
 // StoreSeries sets the series identified by the ulid and id to the value v,
