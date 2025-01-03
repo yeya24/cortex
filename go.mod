@@ -278,3 +278,5 @@ replace gopkg.in/alecthomas/kingpin.v2 => github.com/alecthomas/kingpin v1.3.8-0
 
 // gRPC 1.66 introduced memory pooling which breaks Cortex queries. Pin 1.65.0 until we have a fix.
 replace google.golang.org/grpc => google.golang.org/grpc v1.65.0
+
+replace github.com/thanos-io/thanos => github.com/yeya24/thanos v0.2.2-0.20250103060104-88848f4b0875
