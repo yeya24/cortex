@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/thanos-io/promql-engine/logicalplan"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +88,8 @@ type Config struct {
 	// Ignore max query length check at Querier.
 	IgnoreMaxQueryLength              bool `yaml:"ignore_max_query_length"`
 	EnablePromQLExperimentalFunctions bool `yaml:"enable_promql_experimental_functions"`
+
+	Optimizers []logicalplan.Optimizer `yaml:"-"`
 }
 
 var (
@@ -220,7 +223,7 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 			return cfg.DefaultEvaluationInterval.Milliseconds()
 		},
 	}
-	queryEngine := NewEngineFactory(opts, cfg.ThanosEngine, reg)
+	queryEngine := NewEngineFactory(opts, cfg.ThanosEngine, reg, cfg.Optimizers)
 	return NewSampleAndChunkQueryable(lazyQueryable), exemplarQueryable, queryEngine
 }
 

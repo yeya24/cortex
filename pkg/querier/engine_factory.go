@@ -19,14 +19,14 @@ type EngineFactory struct {
 	fallbackQueriesTotal prometheus.Counter
 }
 
-func NewEngineFactory(opts promql.EngineOpts, enableThanosEngine bool, reg prometheus.Registerer) *EngineFactory {
+func NewEngineFactory(opts promql.EngineOpts, enableThanosEngine bool, reg prometheus.Registerer, optimizers []logicalplan.Optimizer) *EngineFactory {
 	prometheusEngine := promql.NewEngine(opts)
 
 	var thanosEngine *engine.Engine
 	if enableThanosEngine {
 		thanosEngine = engine.New(engine.Opts{
 			EngineOpts:        opts,
-			LogicalOptimizers: logicalplan.AllOptimizers,
+			LogicalOptimizers: append(logicalplan.AllOptimizers, optimizers...),
 			EnableAnalysis:    true,
 		})
 	}
