@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"github.com/prometheus/prometheus/promql/parser"
 	"io"
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/gorilla/mux"
@@ -209,5 +212,108 @@ func Benchmark_Compression(b *testing.B) {
 				b.ReportMetric(float64(responseBodySize), "ContentLength")
 			}
 		})
+	}
+}
+
+func TestCCC(t *testing.T) {
+	m := labels.MustNewMatcher(labels.MatchRegexp, "name", "10\\.1\\.202\\.201")
+	fmt.Println(m.IsRegexOptimized())
+}
+
+func TestAAAC(t *testing.T) {
+	m := labels.MustNewMatcher(labels.MatchRegexp, "name", "sts..*.amazonaws.com")
+	fmt.Println(m.IsRegexOptimized())
+}
+
+func TestAAE(t *testing.T) {
+	m := labels.MustNewMatcher(labels.MatchRegexp, "name", "/augury\\.AmbientHealth/.*|/augury\\.Health/.*")
+	fmt.Println(m.IsRegexOptimized())
+}
+
+func TestAAD(t *testing.T) {
+	m := labels.MustNewMatcher(labels.MatchRegexp, "name", "/stripe_internal.henson.Henson/.*")
+	fmt.Println(m.IsRegexOptimized())
+}
+
+func TestAAA(t *testing.T) {
+	m := labels.MustNewMatcher(labels.MatchRegexp, "name", "sts\\..*\\.amazonaws\\.com")
+	fmt.Println(m.IsRegexOptimized())
+}
+
+func TestBBB(t *testing.T) {
+	// Open the CSV file
+	file, err := os.Open("/Users/benye/Downloads/queries-top100.csv")
+	if err != nil {
+		fmt.Printf("Error opening file: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	// Create CSV reader
+	reader := csv.NewReader(file)
+	reader.LazyQuotes = true
+	reader.TrimLeadingSpace = true
+
+	// Skip header row
+	_, err = reader.Read()
+	if err != nil {
+		fmt.Printf("Error reading header: %v\n", err)
+		return
+	}
+
+	// Read and process each row
+	for {
+		row, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Printf("Error reading row: %v\n", err)
+			continue
+		}
+
+		query := row[1]
+
+		// Parse the PromQL query
+		expr, err := parser.ParseExpr(query)
+		if err != nil {
+			fmt.Printf("Error parsing query: %v\n", err)
+			continue
+		}
+
+		// Function to check for regex matchers recursively
+		var matched bool
+		parser.Inspect(expr, func(node parser.Node, nodes []parser.Node) error {
+			switch n := node.(type) {
+			case *parser.VectorSelector:
+				for _, m := range n.LabelMatchers {
+					if m.Type == labels.MatchRegexp || m.Type == labels.MatchNotRegexp {
+						if len(m.SetMatches()) > 0 {
+							continue
+						}
+						if m.StringMatcher() != nil {
+							continue
+						}
+						//if m.Value == "/com.stripe.gocode.instancelifecycle.fleet.FleetRepository/GetChecks|/com.stripe.gocode.instancelifecycle.fleet.FleetRepository/GetHostMetadata|/com.stripe.gocode.instancelifecycle.InstanceLifecycle/GetInstanceLifecycleStatus|/com.stripe.gocode.instancelifecycle.fleet.FleetRepository/ReportCheckEvaluationBatch|/com.stripe.gocode.instancelifecycle.fleet.FleetRepository/ReportCurrentCheckConfigs" {
+						//	fmt.Printf("aaa\n")
+						//}
+						if m.Value == `sts\\..*.amazonaws.com` {
+							fmt.Printf("aaa\n")
+						}
+
+						mightMatch := len(m.SetMatches()) == 0 && m.Prefix() == "" && m.Suffix() == "" && len(m.Contains()) == 0 && m.StringMatcher() != nil
+						if mightMatch || len(m.Prefix()) > 0 || len(m.Suffix()) > 0 || len(m.Contains()) > 0 {
+							matched = true
+							fmt.Println(m.String())
+						}
+					}
+				}
+			}
+			return nil
+		})
+
+		if matched {
+			fmt.Printf("Found potential regex heavy query: %s\n", query)
+		}
 	}
 }

@@ -14,6 +14,7 @@
 package labels
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"unicode"
@@ -114,6 +115,7 @@ func (m *FastRegexMatcher) compileMatchStringFunction() func(string) bool {
 		if m.stringMatcher != nil {
 			return m.stringMatcher.Matches(s)
 		}
+		fmt.Println("re matching")
 		return m.re.MatchString(s)
 	}
 }
@@ -310,6 +312,10 @@ func (m *FastRegexMatcher) SetMatches() []string {
 	// IMPORTANT: always return a copy, otherwise if the caller manipulate this slice it will
 	// also get manipulated in the cached FastRegexMatcher instance.
 	return slices.Clone(m.setMatches)
+}
+
+func (m *FastRegexMatcher) StringMatcher() StringMatcher {
+	return m.stringMatcher
 }
 
 func (m *FastRegexMatcher) GetRegexString() string {

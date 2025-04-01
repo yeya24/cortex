@@ -152,6 +152,13 @@ func (m *Matcher) SetMatches() []string {
 	return m.re.SetMatches()
 }
 
+func (m *Matcher) StringMatcher() StringMatcher {
+	if m.re == nil {
+		return nil
+	}
+	return m.re.StringMatcher()
+}
+
 // Prefix returns the required prefix of the value to match, if possible.
 // It will be empty if it's an equality matcher or if the prefix can't be determined.
 func (m *Matcher) Prefix() string {
@@ -159,6 +166,24 @@ func (m *Matcher) Prefix() string {
 		return ""
 	}
 	return m.re.prefix
+}
+
+// Prefix returns the required prefix of the value to match, if possible.
+// It will be empty if it's an equality matcher or if the prefix can't be determined.
+func (m *Matcher) Suffix() string {
+	if m.re == nil {
+		return ""
+	}
+	return m.re.suffix
+}
+
+// Prefix returns the required prefix of the value to match, if possible.
+// It will be empty if it's an equality matcher or if the prefix can't be determined.
+func (m *Matcher) Contains() []string {
+	if m.re == nil {
+		return nil
+	}
+	return m.re.contains
 }
 
 // IsRegexOptimized returns whether regex is optimized.
