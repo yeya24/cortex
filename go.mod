@@ -66,7 +66,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.35.0
 	go.opentelemetry.io/otel/trace v1.35.0
 	go.uber.org/atomic v1.11.0
-	golang.org/x/net v0.37.0
+	golang.org/x/net v0.38.0
 	golang.org/x/sync v0.12.0
 	golang.org/x/time v0.9.0
 	google.golang.org/grpc v1.70.0
@@ -81,9 +81,11 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
+	github.com/prometheus/procfs v0.15.1
 	github.com/sercand/kuberesolver/v5 v5.1.1
 	github.com/tjhop/slog-gokit v0.1.3
 	go.opentelemetry.io/collector/pdata v1.24.0
+	go.uber.org/automaxprocs v1.6.0
 	google.golang.org/protobuf v1.36.4
 )
 
@@ -148,7 +150,7 @@ require (
 	github.com/goccy/go-json v0.10.3 // indirect
 	github.com/gofrs/uuid v4.4.0+incompatible // indirect
 	github.com/gogo/googleapis v1.4.0 // indirect
-	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
@@ -199,7 +201,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus-community/prom-label-proxy v0.8.1-0.20240127162815-c1195f9aabc0 // indirect
 	github.com/prometheus/exporter-toolkit v0.13.2 // indirect
-	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/prometheus/sigv4 v0.1.1 // indirect
 	github.com/redis/rueidis v1.0.45-alpha.1 // indirect
 	github.com/rs/cors v1.11.1 // indirect
