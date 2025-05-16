@@ -2690,6 +2690,11 @@ ha_tracker:
 # CLI flag: -distributor.sign-write-requests
 [sign_write_requests: <boolean> | default = false]
 
+# EXPERIMENTAL: If enabled, distributor would use stream connection to send
+# requests to ingesters.
+# CLI flag: -distributor.use-stream-push
+[use_stream_push: <boolean> | default = false]
+
 ring:
   kvstore:
     # Backend storage to use for the ring. Supported values are: consul, etcd,
@@ -3267,6 +3272,10 @@ instance_limits:
 # Maximum number of entries in the regex matchers cache. 0 to disable.
 # CLI flag: -ingester.matchers-cache-max-items
 [matchers_cache_max_items: <int> | default = 0]
+
+# If enabled, the metadata API returns all metadata regardless of the limits.
+# CLI flag: -ingester.skip-metadata-limits
+[skip_metadata_limits: <boolean> | default = true]
 ```
 
 ### `ingester_client_config`
