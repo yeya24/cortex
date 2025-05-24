@@ -3,6 +3,7 @@
 ## master / unreleased
 * [CHANGE] Ingester: Remove EnableNativeHistograms config flag and instead gate keep through new per-tenant limit at ingestion. #6718
 * [CHANGE] StoreGateway/Alertmanager: Add default 5s connection timeout on client. #6603
+* [CHANGE] Validate a tenantID when to use a single tenant resolver. #6727
 * [FEATURE] Query Frontend: Add dynamic interval size for query splitting. This is enabled by configuring experimental flags `querier.max-shards-per-query` and/or `querier.max-fetched-data-duration-per-query`. The split interval size is dynamically increased to maintain a number of shards and total duration fetched below the configured values. #6458
 * [FEATURE] Querier/Ruler: Add `query_partial_data` and `rules_partial_data` limits to allow queries/rules to be evaluated with data from a single zone, if other zones are not available. #6526
 * [FEATURE] Update prometheus alertmanager version to v0.28.0 and add new integration msteamsv2, jira, and rocketchat. #6590
@@ -10,9 +11,11 @@
 * [FEATURE] Ingester: Support out-of-order native histogram ingestion. It automatically enabled when `-ingester.out-of-order-time-window > 0` and `-blocks-storage.tsdb.enable-native-histograms=true`. #6626 #6663
 * [FEATURE] Ruler: Add support for percentage based sharding for rulers. #6680
 * [FEATURE] Ruler: Add support for group labels. #6665
-* [FEATURE] Support Parquet format: Implement parquet converter service to convert a TSDB block into Parquet. #6716
+* [FEATURE] Experimental Support Parquet format: Implement parquet converter service to convert a TSDB block into Parquet and Parquet Queryable. #6716 #6743
+* [FEATURE] Distributor/Ingester: Implemented experimental feature to use gRPC stream connection for push requests. This can be enabled by setting `-distributor.use-stream-push=true`. #6580
+* [FEATURE] Compactor: Add support for percentage based sharding for compactors. #6738
 * [ENHANCEMENT] Query Frontend: Change to return 400 when the tenant resolving fail. #6715
-* [ENHANCEMENT] Querier: Support query parameters to metadata api (/api/v1/metadata) to allow user to limit metadata to return. #6681
+* [ENHANCEMENT] Querier: Support query parameters to metadata api (/api/v1/metadata) to allow user to limit metadata to return. Add a `-ingester.return-all-metadata` flag to make the metadata API run when the deployment. Please set this flag to `false` to use the metadata API with the limits later. #6681 #6744
 * [ENHANCEMENT] Ingester: Add a `cortex_ingester_active_native_histogram_series` metric to track # of active NH series. #6695
 * [ENHANCEMENT] Query Frontend: Add new limit `-frontend.max-query-response-size` for total query response size after decompression in query frontend. #6607
 * [ENHANCEMENT] Alertmanager: Add nflog and silences maintenance metrics. #6659
@@ -28,6 +31,8 @@
 * [ENHANCEMENT] OTLP: Support otlp metadata ingestion. #6617
 * [ENHANCEMENT] AlertManager: Add `keep_instance_in_the_ring_on_shutdown` and `tokens_file_path` configs for alertmanager ring. #6628
 * [ENHANCEMENT] Querier: Add metric and enhanced logging for query partial data. #6676
+* [ENHANCEMENT] Ingester: Push request should fail when label set is out of order #6746
+* [ENHANCEMENT] Querier: Add `querier.ingester-query-max-attempts` to retry on partial data. #6714
 * [BUGFIX] Ingester: Avoid error or early throttling when READONLY ingesters are present in the ring #6517
 * [BUGFIX] Ingester: Fix labelset data race condition. #6573
 * [BUGFIX] Compactor: Cleaner should not put deletion marker for blocks with no-compact marker. #6576
@@ -39,6 +44,7 @@
 * [BUGFIX] Querier: Fix panic when marshaling QueryResultRequest. #6601
 * [BUGFIX] Ingester: Avoid resharding for query when restart readonly ingesters. #6642
 * [BUGFIX] Query Frontend: Fix query frontend per `user` metrics clean up. #6698
+* [BUGFIX] Add `__markers__` tenant ID validation. #6761
 
 ## 1.19.0 2025-02-27
 

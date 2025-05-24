@@ -10,8 +10,12 @@ import (
 	"github.com/weaveworks/common/user"
 )
 
+const GlobalMarkersDir = "__markers__"
+
 var (
 	errTenantIDTooLong = errors.New("tenant ID is too long: max 150 characters")
+	errTenantIDUnsafe  = errors.New("tenant ID is '.' or '..'")
+	errTenantIDMarkers = errors.New("tenant ID '__markers__' is not allowed")
 )
 
 type errTenantIDUnsupportedCharacter struct {
@@ -63,6 +67,16 @@ func ValidTenantID(s string) error {
 
 	if len(s) > 150 {
 		return errTenantIDTooLong
+	}
+
+	// check tenantID is "__markers__"
+	if s == GlobalMarkersDir {
+		return errTenantIDMarkers
+	}
+
+	// check tenantID is "." or ".."
+	if containsUnsafePathSegments(s) {
+		return errTenantIDUnsafe
 	}
 
 	return nil

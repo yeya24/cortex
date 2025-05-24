@@ -2690,6 +2690,11 @@ ha_tracker:
 # CLI flag: -distributor.sign-write-requests
 [sign_write_requests: <boolean> | default = false]
 
+# EXPERIMENTAL: If enabled, distributor would use stream connection to send
+# requests to ingesters.
+# CLI flag: -distributor.use-stream-push
+[use_stream_push: <boolean> | default = false]
+
 ring:
   kvstore:
     # Backend storage to use for the ring. Supported values are: consul, etcd,
@@ -3267,6 +3272,10 @@ instance_limits:
 # Maximum number of entries in the regex matchers cache. 0 to disable.
 # CLI flag: -ingester.matchers-cache-max-items
 [matchers_cache_max_items: <int> | default = 0]
+
+# If enabled, the metadata API returns all metadata regardless of the limits.
+# CLI flag: -ingester.skip-metadata-limits
+[skip_metadata_limits: <boolean> | default = true]
 ```
 
 ### `ingester_client_config`
@@ -3699,9 +3708,10 @@ query_rejection:
 
 # The default tenant's shard size when the shuffle-sharding strategy is used by
 # the compactor. When this setting is specified in the per-tenant overrides, a
-# value of 0 disables shuffle sharding for the tenant.
+# value of 0 disables shuffle sharding for the tenant. If the value is < 1 and >
+# 0 the shard size will be a percentage of the total compactors
 # CLI flag: -compactor.tenant-shard-size
-[compactor_tenant_shard_size: <int> | default = 0]
+[compactor_tenant_shard_size: <float> | default = 0]
 
 # Index size limit in bytes for each compaction partition. 0 means no limit
 # CLI flag: -compactor.partition-index-size-bytes
@@ -4164,6 +4174,11 @@ store_gateway_client:
 # replication factor) than we'll end the retries earlier
 # CLI flag: -querier.store-gateway-consistency-check-max-attempts
 [store_gateway_consistency_check_max_attempts: <int> | default = 3]
+
+# The maximum number of times we attempt fetching data from ingesters for
+# retryable errors (ex. partial data returned).
+# CLI flag: -querier.ingester-query-max-attempts
+[ingester_query_max_attempts: <int> | default = 1]
 
 # When distributor's sharding strategy is shuffle-sharding and this setting is >
 # 0, queriers fetch in-memory series from the minimum set of required ingesters,

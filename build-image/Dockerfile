@@ -1,4 +1,4 @@
-FROM golang:1.24.0-bullseye
+FROM golang:1.24.3-bullseye
 ARG goproxyValue
 ENV GOPROXY=${goproxyValue}
 RUN apt-get update && apt-get install -y curl file gettext jq unzip protobuf-compiler libprotobuf-dev && \
@@ -23,7 +23,7 @@ RUN GOARCH=$(go env GOARCH) && \
 	chmod +x shfmt && \
 	mv shfmt /usr/bin
 
-RUN curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b /usr/bin v1.64.5
+RUN curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh -s -- -b /usr/bin v2.1.6
 
 ENV HUGO_VERSION=v0.101.0
 RUN go install github.com/client9/misspell/cmd/misspell@v0.3.4 &&\
