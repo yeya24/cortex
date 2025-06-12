@@ -791,8 +791,8 @@ github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatocumul
 github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatocumulativeprocessor/internal/metrics
 github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatocumulativeprocessor/internal/putil/pslice
 github.com/open-telemetry/opentelemetry-collector-contrib/processor/deltatocumulativeprocessor/internal/telemetry
-# github.com/opentracing-contrib/go-grpc v0.1.2
-## explicit; go 1.23.8
+# github.com/opentracing-contrib/go-grpc v0.1.2 => github.com/opentracing-contrib/go-grpc v0.1.0
+## explicit; go 1.22.7
 github.com/opentracing-contrib/go-grpc
 # github.com/opentracing-contrib/go-stdlib v1.1.0
 ## explicit; go 1.14
@@ -1754,3 +1754,4 @@ k8s.io/utils/clock
 # github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20241111205755-d1dd89d41f97
 # github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.302.1
 # github.com/prometheus/common => github.com/prometheus/common v0.62.1-0.20250120132612-df14882cbf97
+# github.com/opentracing-contrib/go-grpc => github.com/opentracing-contrib/go-grpc v0.1.0

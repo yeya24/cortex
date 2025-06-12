@@ -308,3 +308,5 @@ replace github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20
 replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.302.1
 
 replace github.com/prometheus/common => github.com/prometheus/common v0.62.1-0.20250120132612-df14882cbf97
+
+replace github.com/opentracing-contrib/go-grpc => github.com/opentracing-contrib/go-grpc v0.1.0
