@@ -58,9 +58,10 @@ func New(opts promql.EngineOpts, enableThanosEngine bool, reg prometheus.Registe
 	var thanosEngine *thanosengine.Engine
 	if enableThanosEngine {
 		thanosEngine = thanosengine.New(thanosengine.Opts{
-			EngineOpts:        opts,
-			LogicalOptimizers: logicalplan.DefaultOptimizers,
-			EnableAnalysis:    true,
+			EngineOpts:                  opts,
+			LogicalOptimizers:           logicalplan.DefaultOptimizers,
+			EnableAnalysis:              true,
+			DisableDuplicateLabelChecks: true,
 		})
 	}
 

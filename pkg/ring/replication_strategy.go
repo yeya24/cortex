@@ -44,7 +44,8 @@ func (s *defaultReplicationStrategy) Filter(instances []InstanceDesc, op Operati
 		replicationFactor = len(instances)
 	}
 
-	minSuccess := (replicationFactor / 2) + 1
+	// We only need quorum of 1.
+	minSuccess := 1
 	// This is just a shortcut - if there are not minSuccess available instances,
 	// after filtering out dead ones, don't even bother trying.
 	if len(instances) < minSuccess {

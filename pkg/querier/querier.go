@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/storage/iceberg"
 	"slices"
 	"strings"
 	"sync"
@@ -97,6 +98,9 @@ type Config struct {
 	EnableParquetQueryable            bool   `yaml:"enable_parquet_queryable" doc:"hidden"`
 	ParquetQueryableShardCacheSize    int    `yaml:"parquet_queryable_shard_cache_size" doc:"hidden"`
 	ParquetQueryableDefaultBlockStore string `yaml:"parquet_queryable_default_block_store" doc:"hidden"`
+
+	IcebergEnabled bool                  `yaml:"iceberg_enabled"`
+	Iceberg        iceberg.IcebergConfig `yaml:"iceberg,omitempty"`
 }
 
 var (
@@ -146,6 +150,8 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&cfg.EnableParquetQueryable, "querier.enable-parquet-queryable", false, "[Experimental] If true, querier will try to query the parquet files if available.")
 	f.IntVar(&cfg.ParquetQueryableShardCacheSize, "querier.parquet-queryable-shard-cache-size", 512, "[Experimental] [Experimental] Maximum size of the Parquet queryable shard cache. 0 to disable.")
 	f.StringVar(&cfg.ParquetQueryableDefaultBlockStore, "querier.parquet-queryable-default-block-store", string(parquetBlockStore), "Parquet queryable's default block store to query. Valid options are tsdb and parquet. If it is set to tsdb, parquet queryable always fallback to store gateway.")
+	f.BoolVar(&cfg.IcebergEnabled, "querier.enable-iceberg", false, "[Experimental] If true, querier will try to query the parquet files if available.")
+	cfg.Iceberg.RegisterFlags(f, "querier.iceberg")
 }
 
 // Validate the config
@@ -211,6 +217,13 @@ func New(cfg Config, limits *validation.Overrides, distributor Distributor, stor
 	}
 	queryable := NewQueryable(distributorQueryable, ns, cfg, limits)
 	exemplarQueryable := newDistributorExemplarQueryable(distributor)
+	if cfg.IcebergEnabled {
+		store, err := iceberg.NewIcebergStore(cfg.Iceberg)
+		if err != nil {
+			panic(err)
+		}
+		queryable = iceberg.NewIcebergQueryable(store)
+	}
 
 	lazyQueryable := storage.QueryableFunc(func(mint int64, maxt int64) (storage.Querier, error) {
 		querier, err := queryable.Querier(mint, maxt)

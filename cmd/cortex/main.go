@@ -57,7 +57,7 @@ const (
 	configExpandENV  = "config.expand-env"
 )
 
-var testMode = false
+var testMode = true
 
 func main() {
 	var (

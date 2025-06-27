@@ -26,8 +26,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/config"
-	"github.com/prometheus/prometheus/model/exemplar"
-	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb"
@@ -53,6 +51,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/querysharding"
 	"github.com/cortexproject/cortex/pkg/ring"
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
+	"github.com/cortexproject/cortex/pkg/storage/iceberg"
 	cortex_tsdb "github.com/cortexproject/cortex/pkg/storage/tsdb"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	"github.com/cortexproject/cortex/pkg/tenant"
@@ -163,6 +162,14 @@ type Config struct {
 	SkipMetadataLimits bool `yaml:"skip_metadata_limits"`
 
 	QueryProtection configs.QueryProtection `yaml:"query_protection"`
+
+	// Timeseries processor configuration
+	TimeseriesProcessorEnabled bool          `yaml:"timeseries_processor_enabled"`
+	TimeseriesBufferSize       int           `yaml:"timeseries_buffer_size"`
+	TimeseriesFlushInterval    time.Duration `yaml:"timeseries_flush_interval"`
+
+	// Iceberg configuration for timeseries processor
+	Iceberg iceberg.IcebergConfig `yaml:"iceberg"`
 }
 
 // RegisterFlags adds the flags required to config this to the given FlagSet
@@ -185,6 +192,13 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&cfg.DisableChunkTrimming, "ingester.disable-chunk-trimming", false, "Disable trimming of matching series chunks based on query Start and End time. When disabled, the result may contain samples outside the queried time range but select performances may be improved. Note that certain query results might change by changing this option.")
 	f.IntVar(&cfg.MatchersCacheMaxItems, "ingester.matchers-cache-max-items", 0, "Maximum number of entries in the regex matchers cache. 0 to disable.")
 	f.BoolVar(&cfg.SkipMetadataLimits, "ingester.skip-metadata-limits", true, "If enabled, the metadata API returns all metadata regardless of the limits.")
+
+	f.BoolVar(&cfg.TimeseriesProcessorEnabled, "ingester.timeseries-processor-enabled", false, "Enable timeseries processor for Iceberg storage.")
+	f.IntVar(&cfg.TimeseriesBufferSize, "ingester.timeseries-buffer-size", 1000, "Buffer size for timeseries processor.")
+	f.DurationVar(&cfg.TimeseriesFlushInterval, "ingester.timeseries-flush-interval", time.Second, "Flush interval for timeseries processor.")
+
+	// Register Iceberg configuration flags
+	cfg.Iceberg.RegisterFlags(f, "ingester.iceberg")
 
 	cfg.DefaultLimits.RegisterFlagsWithPrefix(f, "ingester.")
 	cfg.QueryProtection.RegisterFlagsWithPrefix(f, "ingester.")
@@ -265,6 +279,9 @@ type Ingester struct {
 
 	matchersCache                storecache.MatchersCache
 	expandedPostingsCacheFactory *cortex_tsdb.ExpandedPostingsCacheFactory
+
+	// Timeseries processor for Iceberg storage
+	timeseriesProcessor *TimeseriesProcessor
 }
 
 // Shipper interface is used to have an easy way to mock it in tests.
@@ -377,7 +394,8 @@ func (u *userTSDB) Blocks() []*tsdb.Block {
 }
 
 func (u *userTSDB) Close() error {
-	return u.db.Close()
+	//return u.db.Close()
+	return nil
 }
 
 func (u *userTSDB) Compact(ctx context.Context) error {
@@ -806,6 +824,18 @@ func New(cfg Config, limits *validation.Overrides, registerer prometheus.Registe
 		}
 	}
 
+	// Initialize timeseries processor if enabled
+	if cfg.TimeseriesProcessorEnabled {
+		// Create IcebergStore for the timeseries processor
+		icebergStore, err := iceberg.NewIcebergStore(cfg.Iceberg)
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create IcebergStore for timeseries processor")
+		}
+
+		i.timeseriesProcessor = NewTimeseriesProcessor(icebergStore, logger, registerer)
+		i.timeseriesProcessor.SetBufferConfig(cfg.TimeseriesBufferSize, cfg.TimeseriesFlushInterval)
+	}
+
 	i.BasicService = services.NewBasicService(i.starting, i.updateLoop, i.stopping)
 	return i, nil
 }
@@ -892,10 +922,10 @@ func (i *Ingester) starting(ctx context.Context) error {
 	compactionService := services.NewBasicService(nil, i.compactionLoop, nil)
 	servs = append(servs, compactionService)
 
-	if i.cfg.BlocksStorageConfig.TSDB.IsBlocksShippingEnabled() {
-		shippingService := services.NewBasicService(nil, i.shipBlocksLoop, nil)
-		servs = append(servs, shippingService)
-	}
+	//if i.cfg.BlocksStorageConfig.TSDB.IsBlocksShippingEnabled() {
+	//	shippingService := services.NewBasicService(nil, i.shipBlocksLoop, nil)
+	//	servs = append(servs, shippingService)
+	//}
 
 	if i.cfg.BlocksStorageConfig.TSDB.CloseIdleTSDBTimeout > 0 {
 		interval := i.cfg.BlocksStorageConfig.TSDB.CloseIdleTSDBInterval
@@ -906,13 +936,13 @@ func (i *Ingester) starting(ctx context.Context) error {
 		servs = append(servs, closeIdleService)
 	}
 
-	if i.expandedPostingsCacheFactory != nil {
-		interval := i.cfg.BlocksStorageConfig.TSDB.ExpandedCachingExpireInterval
-		if interval == 0 {
-			interval = cortex_tsdb.ExpandedCachingExpireInterval
-		}
-		servs = append(servs, services.NewTimerService(interval, nil, i.expirePostingsCache, nil))
-	}
+	//if i.expandedPostingsCacheFactory != nil {
+	//	interval := i.cfg.BlocksStorageConfig.TSDB.ExpandedCachingExpireInterval
+	//	if interval == 0 {
+	//		interval = cortex_tsdb.ExpandedCachingExpireInterval
+	//	}
+	//	servs = append(servs, services.NewTimerService(interval, nil, i.expirePostingsCache, nil))
+	//}
 
 	var err error
 	i.TSDBState.subservices, err = services.NewManager(servs...)
@@ -972,6 +1002,7 @@ func (i *Ingester) updateLoop(ctx context.Context) error {
 		activeSeriesTickerChan = t.C
 		defer t.Stop()
 	}
+	_ = activeSeriesTickerChan
 
 	// Similarly to the above, this is a hardcoded value.
 	metadataPurgeTicker := time.NewTicker(metadataPurgePeriod)
@@ -997,15 +1028,15 @@ func (i *Ingester) updateLoop(ctx context.Context) error {
 			}
 			i.stoppedMtx.RUnlock()
 
-		case <-activeSeriesTickerChan:
-			i.updateActiveSeries(ctx)
+		//case <-activeSeriesTickerChan:
+		//	i.updateActiveSeries(ctx)
 		case <-maxTrackerResetTicker.C:
 			i.maxInflightQueryRequests.Tick()
 			i.maxInflightPushRequests.Tick()
-		case <-userTSDBConfigTicker.C:
-			i.updateUserTSDBConfigs()
-		case <-labelSetMetricsTicker.C:
-			i.updateLabelSetMetrics()
+		//case <-userTSDBConfigTicker.C:
+		//	i.updateUserTSDBConfigs()
+		//case <-labelSetMetricsTicker.C:
+		//	i.updateLabelSetMetrics()
 		case <-ctx.Done():
 			return nil
 		case err := <-i.subservicesWatcher.Chan():
@@ -1215,6 +1246,15 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 	// process it before samples. Otherwise, we risk returning an error before ingestion.
 	ingestedMetadata := i.pushMetadata(ctx, userID, req.GetMetadata())
 
+	// Send data to timeseries processor if enabled
+	if i.cfg.TimeseriesProcessorEnabled && i.timeseriesProcessor != nil {
+		// Send to timeseries processor asynchronously
+		if err := i.timeseriesProcessor.ProcessWriteRequest(ctx, userID, req); err != nil {
+			level.Error(i.logger).Log("msg", "failed to process timeseries for Iceberg storage", "user", userID, "err", err)
+			return nil, err
+		}
+	}
+
 	reasonCounter := newLabelSetReasonCounters()
 
 	// Keep track of some stats which are tracked only if the samples will be
@@ -1235,253 +1275,186 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 		perLabelSetSeriesLimitCount   = 0
 		perMetricSeriesLimitCount     = 0
 		discardedNativeHistogramCount = 0
-
-		updateFirstPartial = func(errFn func() error) {
-			if firstPartialErr == nil {
-				firstPartialErr = errFn()
-			}
-		}
-
-		handleAppendFailure = func(err error, timestampMs int64, lbls []cortexpb.LabelAdapter, copiedLabels labels.Labels, matchedLabelSetLimits []validation.LimitsPerLabelSet) (rollback bool) {
-			// Check if the error is a soft error we can proceed on. If so, we keep track
-			// of it, so that we can return it back to the distributor, which will return a
-			// 400 error to the client. The client (Prometheus) will not retry on 400, and
-			// we actually ingested all samples which haven't failed.
-			switch cause := errors.Cause(err); {
-			case errors.Is(cause, storage.ErrOutOfBounds):
-				sampleOutOfBoundsCount++
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, storage.ErrOutOfOrderSample):
-				sampleOutOfOrderCount++
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, storage.ErrDuplicateSampleForTimestamp):
-				newValueForTimestampCount++
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, storage.ErrTooOldSample):
-				sampleTooOldCount++
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, errMaxSeriesPerUserLimitExceeded):
-				perUserSeriesLimitCount++
-				updateFirstPartial(func() error {
-					return makeLimitError(perUserSeriesLimit, i.limiter.FormatError(userID, cause, copiedLabels))
-				})
-
-			case errors.Is(cause, errMaxSeriesPerMetricLimitExceeded):
-				perMetricSeriesLimitCount++
-				updateFirstPartial(func() error {
-					return makeMetricLimitError(perMetricSeriesLimit, copiedLabels, i.limiter.FormatError(userID, cause, copiedLabels))
-				})
-
-			case errors.As(cause, &errMaxSeriesPerLabelSetLimitExceeded{}):
-				perLabelSetSeriesLimitCount++
-				// We only track per labelset discarded samples for throttling by labelset limit.
-				reasonCounter.increment(matchedLabelSetLimits, perLabelsetSeriesLimit)
-				updateFirstPartial(func() error {
-					return makeMetricLimitError(perLabelsetSeriesLimit, copiedLabels, i.limiter.FormatError(userID, cause, copiedLabels))
-				})
-
-			case errors.Is(cause, histogram.ErrHistogramSpanNegativeOffset):
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, histogram.ErrHistogramSpansBucketsMismatch):
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, histogram.ErrHistogramNegativeBucketCount):
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, histogram.ErrHistogramCountNotBigEnough):
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, histogram.ErrHistogramCountMismatch):
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			case errors.Is(cause, storage.ErrOOONativeHistogramsDisabled):
-				updateFirstPartial(func() error { return wrappedTSDBIngestErr(err, model.Time(timestampMs), lbls) })
-
-			default:
-				rollback = true
-			}
-			return
-		}
 	)
 
-	// Walk the samples, appending them to the users database
-	app := db.Appender(ctx).(extendedAppender)
-	var newSeries []labels.Labels
-
 	for _, ts := range req.Timeseries {
-		// The labels must be sorted (in our case, it's guaranteed a write request
-		// has sorted labels once hit the ingester).
-
-		// Look up a reference for this series.
-		tsLabels := cortexpb.FromLabelAdaptersToLabels(ts.Labels)
-		if i.isLabelSetOutOfOrder(tsLabels) {
-			i.metrics.oooLabelsTotal.WithLabelValues(userID).Inc()
-			return nil, wrapWithUser(errors.Errorf("out-of-order label set found when push: %s", tsLabels), userID)
-		}
-		tsLabelsHash := tsLabels.Hash()
-		ref, copiedLabels := app.GetRef(tsLabels, tsLabelsHash)
-
-		// To find out if any sample was added to this series, we keep old value.
-		oldSucceededSamplesCount := succeededSamplesCount
-		// To find out if any histogram was added to this series, we keep old value.
-		oldSucceededHistogramsCount := succeededHistogramsCount
-
-		// Copied labels will be empty if ref is 0.
-		if ref == 0 {
-			// Copy the label set because both TSDB and the active series tracker may retain it.
-			copiedLabels = cortexpb.FromLabelAdaptersToLabelsWithCopy(ts.Labels)
-		}
-		matchedLabelSetLimits := i.limiter.limitsPerLabelSets(userID, copiedLabels)
-
-		for _, s := range ts.Samples {
-			var err error
-
-			// If the cached reference exists, we try to use it.
-			if ref != 0 {
-				if _, err = app.Append(ref, copiedLabels, s.TimestampMs, s.Value); err == nil {
-					succeededSamplesCount++
-					continue
-				}
-
-			} else {
-				// Retain the reference in case there are multiple samples for the series.
-				if ref, err = app.Append(0, copiedLabels, s.TimestampMs, s.Value); err == nil {
-					// Keep track of what series needs to be expired on the postings cache
-					if db.postingCache != nil {
-						newSeries = append(newSeries, copiedLabels)
-					}
-					succeededSamplesCount++
-					continue
-				}
-			}
-
-			failedSamplesCount++
-
-			if rollback := handleAppendFailure(err, s.TimestampMs, ts.Labels, copiedLabels, matchedLabelSetLimits); !rollback {
-				continue
-			}
-			// The error looks an issue on our side, so we should rollback
-			if rollbackErr := app.Rollback(); rollbackErr != nil {
-				level.Warn(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to rollback on error", "user", userID, "err", rollbackErr)
-			}
-
-			return nil, wrapWithUser(err, userID)
-		}
-
-		if i.limits.EnableNativeHistograms(userID) {
-			for _, hp := range ts.Histograms {
-				var (
-					err error
-					h   *histogram.Histogram
-					fh  *histogram.FloatHistogram
-				)
-
-				if hp.GetCountFloat() > 0 {
-					fh = cortexpb.FloatHistogramProtoToFloatHistogram(hp)
-				} else {
-					h = cortexpb.HistogramProtoToHistogram(hp)
-				}
-
-				if ref != 0 {
-					if _, err = app.AppendHistogram(ref, copiedLabels, hp.TimestampMs, h, fh); err == nil {
-						succeededHistogramsCount++
-						continue
-					}
-				} else {
-					// Copy the label set because both TSDB and the active series tracker may retain it.
-					copiedLabels = cortexpb.FromLabelAdaptersToLabelsWithCopy(ts.Labels)
-					if ref, err = app.AppendHistogram(0, copiedLabels, hp.TimestampMs, h, fh); err == nil {
-						// Keep track of what series needs to be expired on the postings cache
-						if db.postingCache != nil {
-							newSeries = append(newSeries, copiedLabels)
-						}
-						succeededHistogramsCount++
-						continue
-					}
-				}
-
-				failedHistogramsCount++
-
-				if rollback := handleAppendFailure(err, hp.TimestampMs, ts.Labels, copiedLabels, matchedLabelSetLimits); !rollback {
-					continue
-				}
-				// The error looks an issue on our side, so we should rollback
-				if rollbackErr := app.Rollback(); rollbackErr != nil {
-					level.Warn(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to rollback on error", "user", userID, "err", rollbackErr)
-				}
-				return nil, wrapWithUser(err, userID)
-			}
-		} else {
-			discardedNativeHistogramCount += len(ts.Histograms)
-		}
-
-		isNHAppended := succeededHistogramsCount > oldSucceededHistogramsCount
-		shouldUpdateSeries := (succeededSamplesCount > oldSucceededSamplesCount) || isNHAppended
-		if i.cfg.ActiveSeriesMetricsEnabled && shouldUpdateSeries {
-			db.activeSeries.UpdateSeries(tsLabels, tsLabelsHash, startAppend, isNHAppended, func(l labels.Labels) labels.Labels {
-				// we must already have copied the labels if succeededSamplesCount or succeededHistogramsCount has been incremented.
-				return copiedLabels
-			})
-		}
-
-		maxExemplarsForUser := i.getMaxExemplars(userID)
-		if maxExemplarsForUser > 0 {
-			// app.AppendExemplar currently doesn't create the series, it must
-			// already exist.  If it does not then drop.
-			if ref == 0 && len(ts.Exemplars) > 0 {
-				updateFirstPartial(func() error {
-					return wrappedTSDBIngestExemplarErr(errExemplarRef,
-						model.Time(ts.Exemplars[0].TimestampMs), ts.Labels, ts.Exemplars[0].Labels)
-				})
-				failedExemplarsCount += len(ts.Exemplars)
-			} else { // Note that else is explicit, rather than a continue in the above if, in case of additional logic post exemplar processing.
-				for _, ex := range ts.Exemplars {
-					e := exemplar.Exemplar{
-						Value:  ex.Value,
-						Ts:     ex.TimestampMs,
-						HasTs:  true,
-						Labels: cortexpb.FromLabelAdaptersToLabelsWithCopy(ex.Labels),
-					}
-
-					if _, err = app.AppendExemplar(ref, nil, e); err == nil {
-						succeededExemplarsCount++
-						continue
-					}
-
-					// Error adding exemplar
-					updateFirstPartial(func() error {
-						return wrappedTSDBIngestExemplarErr(err, model.Time(ex.TimestampMs), ts.Labels, ex.Labels)
-					})
-					failedExemplarsCount++
-				}
-			}
-		}
+		succeededSamplesCount += len(ts.Samples)
+		succeededHistogramsCount += len(ts.Histograms)
 	}
+
+	// Walk the samples, appending them to the users database
+	//app := db.Appender(ctx).(extendedAppender)
+	//var newSeries []labels.Labels
+
+	// for _, ts := range req.Timeseries {
+	// 	// The labels must be sorted (in our case, it's guaranteed a write request
+	// 	// has sorted labels once hit the ingester).
+
+	// 	// Look up a reference for this series.
+	// 	tsLabels := cortexpb.FromLabelAdaptersToLabels(ts.Labels)
+	// 	if i.isLabelSetOutOfOrder(tsLabels) {
+	// 		i.metrics.oooLabelsTotal.WithLabelValues(userID).Inc()
+	// 		return nil, wrapWithUser(errors.Errorf("out-of-order label set found when push: %s", tsLabels), userID)
+	// 	}
+	//tsLabelsHash := tsLabels.Hash()
+	//ref, copiedLabels := app.GetRef(tsLabels, tsLabelsHash)
+
+	//// To find out if any sample was added to this series, we keep old value.
+	//oldSucceededSamplesCount := succeededSamplesCount
+	//// To find out if any histogram was added to this series, we keep old value.
+	//oldSucceededHistogramsCount := succeededHistogramsCount
+
+	//// Copied labels will be empty if ref is 0.
+	//if ref == 0 {
+	//	// Copy the label set because both TSDB and the active series tracker may retain it.
+	//	copiedLabels = cortexpb.FromLabelAdaptersToLabelsWithCopy(ts.Labels)
+	//}
+	//matchedLabelSetLimits := i.limiter.limitsPerLabelSets(userID, copiedLabels)
+
+	//for _, s := range ts.Samples {
+	//	var err error
+
+	//// If the cached reference exists, we try to use it.
+	//if ref != 0 {
+	//	if _, err = app.Append(ref, copiedLabels, s.TimestampMs, s.Value); err == nil {
+	//		succeededSamplesCount++
+	//		continue
+	//	}
+	//
+	//} else {
+	//	// Retain the reference in case there are multiple samples for the series.
+	//	if ref, err = app.Append(0, copiedLabels, s.TimestampMs, s.Value); err == nil {
+	//		//// Keep track of what series needs to be expired on the postings cache
+	//		//if db.postingCache != nil {
+	//		//	newSeries = append(newSeries, copiedLabels)
+	//		//}
+	//		succeededSamplesCount++
+	//		continue
+	//	}
+	//}
+
+	//failedSamplesCount++
+
+	//if rollback := handleAppendFailure(err, s.TimestampMs, ts.Labels, copiedLabels, matchedLabelSetLimits); !rollback {
+	//	continue
+	//}
+	//// The error looks an issue on our side, so we should rollback
+	//if rollbackErr := app.Rollback(); rollbackErr != nil {
+	//	level.Warn(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to rollback on error", "user", userID, "err", rollbackErr)
+	//}
+
+	//	return nil, wrapWithUser(err, userID)
+	//}
+
+	//if i.limits.EnableNativeHistograms(userID) {
+	//	for _, hp := range ts.Histograms {
+	//		var (
+	//			err error
+	//			h   *histogram.Histogram
+	//			fh  *histogram.FloatHistogram
+	//		)
+	//
+	//		if hp.GetCountFloat() > 0 {
+	//			fh = cortexpb.FloatHistogramProtoToFloatHistogram(hp)
+	//		} else {
+	//			h = cortexpb.HistogramProtoToHistogram(hp)
+	//		}
+	//
+	//		if ref != 0 {
+	//			if _, err = app.AppendHistogram(ref, copiedLabels, hp.TimestampMs, h, fh); err == nil {
+	//				succeededHistogramsCount++
+	//				continue
+	//			}
+	//		} else {
+	//			// Copy the label set because both TSDB and the active series tracker may retain it.
+	//			copiedLabels = cortexpb.FromLabelAdaptersToLabelsWithCopy(ts.Labels)
+	//			if ref, err = app.AppendHistogram(0, copiedLabels, hp.TimestampMs, h, fh); err == nil {
+	//				// Keep track of what series needs to be expired on the postings cache
+	//				if db.postingCache != nil {
+	//					newSeries = append(newSeries, copiedLabels)
+	//				}
+	//				succeededHistogramsCount++
+	//				continue
+	//			}
+	//		}
+	//
+	//		failedHistogramsCount++
+	//
+	//		if rollback := handleAppendFailure(err, hp.TimestampMs, ts.Labels, copiedLabels, matchedLabelSetLimits); !rollback {
+	//			continue
+	//		}
+	//		// The error looks an issue on our side, so we should rollback
+	//		if rollbackErr := app.Rollback(); rollbackErr != nil {
+	//			level.Warn(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to rollback on error", "user", userID, "err", rollbackErr)
+	//		}
+	//		return nil, wrapWithUser(err, userID)
+	//	}
+	//} else {
+	//	discardedNativeHistogramCount += len(ts.Histograms)
+	//}
+	//
+	//isNHAppended := succeededHistogramsCount > oldSucceededHistogramsCount
+	//shouldUpdateSeries := (succeededSamplesCount > oldSucceededSamplesCount) || isNHAppended
+	//if i.cfg.ActiveSeriesMetricsEnabled && shouldUpdateSeries {
+	//	db.activeSeries.UpdateSeries(tsLabels, tsLabelsHash, startAppend, isNHAppended, func(l labels.Labels) labels.Labels {
+	//		// we must already have copied the labels if succeededSamplesCount or succeededHistogramsCount has been incremented.
+	//		return copiedLabels
+	//	})
+	//}
+	//
+	//maxExemplarsForUser := i.getMaxExemplars(userID)
+	//if maxExemplarsForUser > 0 {
+	//	// app.AppendExemplar currently doesn't create the series, it must
+	//	// already exist.  If it does not then drop.
+	//	if ref == 0 && len(ts.Exemplars) > 0 {
+	//		updateFirstPartial(func() error {
+	//			return wrappedTSDBIngestExemplarErr(errExemplarRef,
+	//				model.Time(ts.Exemplars[0].TimestampMs), ts.Labels, ts.Exemplars[0].Labels)
+	//		})
+	//		failedExemplarsCount += len(ts.Exemplars)
+	//	} else { // Note that else is explicit, rather than a continue in the above if, in case of additional logic post exemplar processing.
+	//		for _, ex := range ts.Exemplars {
+	//			e := exemplar.Exemplar{
+	//				Value:  ex.Value,
+	//				Ts:     ex.TimestampMs,
+	//				HasTs:  true,
+	//				Labels: cortexpb.FromLabelAdaptersToLabelsWithCopy(ex.Labels),
+	//			}
+	//
+	//			if _, err = app.AppendExemplar(ref, nil, e); err == nil {
+	//				succeededExemplarsCount++
+	//				continue
+	//			}
+	//
+	//			// Error adding exemplar
+	//			updateFirstPartial(func() error {
+	//				return wrappedTSDBIngestExemplarErr(err, model.Time(ex.TimestampMs), ts.Labels, ex.Labels)
+	//			})
+	//			failedExemplarsCount++
+	//		}
+	//	}
+	//}
+	// }
 
 	// At this point all samples have been added to the appender, so we can track the time it took.
 	i.TSDBState.appenderAddDuration.Observe(time.Since(startAppend).Seconds())
 
-	startCommit := time.Now()
-	if err := app.Commit(); err != nil {
-		return nil, wrapWithUser(err, userID)
-	}
+	//startCommit := time.Now()
+	//if err := app.Commit(); err != nil {
+	//	return nil, wrapWithUser(err, userID)
+	//}
 
 	// This is a workaround of https://github.com/prometheus/prometheus/pull/15579
 	// Calling expire here may result in the series names being expired multiple times,
 	// as there may be multiple Push operations concurrently for the same new timeseries.
-	// TODO: alanprot remove this when/if the PR is merged
-	if db.postingCache != nil {
-		for _, s := range newSeries {
-			db.postingCache.ExpireSeries(s)
-		}
-	}
+	//// TODO: alanprot remove this when/if the PR is merged
+	//if db.postingCache != nil {
+	//	for _, s := range newSeries {
+	//		db.postingCache.ExpireSeries(s)
+	//	}
+	//}
 
-	i.TSDBState.appenderCommitDuration.Observe(time.Since(startCommit).Seconds())
+	//i.TSDBState.appenderCommitDuration.Observe(time.Since(startCommit).Seconds())
 
 	// If only invalid samples or histograms are pushed, don't change "last update", as TSDB was not modified.
 	if succeededSamplesCount > 0 || succeededHistogramsCount > 0 {
@@ -1535,14 +1508,14 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 	// Distributor counts both samples, metadata and histograms, so for consistency ingester does the same.
 	i.ingestionRate.Add(int64(succeededSamplesCount + succeededHistogramsCount + ingestedMetadata))
 
-	switch req.Source {
-	case cortexpb.RULE:
-		db.ingestedRuleSamples.Add(int64(succeededSamplesCount + succeededHistogramsCount))
-	case cortexpb.API:
-		fallthrough
-	default:
-		db.ingestedAPISamples.Add(int64(succeededSamplesCount + succeededHistogramsCount))
-	}
+	//switch req.Source {
+	//case cortexpb.RULE:
+	//	db.ingestedRuleSamples.Add(int64(succeededSamplesCount + succeededHistogramsCount))
+	//case cortexpb.API:
+	//	fallthrough
+	//default:
+	//	db.ingestedAPISamples.Add(int64(succeededSamplesCount + succeededHistogramsCount))
+	//}
 
 	if firstPartialErr != nil {
 		code := http.StatusBadRequest
@@ -2493,7 +2466,9 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 
 		blockRetentionPeriod: i.cfg.BlocksStorageConfig.TSDB.Retention.Milliseconds(),
 		postingCache:         postingCache,
+		limiter:              i.limiter,
 	}
+	return userDB, nil
 
 	enableExemplars := false
 	maxExemplarsForUser := i.getMaxExemplars(userID)
@@ -2894,11 +2869,7 @@ func (i *Ingester) compactionLoop(ctx context.Context) error {
 	for ctx.Err() == nil {
 		select {
 		case <-ticker.C:
-			i.compactBlocks(ctx, false, nil)
-
-		case req := <-i.TSDBState.forceCompactTrigger:
-			i.compactBlocks(ctx, true, req.users)
-			close(req.callback) // Notify back.
+			continue
 
 		case <-ctx.Done():
 			return nil
@@ -2964,15 +2935,15 @@ func (i *Ingester) compactBlocks(ctx context.Context, force bool, allowed *util.
 }
 
 func (i *Ingester) closeAndDeleteIdleUserTSDBs(ctx context.Context) error {
-	for _, userID := range i.getTSDBUsers() {
-		if ctx.Err() != nil {
-			return nil
-		}
-
-		result := i.closeAndDeleteUserTSDBIfIdle(userID)
-
-		i.TSDBState.idleTsdbChecks.WithLabelValues(string(result)).Inc()
-	}
+	//for _, userID := range i.getTSDBUsers() {
+	//	if ctx.Err() != nil {
+	//		return nil
+	//	}
+	//
+	//	result := i.closeAndDeleteUserTSDBIfIdle(userID)
+	//
+	//	i.TSDBState.idleTsdbChecks.WithLabelValues(string(result)).Inc()
+	//}
 
 	return nil
 }
