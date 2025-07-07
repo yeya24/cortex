@@ -227,7 +227,7 @@ github.com/apache/arrow-go/v18/parquet/internal/utils
 github.com/apache/arrow-go/v18/parquet/metadata
 github.com/apache/arrow-go/v18/parquet/pqarrow
 github.com/apache/arrow-go/v18/parquet/schema
-# github.com/apache/iceberg-go v0.3.0 => github.com/yeya24/iceberg-go v0.0.0-20250625193123-790e30fd1717
+# github.com/apache/iceberg-go v0.3.0 => github.com/yeya24/iceberg-go v0.0.0-20250701065550-287247e6eae3
 ## explicit; go 1.24
 github.com/apache/iceberg-go
 github.com/apache/iceberg-go/catalog
@@ -1124,7 +1124,16 @@ github.com/planetscale/vtprotobuf/types/known/wrapperspb
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
-# github.com/prometheus-community/parquet-common v0.0.0-20250610002942-dfd72bae1309
+# github.com/polarsignals/frostdb v0.0.0-20250527092429-11b0ba9c71ea
+## explicit; go 1.24.1
+github.com/polarsignals/frostdb/dynparquet
+github.com/polarsignals/frostdb/gen/proto/go/frostdb/schema/v1alpha1
+github.com/polarsignals/frostdb/gen/proto/go/frostdb/schema/v1alpha2
+github.com/polarsignals/frostdb/internal/records
+github.com/polarsignals/frostdb/pqarrow/arrowutils
+github.com/polarsignals/frostdb/pqarrow/builder
+github.com/polarsignals/frostdb/samples
+# github.com/prometheus-community/parquet-common v0.0.0-20250610002942-dfd72bae1309 => github.com/yeya24/parquet-common v0.0.0-20250702050557-e1e7279b68dc
 ## explicit; go 1.23.4
 github.com/prometheus-community/parquet-common/convert
 github.com/prometheus-community/parquet-common/schema
@@ -2208,4 +2217,5 @@ k8s.io/utils/clock
 # github.com/thanos-io/objstore => github.com/thanos-io/objstore v0.0.0-20241111205755-d1dd89d41f97
 # github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.302.1
 # github.com/prometheus/common => github.com/prometheus/common v0.62.1-0.20250120132612-df14882cbf97
-# github.com/apache/iceberg-go => github.com/yeya24/iceberg-go v0.0.0-20250625193123-790e30fd1717
+# github.com/apache/iceberg-go => github.com/yeya24/iceberg-go v0.0.0-20250701065550-287247e6eae3
+# github.com/prometheus-community/parquet-common => github.com/yeya24/parquet-common v0.0.0-20250702050557-e1e7279b68dc

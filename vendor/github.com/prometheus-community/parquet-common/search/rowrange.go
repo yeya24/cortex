@@ -37,6 +37,14 @@ func (rr RowRange) Overlaps(o RowRange) bool {
 	return rr.from < endB && o.from < endA
 }
 
+func (rr RowRange) From() int64 {
+	return rr.from
+}
+
+func (rr RowRange) Count() int64 {
+	return rr.count
+}
+
 // Intersection returns the intersection of rr and o. Both are assumed to be overlapping
 func (rr RowRange) Intersection(o RowRange) RowRange {
 	os, oe := max(rr.from, o.from), min(rr.from+rr.count, o.from+o.count)

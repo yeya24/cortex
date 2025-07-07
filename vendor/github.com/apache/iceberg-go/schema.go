@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,6 +77,36 @@ func NewSchemaWithIdentifiers(id int, identifierIDs []int, fields ...NestedField
 	s.init()
 
 	return s
+}
+
+// Merge combines two schemas into a single schema. It returns a schema with an ID that is one greater thatn the ID of the first schema.
+// If the two schemas have the same fields, the first schema is returned.
+func (s *Schema) Merge(other *Schema) (*Schema, error) {
+	if s.Equals(other) {
+		return s, nil
+	}
+
+	if other == nil {
+		return s, nil
+	}
+
+	final := s.fields
+	for _, field := range other.fields {
+		if _, ok := s.FindFieldByName(field.Name); !ok {
+			final = append(final, field)
+		}
+	}
+
+	// Sort the schema by name
+	sort.Slice(final, func(i, j int) bool {
+		return final[i].Name < final[j].Name
+	})
+
+	for i := range final {
+		final[i].ID = i
+	}
+
+	return NewSchemaWithIdentifiers(s.ID+1, []int{}, final...), nil
 }
 
 func (s *Schema) init() {

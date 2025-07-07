@@ -1,6 +1,8 @@
 module github.com/cortexproject/cortex
 
-go 1.24.0
+go 1.24.1
+
+toolchain go1.24.4
 
 require (
 	github.com/Masterminds/squirrel v1.5.4
@@ -85,6 +87,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 	github.com/parquet-go/parquet-go v0.25.1
+	github.com/polarsignals/frostdb v0.0.0-20250527092429-11b0ba9c71ea
 	github.com/prometheus-community/parquet-common v0.0.0-20250610002942-dfd72bae1309
 	github.com/prometheus/procfs v0.16.1
 	github.com/sercand/kuberesolver/v5 v5.1.1
@@ -358,4 +361,6 @@ replace github.com/prometheus/prometheus => github.com/prometheus/prometheus v0.
 
 replace github.com/prometheus/common => github.com/prometheus/common v0.62.1-0.20250120132612-df14882cbf97
 
-replace github.com/apache/iceberg-go => github.com/yeya24/iceberg-go v0.0.0-20250625193123-790e30fd1717
+replace github.com/apache/iceberg-go => github.com/yeya24/iceberg-go v0.0.0-20250701065550-287247e6eae3
+
+replace github.com/prometheus-community/parquet-common => github.com/yeya24/parquet-common v0.0.0-20250702050557-e1e7279b68dc

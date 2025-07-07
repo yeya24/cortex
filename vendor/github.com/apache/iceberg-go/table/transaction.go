@@ -134,6 +134,10 @@ func (t *Transaction) updateSnapshot(fs io.IO, props iceberg.Properties) snapsho
 	}
 }
 
+func (t *Transaction) GetMetaBuilder() *MetadataBuilder {
+	return t.meta
+}
+
 func (t *Transaction) SetProperties(props iceberg.Properties) error {
 	if len(props) > 0 {
 		return t.apply([]Update{NewSetPropertiesUpdate(props)}, nil)
@@ -332,6 +336,26 @@ func (t *Transaction) AddFiles(ctx context.Context, files []string, snapshotProp
 		if err != nil {
 			return err
 		}
+		updater.appendDataFile(df)
+	}
+
+	updates, reqs, err := updater.commit()
+	if err != nil {
+		return err
+	}
+
+	return t.apply(updates, reqs)
+}
+
+func (t *Transaction) AddDataFiles(ctx context.Context, dataFiles []iceberg.DataFile, snapshotProps iceberg.Properties) error {
+	fs, err := t.tbl.fsF(ctx)
+	if err != nil {
+		return err
+	}
+
+	updater := t.updateSnapshot(fs, snapshotProps).fastAppend()
+
+	for _, df := range dataFiles {
 		updater.appendDataFile(df)
 	}
 

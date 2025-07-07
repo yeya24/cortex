@@ -1,10 +1,14 @@
 package iceberg
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/storage/frostdb"
+	"github.com/prometheus-community/parquet-common/util"
+	"github.com/prometheus/prometheus/model/labels"
 	"io"
 	"math/rand"
 	"net/url"
@@ -206,11 +210,12 @@ func (ig *IcebergStore) DropTable(ctx context.Context, tableName string) error {
 	return ig.Catalog.DropTable(ctx, identifier)
 }
 
-func (ig *IcebergStore) scan(ctx context.Context, tableName string, mint, maxt int64, metricName string) ([]*ParquetShard, error) {
+func (ig *IcebergStore) scan(ctx context.Context, tableName string, mint, maxt int64, matchers []*labels.Matcher) ([]*ParquetShard, error) {
 	t, err := ig.Catalog.LoadTable(ctx, table.Identifier{ig.Namespace, tableName}, iceberg.Properties{})
 	if err != nil {
 		return nil, err
 	}
+	schema := t.Schema()
 
 	snapshot := t.CurrentSnapshot()
 	if snapshot == nil {
@@ -258,7 +263,7 @@ func (ig *IcebergStore) scan(ctx context.Context, tableName string, mint, maxt i
 				entry := entry // Capture for closure
 				entryG.Go(func() error {
 					// Check if the data file has timestamps within the query range
-					if !ig.dataFileMaybeUseful(entry.DataFile(), mint, maxt, metricName) {
+					if !ig.dataFileMaybeUseful(schema, entry.DataFile(), mint, maxt, matchers) {
 						return nil
 					}
 
@@ -328,13 +333,16 @@ func (ig *IcebergStore) scan(ctx context.Context, tableName string, mint, maxt i
 }
 
 // dataFileMaybeUseful checks if the data file contains timestamps within the specified range
-func (ig *IcebergStore) dataFileMaybeUseful(dataFile iceberg.DataFile, mint, maxt int64, metricName string) bool {
+func (ig *IcebergStore) dataFileMaybeUseful(schema *iceberg.Schema, dataFile iceberg.DataFile, mint, maxt int64, matchers []*labels.Matcher) bool {
 	// Get the lower and upper bounds from the data file
 	lowerBounds := dataFile.LowerBoundValues()
 	upperBounds := dataFile.UpperBoundValues()
 
-	metricNameColID := 1
-	timestampColID := 2
+	timeField, ok := schema.FindFieldByName(frostdb.ColumnTimestamp)
+	if !ok {
+		return true
+	}
+	timestampColID := timeField.ID
 
 	// Check if the timestamp range overlaps with the query range
 	if lowerBounds != nil {
@@ -349,11 +357,17 @@ func (ig *IcebergStore) dataFileMaybeUseful(dataFile iceberg.DataFile, mint, max
 			}
 		}
 
-		if metricName != "" {
-			if lowerBoundBytes, exists := lowerBounds[metricNameColID]; exists && len(lowerBoundBytes) > 0 {
-				lowerBound := string(lowerBoundBytes)
-				if lowerBound > metricName {
+		for _, matcher := range matchers {
+			if matcher.Type == labels.MatchEqual {
+				field, ok := schema.FindFieldByName(LabelToColumn(matcher.Name))
+				if !ok && matcher.Value != "" {
 					return false
+				}
+				if lowerBoundBytes, exists := lowerBounds[field.ID]; exists && len(lowerBoundBytes) > 0 {
+					val := util.YoloString(lowerBoundBytes)
+					if val > matcher.Value {
+						return false
+					}
 				}
 			}
 		}
@@ -371,11 +385,17 @@ func (ig *IcebergStore) dataFileMaybeUseful(dataFile iceberg.DataFile, mint, max
 			}
 		}
 
-		if metricName != "" {
-			if upperBoundBytes, exists := upperBounds[metricNameColID]; exists && len(upperBoundBytes) > 0 {
-				upperBound := string(upperBoundBytes)
-				if upperBound < metricName {
+		for _, matcher := range matchers {
+			if matcher.Type == labels.MatchEqual {
+				field, ok := schema.FindFieldByName(LabelToColumn(matcher.Name))
+				if !ok && matcher.Value != "" {
 					return false
+				}
+				if upperBoundBytes, exists := upperBounds[field.ID]; exists && len(upperBoundBytes) > 0 {
+					val := util.YoloString(upperBoundBytes)
+					if val < matcher.Value {
+						return false
+					}
 				}
 			}
 		}
@@ -444,6 +464,9 @@ func (ig *IcebergStore) loadFileSystem(ctx context.Context, metadataLocation str
 
 // Upload uploads parquet data to the specified table
 func (ig *IcebergStore) Upload(ctx context.Context, tableName string, parquetData io.Reader) error {
+	b := &bytes.Buffer{}
+	rdr := io.TeeReader(parquetData, b) // Read file into memory while uploading
+
 	// Try to load the table first
 	t, err := ig.Catalog.LoadTable(ctx, table.Identifier{ig.Namespace, tableName}, iceberg.Properties{})
 	if err != nil {
@@ -451,11 +474,12 @@ func (ig *IcebergStore) Upload(ctx context.Context, tableName string, parquetDat
 		level.Info(log.NewNopLogger()).Log("msg", "table does not exist, creating new table", "table", tableName)
 
 		// Create the table with timeseries schema
-		t, err = ig.CreateTable(ctx, tableName, ig.getTimeseriesSchema(), nil)
+		t, err = ig.CreateTable(ctx, tableName, iceberg.NewSchema(0), nil)
 		if err != nil {
 			return fmt.Errorf("failed to create table %s: %w", tableName, err)
 		}
 	}
+	schema := t.Metadata().CurrentSchema()
 
 	// Get or create bucket for this table
 	bkt, err := ig.getOrCreateBucket(ctx, tableName, t.Location())
@@ -471,15 +495,31 @@ func (ig *IcebergStore) Upload(ctx context.Context, tableName string, parquetDat
 	filePath := locProvider.NewDataLocation(fmt.Sprintf("00000-%d-%s.%s", ulid.Now(), ulid.MustNew(ulid.Now(), nil), "parquet"))
 
 	// Upload the parquet file to the bucket
-	if err := bkt.Upload(ctx, filePath, parquetData); err != nil {
+	if err := bkt.Upload(ctx, filePath, rdr); err != nil {
 		return fmt.Errorf("failed to upload parquet file to bucket: %w", err)
+	}
+
+	df, latestSchema, err := iceberg.DataFileFromParquet(filePath, int64(b.Len()), schema, bytes.NewReader(b.Bytes()))
+	if err != nil {
+		return fmt.Errorf("failed to load parquet file from bucket: %w", err)
 	}
 
 	// Create a new transaction to add the file to the table
 	txn := t.NewTransaction()
+	mb := txn.GetMetaBuilder()
+	if !schema.Equals(latestSchema) {
+		mb, err = mb.AddSchema(latestSchema, latestSchema.HighestFieldID(), true)
+		if err != nil {
+			return fmt.Errorf("failed to add schema to meta builder: %w", err)
+		}
+		mb, err = mb.SetCurrentSchemaID(-1)
+		if err != nil {
+			return fmt.Errorf("failed to set current schema id: %w", err)
+		}
+	}
 
 	// Add the file to the transaction - reference the file in the bucket
-	err = txn.AddFiles(ctx, []string{filePath}, nil, true)
+	err = txn.AddDataFiles(ctx, []iceberg.DataFile{df}, nil)
 	if err != nil {
 		return fmt.Errorf("failed to add files to transaction: %w", err)
 	}

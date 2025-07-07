@@ -125,14 +125,14 @@ func NewParquetQueryable(
 		return nil, err
 	}
 
-	cache, err := newCache[*parquet_storage.ParquetShard]("parquet-shards", config.ParquetQueryableShardCacheSize, newCacheMetrics(reg))
+	cache, err := newCache[parquet_storage.ParquetShard]("parquet-shards", config.ParquetQueryableShardCacheSize, newCacheMetrics(reg))
 	if err != nil {
 		return nil, err
 	}
 
 	cDecoder := schema.NewPrometheusParquetChunksDecoder(chunkenc.NewPool())
 
-	parquetQueryable, err := search.NewParquetQueryable(cDecoder, func(ctx context.Context, mint, maxt int64) ([]*parquet_storage.ParquetShard, error) {
+	parquetQueryable, err := search.NewParquetQueryable(cDecoder, func(ctx context.Context, mint, maxt int64) ([]parquet_storage.ParquetShard, error) {
 		userID, err := tenant.TenantID(ctx)
 		if err != nil {
 			return nil, err
@@ -144,12 +144,13 @@ func NewParquetQueryable(
 		}
 		userBkt := bucket.NewUserBucketClient(userID, bucketClient, limits)
 
-		shards := make([]*parquet_storage.ParquetShard, len(blocks))
+		shards := make([]parquet_storage.ParquetShard, len(blocks))
 		errGroup := &errgroup.Group{}
 
 		span, ctx := opentracing.StartSpanFromContext(ctx, "parquetQuerierWithFallback.OpenShards")
 		defer span.Finish()
 
+		opener := parquet_storage.NewParquetBucketOpener(userBkt)
 		for i, block := range blocks {
 			errGroup.Go(func() error {
 				cacheKey := fmt.Sprintf("%v-%v", userID, block.ID)
@@ -157,9 +158,10 @@ func NewParquetQueryable(
 				if shard == nil {
 					// we always only have 1 shard - shard 0
 					// Use context.Background() here as the file can be cached and live after the request ends.
-					shard, err = parquet_storage.OpenParquetShard(context.WithoutCancel(ctx),
-						userBkt,
+					shard, err = parquet_storage.NewParquetShardOpener(context.WithoutCancel(ctx),
 						block.ID.String(),
+						opener,
+						opener,
 						0,
 						parquet_storage.WithFileOptions(
 							parquet.SkipMagicBytes(true),
