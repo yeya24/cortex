@@ -448,6 +448,10 @@ func TestSchedulerMetrics(t *testing.T) {
 	`), "cortex_query_scheduler_queue_length", "cortex_request_queue_requests_total"))
 }
 
+func TestSchedulerLogicalPlan(t *testing.T) {
+	
+}
+
 func initFrontendLoop(t *testing.T, client schedulerpb.SchedulerForFrontendClient, frontendAddr string) schedulerpb.SchedulerForFrontend_FrontendLoopClient {
 	loop, err := client.FrontendLoop(context.Background())
 	require.NoError(t, err)

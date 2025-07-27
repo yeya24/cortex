@@ -139,6 +139,10 @@ type SchedulerToQuerier struct {
 	// Whether query statistics tracking should be enabled. The response will include
 	// statistics only when this option is enabled.
 	StatsEnabled bool `protobuf:"varint,5,opt,name=statsEnabled,proto3" json:"statsEnabled,omitempty"`
+
+	FragmentID uint64 `protobuf:"varint,6,opt,name=fragmentID,proto3" json:"fragmentID,omitempty"`
+	ChildFragmentID []uint64 `protobuf:"varint,7,rep,name=childFragmentID,proto3" json:"childFragmentID,omitempty"`
+	ChildAddr []string `protobuf:"bytes,8,rep,name=childAddr,proto3" json:"childAddr,omitempty"`
 }
 
 func (m *SchedulerToQuerier) Reset()      { *m = SchedulerToQuerier{} }
