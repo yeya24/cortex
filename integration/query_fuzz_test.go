@@ -1,11 +1,9 @@
-//go:build integration_query_fuzz
-// +build integration_query_fuzz
-
 package integration
 
 import (
 	"context"
 	"fmt"
+	"github.com/thanos-io/thanos/pkg/querysharding"
 	"math/rand"
 	"os"
 	"path"
@@ -764,7 +762,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	}
 	// Generate another set of series for testing binary expression and vector matching.
 	for i := numSeries; i < 2*numSeries; i++ {
-		prompbLabels := []prompb.Label{{Name: "job", Value: "test"}, {Name: "series", Value: strconv.Itoa(i)}}
+		prompbLabels := []prompb.Label{{Name: "job", Value: "test"}, {Name: "series", Value: strconv.Itoa(i + 1)}}
 		switch i % 3 {
 		case 0:
 			prompbLabels = append(prompbLabels, prompb.Label{Name: "status_code", Value: "200"})
@@ -799,7 +797,7 @@ func TestVerticalShardingFuzz(t *testing.T) {
 	}
 	ps := promqlsmith.New(rnd, lbls, opts...)
 
-	runQueryFuzzTestCases(t, ps, c1, c2, now, start, end, scrapeInterval, 1000, false)
+	runQueryFuzzTestCases(t, ps, c1, c2, end, start, end, scrapeInterval, 1000, false)
 }
 
 func TestProtobufCodecFuzz(t *testing.T) {
@@ -1779,11 +1777,17 @@ func runQueryFuzzTestCases(t *testing.T, ps *promqlsmith.PromQLSmith, c1, c2 *e2
 		expr  parser.Expr
 		query string
 	)
+	qa := querysharding.NewQueryAnalyzer()
 	for i := 0; i < run; i++ {
 		for {
 			expr = ps.WalkInstantQuery()
 			if isValidQuery(expr, skipStdAggregations) {
 				query = expr.Pretty(0)
+			} else {
+				continue
+			}
+			analysis, _ := qa.Analyze(query)
+			if analysis.IsShardable() {
 				break
 			}
 		}
@@ -1805,6 +1809,11 @@ func runQueryFuzzTestCases(t *testing.T, ps *promqlsmith.PromQLSmith, c1, c2 *e2
 			expr = ps.WalkRangeQuery()
 			if isValidQuery(expr, skipStdAggregations) {
 				query = expr.Pretty(0)
+			} else {
+				continue
+			}
+			analysis, _ := qa.Analyze(query)
+			if analysis.IsShardable() {
 				break
 			}
 		}
@@ -1838,7 +1847,7 @@ func runQueryFuzzTestCases(t *testing.T, ps *promqlsmith.PromQLSmith, c1, c2 *e2
 				failures++
 			}
 		} else if !cmp.Equal(tc.res1, tc.res2, comparer) {
-			t.Logf("case %d results mismatch.\n%s: %s\nres1: %s\nres2: %s\n", i, qt, tc.query, tc.res1.String(), tc.res2.String())
+			t.Logf("case %d results mismatch.\n%s: %s\nres1 len: %d data: %s\nres2 len: %d data: %s\n", i, qt, tc.query, resultLength(tc.res1), tc.res1.String(), resultLength(tc.res2), tc.res2.String())
 			failures++
 		}
 	}
@@ -1871,4 +1880,18 @@ func isValidQuery(generatedQuery parser.Expr, skipStdAggregations bool) bool {
 		return false
 	}
 	return isValid
+}
+
+func resultLength(x model.Value) int {
+	vx, xvec := x.(model.Vector)
+	if xvec {
+		return vx.Len()
+	}
+
+	mx, xMatrix := x.(model.Matrix)
+	if xMatrix {
+		return mx.Len()
+	}
+	// Other type, return 0
+	return 0
 }

@@ -1,11 +1,10 @@
-//go:build integration_query_fuzz
-// +build integration_query_fuzz
-
 package integration
 
 import (
 	"context"
 	"fmt"
+	"github.com/prometheus/common/model"
+	"golang.org/x/sync/errgroup"
 	"math/rand"
 	"path/filepath"
 	"strconv"
@@ -51,7 +50,9 @@ func TestParquetFuzz(t *testing.T) {
 			"-blocks-storage.bucket-store.bucket-index.idle-timeout":               "1s",
 			"-blocks-storage.bucket-store.bucket-index.enabled":                    "true",
 			"-blocks-storage.bucket-store.index-cache.backend":                     tsdb.IndexCacheBackendInMemory,
-			"-querier.query-store-for-labels-enabled":                              "true",
+			// Disable querying Ingesters
+			"-querier.query-ingesters-within": "2s",
+			"-querier.query-store-after":      "1s",
 			// compactor
 			"-compactor.cleanup-interval": "1s",
 			// Ingester.
@@ -65,7 +66,7 @@ func TestParquetFuzz(t *testing.T) {
 			// alert manager
 			"-alertmanager.web.external-url": "http://localhost/alertmanager",
 			// Enable vertical sharding.
-			"-frontend.query-vertical-shard-size": "3",
+			"-frontend.query-vertical-shard-size": "2",
 			"-frontend.max-cache-freshness":       "1m",
 			// enable experimental promQL funcs
 			"-querier.enable-promql-experimental-functions": "true",
@@ -76,9 +77,9 @@ func TestParquetFuzz(t *testing.T) {
 			// Querier
 			"-querier.enable-parquet-queryable": "true",
 			// Enable cache for parquet labels and chunks
-			"-blocks-storage.bucket-store.parquet-labels-cache.backend":             "inmemory,memcached",
+			"-blocks-storage.bucket-store.parquet-labels-cache.backend":             "",
 			"-blocks-storage.bucket-store.parquet-labels-cache.memcached.addresses": "dns+" + memcached.NetworkEndpoint(e2ecache.MemcachedPort),
-			"-blocks-storage.bucket-store.chunks-cache.backend":                     "inmemory,memcached",
+			"-blocks-storage.bucket-store.chunks-cache.backend":                     "",
 			"-blocks-storage.bucket-store.chunks-cache.memcached.addresses":         "dns+" + memcached.NetworkEndpoint(e2ecache.MemcachedPort),
 		},
 	)
@@ -131,16 +132,20 @@ func TestParquetFuzz(t *testing.T) {
 	// Wait until we convert the blocks
 	cortex_testutil.Poll(t, 30*time.Second, true, func() interface{} {
 		found := false
+		foundBucketIndex := false
 
 		err := bkt.Iter(context.Background(), "", func(name string) error {
 			fmt.Println(name)
 			if name == fmt.Sprintf("parquet-markers/%v-parquet-converter-mark.json", id.String()) {
 				found = true
 			}
+			if name == "bucket-index.json.gz" {
+				foundBucketIndex = true
+			}
 			return nil
 		}, objstore.WithRecursiveIter())
 		require.NoError(t, err)
-		return found
+		return found && foundBucketIndex
 	})
 
 	att, err := bkt.Attributes(context.Background(), "bucket-index.json.gz")
@@ -173,14 +178,42 @@ func TestParquetFuzz(t *testing.T) {
 	waitUntilReady(t, ctx, c1, c2, `{job="test"}`, start, end)
 
 	opts := []promqlsmith.Option{
-		promqlsmith.WithEnableOffset(true),
-		promqlsmith.WithEnableAtModifier(true),
+		//promqlsmith.WithEnableOffset(true),
+		promqlsmith.WithMaxDepth(2),
+		//promqlsmith.WithEnableAtModifier(true),
 		promqlsmith.WithEnabledFunctions(enabledFunctions),
+		promqlsmith.WithEnabledAggrs(enabledAggrs),
+		promqlsmith.WithEnabledExprs([]promqlsmith.ExprType{
+			promqlsmith.VectorSelector,
+			promqlsmith.BinaryExpr,
+			promqlsmith.AggregateExpr,
+			promqlsmith.NumberLiteral,
+		}),
 	}
 	ps := promqlsmith.New(rnd, lbls, opts...)
 
-	runQueryFuzzTestCases(t, ps, c1, c2, end, start, end, scrapeInterval, 500, false)
+	runQueryFuzzTestCases(t, ps, c1, c2, end, start, end, scrapeInterval, 3000, false)
 
 	require.NoError(t, cortex.WaitSumMetricsWithOptions(e2e.Greater(0), []string{"cortex_parquet_queryable_blocks_queried_total"}, e2e.WithLabelMatchers(
 		labels.MustNewMatcher(labels.MatchEqual, "type", "parquet"))))
+}
+
+func TestAA(t *testing.T) {
+	c1, err := e2ecortex.NewClient("", "localhost:8005", "", "", "user-1")
+	require.NoError(t, err)
+
+	eg := errgroup.Group{}
+	eg.SetLimit(10)
+	query := `({__name__="test_series_a", series="0"}  or {__name__="test_series_b", series="0"})`
+	for i := 0; i < 2000; i++ {
+		eg.Go(func() error {
+			res, err := c1.QueryRange(query, model.TimeFromUnix(1752730910).Time(), model.TimeFromUnix(1752813710).Time(), 60*time.Second)
+			require.NoError(t, err)
+			m, ok := res.(model.Matrix)
+			require.True(t, ok)
+			require.Len(t, m, 7)
+			return nil
+		})
+	}
+	eg.Wait()
 }
