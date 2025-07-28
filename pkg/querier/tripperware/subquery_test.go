@@ -74,8 +74,18 @@ func TestSubQueryStepSizeCheck(t *testing.T) {
 }
 
 func TestAAA(t *testing.T) {
-	qa := querysharding.NewQueryAnalyzer()
-	q := `tanh(({__name__="test_series_b"} / ignoring (status_code) {__name__="test_series_a"}))`
+	qa := NewDisableBinaryExpressionAnalyzer(querysharding.NewQueryAnalyzer())
+	//q := `tanh(({__name__="test_series_b"} / ignoring (status_code) {__name__="test_series_a"}))`
+	//q := `avg without () (({__name__="test_series_a"} == on (status_code) {__name__="test_series_b"}))`
+	q := `asin(
+          acosh(
+            (
+                -{__name__="test_series_a"} offset 1m11s
+              == bool
+                timestamp({__name__="test_series_b"} @ end() offset 4m22s)
+            )
+          )
+        )`
 	analysis, _ := qa.Analyze(q)
 	fmt.Println(analysis.IsShardable(), analysis.ShardBy(), analysis.ShardingLabels())
 }

@@ -2,6 +2,8 @@ package tripperware
 
 import (
 	"context"
+	"errors"
+	promqlparser "github.com/prometheus/prometheus/promql/parser"
 	"net/http"
 
 	"github.com/go-kit/log"
@@ -123,4 +125,44 @@ func VerticalShardSizeFromContext(ctx context.Context) (int, bool) {
 
 func InjectVerticalShardSizeToContext(ctx context.Context, verticalShardSize int) context.Context {
 	return context.WithValue(ctx, verticalShardsKey{}, verticalShardSize)
+}
+
+type disableBinaryExpressionAnalyzer struct {
+	analyzer querysharding.Analyzer
+}
+
+func NewDisableBinaryExpressionAnalyzer(analyzer querysharding.Analyzer) *disableBinaryExpressionAnalyzer {
+	return &disableBinaryExpressionAnalyzer{analyzer: analyzer}
+}
+
+func (d *disableBinaryExpressionAnalyzer) Analyze(query string) (querysharding.QueryAnalysis, error) {
+	analysis, err := d.analyzer.Analyze(query)
+	if err != nil || !analysis.IsShardable() {
+		return analysis, err
+	}
+
+	expr, _ := promqlparser.ParseExpr(query)
+	isShardable := true
+	promqlparser.Inspect(expr, func(node promqlparser.Node, nodes []promqlparser.Node) error {
+		switch n := node.(type) {
+		case *promqlparser.BinaryExpr:
+			// No vector matching means one operand is not vector. Skip it.
+			if n.VectorMatching == nil {
+				return nil
+			}
+			// Vector matching ignore will add MetricNameLabel as sharding label.
+			// This seems causing correctness issue for Parquet queryable.
+			// Mark this type of query not shardable.
+			if !n.VectorMatching.On {
+				isShardable = false
+				return errors.New("stop")
+			}
+		}
+		return nil
+	})
+	if !isShardable {
+		// Mark as not shardable.
+		return querysharding.QueryAnalysis{}, nil
+	}
+	return analysis, nil
 }
