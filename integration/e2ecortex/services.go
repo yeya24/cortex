@@ -28,7 +28,7 @@ func GetDefaultImage() string {
 		return os.Getenv("CORTEX_IMAGE")
 	}
 
-	return "yeya24/cortex:parquet-vertical-sharding-3a66554916-arm64"
+	return "yeya24/cortex:parquet-vertical-sharding-767f12ad37-arm64"
 }
 
 func NewDistributor(name string, store RingStore, address string, flags map[string]string, image string) *CortexService {

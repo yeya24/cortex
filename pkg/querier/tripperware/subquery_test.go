@@ -1,6 +1,8 @@
 package tripperware
 
 import (
+	"fmt"
+	"github.com/thanos-io/thanos/pkg/querysharding"
 	"net/http"
 	"testing"
 	"time"
@@ -69,4 +71,11 @@ func TestSubQueryStepSizeCheck(t *testing.T) {
 			require.Equal(t, tc.err, err)
 		})
 	}
+}
+
+func TestAAA(t *testing.T) {
+	qa := querysharding.NewQueryAnalyzer()
+	q := `tanh(({__name__="test_series_b"} / ignoring (status_code) {__name__="test_series_a"}))`
+	analysis, _ := qa.Analyze(q)
+	fmt.Println(analysis.IsShardable(), analysis.ShardBy(), analysis.ShardingLabels())
 }

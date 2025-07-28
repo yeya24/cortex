@@ -179,20 +179,15 @@ func TestParquetFuzz(t *testing.T) {
 
 	opts := []promqlsmith.Option{
 		//promqlsmith.WithEnableOffset(true),
-		promqlsmith.WithMaxDepth(2),
+		promqlsmith.WithMaxDepth(3),
 		//promqlsmith.WithEnableAtModifier(true),
 		promqlsmith.WithEnabledFunctions(enabledFunctions),
 		promqlsmith.WithEnabledAggrs(enabledAggrs),
-		promqlsmith.WithEnabledExprs([]promqlsmith.ExprType{
-			promqlsmith.VectorSelector,
-			promqlsmith.BinaryExpr,
-			promqlsmith.AggregateExpr,
-			promqlsmith.NumberLiteral,
-		}),
+		promqlsmith.WithEnableVectorMatching(true),
 	}
 	ps := promqlsmith.New(rnd, lbls, opts...)
 
-	runQueryFuzzTestCases(t, ps, c1, c2, end, start, end, scrapeInterval, 3000, false)
+	runQueryFuzzTestCases(t, ps, c1, c2, end, start, end, scrapeInterval, 5000, false)
 
 	require.NoError(t, cortex.WaitSumMetricsWithOptions(e2e.Greater(0), []string{"cortex_parquet_queryable_blocks_queried_total"}, e2e.WithLabelMatchers(
 		labels.MustNewMatcher(labels.MatchEqual, "type", "parquet"))))
