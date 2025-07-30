@@ -14,7 +14,10 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	promtest "github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
+	"github.com/thanos-io/promql-engine/logicalplan"
+	"github.com/thanos-io/promql-engine/query"
 	"github.com/uber/jaeger-client-go/config"
 	"github.com/weaveworks/common/httpgrpc"
 	"google.golang.org/grpc"
@@ -410,7 +413,6 @@ func TestSchedulerMetrics(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 
 	scheduler, frontendClient, _ := setupScheduler(t, reg)
-
 	frontendLoop := initFrontendLoop(t, frontendClient, "frontend-12345")
 	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
 		Type:        schedulerpb.ENQUEUE,
@@ -448,8 +450,95 @@ func TestSchedulerMetrics(t *testing.T) {
 	`), "cortex_query_scheduler_queue_length", "cortex_request_queue_requests_total"))
 }
 
-func TestSchedulerLogicalPlan(t *testing.T) {
-	
+// TestQuerierLoopClient_WithLogicalPlan tests to see if the scheduler enqueues the fragment
+// with the expected QueryID, logical plan, and other fragment meta-data
+func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
+	reg := prometheus.NewPedanticRegistry()
+
+	_, frontendClient, querierClient := setupScheduler(t, reg)
+	frontendLoop := initFrontendLoop(t, frontendClient, "frontend-12345")
+
+	// CASE 1: request with corrupted logical plan --> expect to fail at un-marshal stage
+	require.NoError(t, frontendLoop.Send(&schedulerpb.FrontendToScheduler{
+		Type:        schedulerpb.ENQUEUE,
+		QueryID:     1,
+		UserID:      "test",
+		HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: []byte("test")},
+	}))
+	msg, err := frontendLoop.Recv()
+	require.NoError(t, err)
+	require.True(t, msg.Status == schedulerpb.ERROR)
+
+	querierLoop, err := querierClient.QuerierLoop(context.Background())
+	require.NoError(t, err)
+
+	// CASE 2: request without logical plan --> expect to not have fragment meta-data
+	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
+		Type:        schedulerpb.ENQUEUE,
+		QueryID:     2,
+		UserID:      "test",
+		HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: []byte{}}, // empty logical plan
+	})
+	require.NoError(t, querierLoop.Send(&schedulerpb.QuerierToScheduler{QuerierID: "querier-1", QuerierAddress: "localhost:8000"}))
+
+	s2, err := querierLoop.Recv()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), s2.QueryID)
+	// (the below fields should be empty because the logical plan is not in the request)
+	require.Empty(t, s2.FragmentID)
+	require.Empty(t, s2.ChildFragmentID)
+	require.Empty(t, s2.ChildAddr)
+	require.Empty(t, s2.HttpRequest.Body)
+	require.False(t, s2.IsRoot)
+
+	// CASE 3: request with correct logical plan --> expect to have fragment metadata
+	lp := createTestLogicalPlan(t, time.Now(), time.Now(), 0, "up")
+	bytesLp, err := logicalplan.Marshal(lp.Root())
+	require.NoError(t, err)
+	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
+		Type:        schedulerpb.ENQUEUE,
+		QueryID:     3,
+		UserID:      "test",
+		HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: bytesLp},
+	})
+	require.NoError(t, querierLoop.Send(&schedulerpb.QuerierToScheduler{QuerierID: "querier-2", QuerierAddress: "localhost:8000"}))
+
+	s3, err := querierLoop.Recv()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), s3.FragmentID)
+	require.Equal(t, uint64(3), s3.QueryID)
+	require.Empty(t, s3.ChildFragmentID) // there is only one fragment for the logical plan, so no child fragments
+	require.Empty(t, s3.ChildAddr)
+	require.Equal(t, s3.HttpRequest.Body, bytesLp)
+	require.True(t, s3.IsRoot)
+}
+
+func createTestLogicalPlan(t *testing.T, startTime time.Time, endTime time.Time, step time.Duration, q string) logicalplan.Plan {
+
+	qOpts := query.Options{
+		Start:              startTime,
+		End:                startTime,
+		Step:               0,
+		StepsBatch:         10,
+		LookbackDelta:      0,
+		EnablePerStepStats: false,
+	}
+
+	if step != 0 {
+		qOpts.End = endTime
+		qOpts.Step = step
+	}
+
+	expr, err := parser.NewParser(q, parser.WithFunctions(parser.Functions)).ParseExpr()
+	require.NoError(t, err)
+
+	planOpts := logicalplan.PlanOptions{
+		DisableDuplicateLabelCheck: false,
+	}
+
+	logicalPlan := logicalplan.NewFromAST(expr, &qOpts, planOpts)
+
+	return logicalPlan
 }
 
 func initFrontendLoop(t *testing.T, client schedulerpb.SchedulerForFrontendClient, frontendAddr string) schedulerpb.SchedulerForFrontend_FrontendLoopClient {

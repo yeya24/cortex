@@ -2,7 +2,6 @@ package fragmenter
 
 import (
 	"github.com/thanos-io/promql-engine/logicalplan"
-	"time"
 )
 
 type Fragment struct {
@@ -13,10 +12,11 @@ type Fragment struct {
 }
 
 func getNewID() uint64 {
-	return uint64(time.Now().UnixNano())
+	return 1 // for dummy fragmenter testing
 }
 
 func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
+	// TODO: remote node fragmentation logic
 	return []Fragment{
 		{
 			Node:       node,
@@ -58,13 +58,6 @@ func (f *FragmentTable) GetMapping(queryID uint64, fragmentIDs []uint64) ([]stri
 		}
 	}
 	return addresses, true
-}
-
-func (f *FragmentTable) UpdateMapping(queryID uint64, fragmentID uint64, newAddr string) {
-	key := fragmentKey{queryID: queryID, fragmentID: fragmentID}
-	if _, exists := f.mappings[key]; exists {
-		f.mappings[key] = newAddr
-	}
 }
 
 func (f *FragmentTable) ClearMappings(queryID uint64) {

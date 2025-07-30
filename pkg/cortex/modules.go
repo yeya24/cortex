@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 
 	"github.com/go-kit/log/level"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
@@ -414,7 +416,12 @@ func (t *Cortex) initQuerier() (serv services.Service, err error) {
 
 	t.Cfg.Worker.MaxConcurrentRequests = t.Cfg.Querier.MaxConcurrent
 	t.Cfg.Worker.TargetHeaders = t.Cfg.API.HTTPRequestHeadersToLog
-	return querier_worker.NewQuerierWorker(t.Cfg.Worker, httpgrpc_server.NewServer(internalQuerierRouter), util_log.Logger, prometheus.DefaultRegisterer)
+	ipAddr, err := ring.GetInstanceAddr(t.Cfg.Alertmanager.ShardingRing.InstanceAddr, t.Cfg.Alertmanager.ShardingRing.InstanceInterfaceNames, util_log.Logger)
+	if err != nil {
+		return nil, err
+	}
+	serverAddress := net.JoinHostPort(ipAddr, strconv.Itoa(t.Cfg.Server.HTTPListenPort))
+	return querier_worker.NewQuerierWorker(t.Cfg.Worker, httpgrpc_server.NewServer(internalQuerierRouter), util_log.Logger, prometheus.DefaultRegisterer, serverAddress)
 }
 
 func (t *Cortex) initStoreQueryables() (services.Service, error) {

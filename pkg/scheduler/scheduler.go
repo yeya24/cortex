@@ -328,7 +328,10 @@ func (s *Scheduler) enqueueRequest(frontendContext context.Context, frontendAddr
 
 	userID := msg.GetUserID()
 
-	fragments, _ := s.fragmentLogicalPlan(msg.HttpRequest)
+	fragments, err := s.fragmentLogicalPlan(msg.HttpRequest)
+	if err != nil {
+		return err
+	}
 	if fragments == nil {
 		req := &schedulerRequest{
 			frontendAddress: frontendAddr,
@@ -510,6 +513,7 @@ func (s *Scheduler) forwardRequestToQuerier(querier schedulerpb.SchedulerForQuer
 			FragmentID:      req.fragment.FragmentID,
 			ChildFragmentID: req.fragment.ChildIDs,
 			ChildAddr:       childAddrs,
+			IsRoot:          req.fragment.IsRoot,
 		})
 		if err != nil {
 			errCh <- err
@@ -520,7 +524,7 @@ func (s *Scheduler) forwardRequestToQuerier(querier schedulerpb.SchedulerForQuer
 			if req.fragment.IsRoot {
 				s.fragmentTable.ClearMappings(req.queryID)
 			} else {
-				s.fragmentTable.AddMapping(req.queryID, req.fragment.FragmentID, r.QuerierID)
+				s.fragmentTable.AddMapping(req.queryID, req.fragment.FragmentID, r.QuerierAddress)
 			}
 		}
 		errCh <- err
