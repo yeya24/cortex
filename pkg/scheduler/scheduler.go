@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"net/http"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/thanos-io/promql-engine/logicalplan"
 	"github.com/weaveworks/common/httpgrpc"
 	"github.com/weaveworks/common/middleware"
 	"github.com/weaveworks/common/user"
@@ -23,6 +25,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/frontend/v2/frontendv2pb"
 	//lint:ignore faillint scheduler needs to retrieve priority from the context
 	"github.com/cortexproject/cortex/pkg/querier/stats"
+	"github.com/cortexproject/cortex/pkg/scheduler/fragmenter"
 	"github.com/cortexproject/cortex/pkg/scheduler/queue"
 	"github.com/cortexproject/cortex/pkg/scheduler/schedulerpb"
 	"github.com/cortexproject/cortex/pkg/tenant"
@@ -67,6 +70,9 @@ type Scheduler struct {
 	connectedQuerierClients  prometheus.GaugeFunc
 	connectedFrontendClients prometheus.GaugeFunc
 	queueDuration            prometheus.Histogram
+
+	// Distributed sub-query mappings
+	fragmentTable *fragmenter.FragmentTable
 }
 
 type requestKey struct {
@@ -103,6 +109,7 @@ func NewScheduler(cfg Config, limits Limits, log log.Logger, registerer promethe
 
 		pendingRequests:    map[requestKey]*schedulerRequest{},
 		connectedFrontends: map[string]*connectedFrontend{},
+		fragmentTable:      fragmenter.NewFragmentTable(),
 	}
 
 	s.queueLength = promauto.With(registerer).NewGaugeVec(prometheus.GaugeOpts{
@@ -166,6 +173,8 @@ type schedulerRequest struct {
 
 	// This is only used for testing.
 	parentSpanContext opentracing.SpanContext
+
+	fragment fragmenter.Fragment
 }
 
 func (s schedulerRequest) Priority() int64 {
@@ -279,6 +288,26 @@ func (s *Scheduler) frontendDisconnected(frontendAddress string) {
 	}
 }
 
+// fragmentLogicalPlan fragments logical plan if it exist and can be un-marshaled
+// otherwise, it returns an empty fragment array
+func (s *Scheduler) fragmentLogicalPlan(req *httpgrpc.HTTPRequest) ([]fragmenter.Fragment, error) {
+	if req.Body == nil {
+		return nil, nil
+	}
+
+	lpNode, err := logicalplan.Unmarshal(req.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal logical plan: %w", err)
+	}
+
+	fragments, err := fragmenter.FragmentLogicalPlanNode(lpNode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fragment logical plan: %w", err)
+	}
+
+	return fragments, nil
+}
+
 func (s *Scheduler) enqueueRequest(frontendContext context.Context, frontendAddr string, msg *schedulerpb.FrontendToScheduler) error {
 	// Create new context for this request, to support cancellation.
 	ctx, cancel := context.WithCancel(frontendContext)
@@ -299,36 +328,85 @@ func (s *Scheduler) enqueueRequest(frontendContext context.Context, frontendAddr
 
 	userID := msg.GetUserID()
 
-	req := &schedulerRequest{
-		frontendAddress: frontendAddr,
-		userID:          msg.UserID,
-		queryID:         msg.QueryID,
-		request:         msg.HttpRequest,
-		statsEnabled:    msg.StatsEnabled,
-	}
-
-	now := time.Now()
-
-	req.parentSpanContext = parentSpanContext
-	req.queueSpan, req.ctx = opentracing.StartSpanFromContextWithTracer(ctx, tracer, "queued", opentracing.ChildOf(parentSpanContext))
-	req.enqueueTime = now
-	req.ctxCancel = cancel
-
-	// aggregate the max queriers limit in the case of a multi tenant query
-	tenantIDs, err := tenant.TenantIDsFromOrgID(userID)
+	fragments, err := s.fragmentLogicalPlan(msg.HttpRequest)
 	if err != nil {
 		return err
 	}
-	maxQueriers := validation.SmallestPositiveNonZeroFloat64PerTenant(tenantIDs, s.limits.MaxQueriersPerUser)
+	if fragments == nil {
+		req := &schedulerRequest{
+			frontendAddress: frontendAddr,
+			userID:          msg.UserID,
+			queryID:         msg.QueryID,
+			request:         msg.HttpRequest,
+			statsEnabled:    msg.StatsEnabled,
+			fragment:        fragmenter.Fragment{},
+		}
 
-	s.activeUsers.UpdateUserTimestamp(userID, now)
-	return s.requestQueue.EnqueueRequest(userID, req, maxQueriers, func() {
-		shouldCancel = false
+		now := time.Now()
 
-		s.pendingRequestsMu.Lock()
-		defer s.pendingRequestsMu.Unlock()
-		s.pendingRequests[requestKey{frontendAddr: frontendAddr, queryID: msg.QueryID}] = req
-	})
+		req.parentSpanContext = parentSpanContext
+		req.queueSpan, req.ctx = opentracing.StartSpanFromContextWithTracer(ctx, tracer, "queued", opentracing.ChildOf(parentSpanContext))
+		req.enqueueTime = now
+		req.ctxCancel = cancel
+
+		// aggregate the max queriers limit in the case of a multi tenant query
+		tenantIDs, err := tenant.TenantIDsFromOrgID(userID)
+		if err != nil {
+			return err
+		}
+		maxQueriers := validation.SmallestPositiveNonZeroFloat64PerTenant(tenantIDs, s.limits.MaxQueriersPerUser)
+
+		s.activeUsers.UpdateUserTimestamp(userID, now)
+		return s.requestQueue.EnqueueRequest(userID, req, maxQueriers, func() {
+			shouldCancel = false
+
+			s.pendingRequestsMu.Lock()
+			defer s.pendingRequestsMu.Unlock()
+			s.pendingRequests[requestKey{frontendAddr: frontendAddr, queryID: msg.QueryID}] = req
+		})
+
+	} else { // when there are fragments
+		for _, fragment := range fragments {
+			// if one fragment fails then the whole query will be considered failing
+			req := &schedulerRequest{
+				frontendAddress: frontendAddr,
+				userID:          msg.UserID,
+				queryID:         msg.QueryID,
+				request:         msg.HttpRequest,
+				statsEnabled:    msg.StatsEnabled,
+				fragment:        fragment,
+			}
+
+			now := time.Now()
+
+			req.parentSpanContext = parentSpanContext
+			req.queueSpan, req.ctx = opentracing.StartSpanFromContextWithTracer(ctx, tracer, "queued", opentracing.ChildOf(parentSpanContext))
+			req.enqueueTime = now
+			req.ctxCancel = cancel
+
+			tenantIDs, err := tenant.TenantIDsFromOrgID(userID)
+			if err != nil {
+				return err
+			}
+			maxQueriers := validation.SmallestPositiveNonZeroFloat64PerTenant(tenantIDs, s.limits.MaxQueriersPerUser)
+
+			s.activeUsers.UpdateUserTimestamp(userID, now)
+			err = s.requestQueue.EnqueueRequest(userID, req, maxQueriers, func() {
+				shouldCancel = false
+
+				s.pendingRequestsMu.Lock()
+				defer s.pendingRequestsMu.Unlock()
+				s.pendingRequests[requestKey{frontendAddr: frontendAddr, queryID: msg.QueryID}] = req
+			})
+
+			// if any error happens, immediately return to tell frontend that the whole query has failed
+			if err != nil {
+				return err
+			}
+		}
+		// if all fragments are successfully queued, return nil (no error)
+		return nil
+	}
 }
 
 // This method doesn't do removal from the queue.
@@ -422,19 +500,33 @@ func (s *Scheduler) forwardRequestToQuerier(querier schedulerpb.SchedulerForQuer
 	// monitoring the contexts in a select and cancel things appropriately.
 	errCh := make(chan error, 1)
 	go func() {
+		childAddrs := []string{}
+		if len(req.fragment.ChildIDs) != 0 {
+			childAddrs, _ = s.fragmentTable.GetMapping(req.queryID, req.fragment.ChildIDs)
+		}
 		err := querier.Send(&schedulerpb.SchedulerToQuerier{
 			UserID:          req.userID,
 			QueryID:         req.queryID,
 			FrontendAddress: req.frontendAddress,
 			HttpRequest:     req.request,
 			StatsEnabled:    req.statsEnabled,
+			FragmentID:      req.fragment.FragmentID,
+			ChildFragmentID: req.fragment.ChildIDs,
+			ChildAddr:       childAddrs,
+			IsRoot:          req.fragment.IsRoot,
 		})
 		if err != nil {
 			errCh <- err
 			return
 		}
-
-		_, err = querier.Recv()
+		r, err := querier.Recv()
+		if err == nil && !req.fragment.IsEmpty() {
+			if req.fragment.IsRoot {
+				s.fragmentTable.ClearMappings(req.queryID)
+			} else {
+				s.fragmentTable.AddMapping(req.queryID, req.fragment.FragmentID, r.QuerierAddress)
+			}
+		}
 		errCh <- err
 	}()
 

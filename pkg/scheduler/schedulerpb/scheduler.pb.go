@@ -86,6 +86,7 @@ func (SchedulerToFrontendStatus) EnumDescriptor() ([]byte, []int) {
 // To signal that querier is ready to accept another request, querier sends empty message.
 type QuerierToScheduler struct {
 	QuerierID string `protobuf:"bytes,1,opt,name=querierID,proto3" json:"querierID,omitempty"`
+	QuerierAddress string `protobuf:"bytes,2,opt,name=querierAddress,proto3" json:"querierAddress,omitempty"`
 }
 
 func (m *QuerierToScheduler) Reset()      { *m = QuerierToScheduler{} }
@@ -127,6 +128,11 @@ func (m *QuerierToScheduler) GetQuerierID() string {
 	return ""
 }
 
+func (m *QuerierToScheduler) GetQuerierAddress() string {
+	if m != nil {return m.QuerierAddress}
+	return ""
+}
+
 type SchedulerToQuerier struct {
 	// Query ID as reported by frontend. When querier sends the response back to frontend (using frontendAddress),
 	// it identifies the query by using this ID.
@@ -139,6 +145,11 @@ type SchedulerToQuerier struct {
 	// Whether query statistics tracking should be enabled. The response will include
 	// statistics only when this option is enabled.
 	StatsEnabled bool `protobuf:"varint,5,opt,name=statsEnabled,proto3" json:"statsEnabled,omitempty"`
+
+	FragmentID uint64 `protobuf:"varint,6,opt,name=fragmentID,proto3" json:"fragmentID,omitempty"`
+	ChildFragmentID []uint64 `protobuf:"varint,7,rep,name=childFragmentID,proto3" json:"childFragmentID,omitempty"`
+	ChildAddr []string `protobuf:"bytes,8,rep,name=childAddr,proto3" json:"childAddr,omitempty"`
+	IsRoot bool `protobuf:"varint,9,opt,name=isRoot,proto3" json:"isRoot,omitempty"`
 }
 
 func (m *SchedulerToQuerier) Reset()      { *m = SchedulerToQuerier{} }
@@ -204,6 +215,30 @@ func (m *SchedulerToQuerier) GetUserID() string {
 func (m *SchedulerToQuerier) GetStatsEnabled() bool {
 	if m != nil {
 		return m.StatsEnabled
+	}
+	return false
+}
+
+func (m *SchedulerToQuerier) GetFragmentID() uint64 {
+	if m != nil { return m.FragmentID}
+	return 0
+}
+
+func (m *SchedulerToQuerier) GetChildFragmentID() []uint64 {
+	if m != nil { return m.ChildFragmentID }
+	return nil
+}
+
+func (m *SchedulerToQuerier) GetChildAddr() []string {
+	if m != nil {
+		return m.ChildAddr
+	}
+	return nil
+}
+
+func (m *SchedulerToQuerier) GetIsRoot() bool {
+	if m != nil {
+		return m.IsRoot
 	}
 	return false
 }
@@ -518,6 +553,7 @@ func (this *QuerierToScheduler) Equal(that interface{}) bool {
 	if this.QuerierID != that1.QuerierID {
 		return false
 	}
+	if this.QuerierAddress != that1.QuerierAddress {return false}
 	return true
 }
 func (this *SchedulerToQuerier) Equal(that interface{}) bool {
@@ -553,6 +589,14 @@ func (this *SchedulerToQuerier) Equal(that interface{}) bool {
 	}
 	if this.StatsEnabled != that1.StatsEnabled {
 		return false
+	}
+	if this.FragmentID != that1.FragmentID {return false}
+	if this.IsRoot != that1.IsRoot {return false}
+	for i, addr := range this.ChildAddr{
+		if addr != that1.ChildAddr[i] {return false}
+	}
+	for j, id := range this.ChildFragmentID{
+		if id != that1.ChildFragmentID[j] {return false}
 	}
 	return true
 }
@@ -1048,6 +1092,13 @@ func (m *QuerierToScheduler) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.QuerierAddress) > 0 {
+		i -= len(m.QuerierAddress)
+		copy(dAtA[i:], m.QuerierAddress)
+		i = encodeVarintScheduler(dAtA, i, uint64(len(m.QuerierAddress)))
+		i--
+		dAtA[i] = 0x12
+	}
 	if len(m.QuerierID) > 0 {
 		i -= len(m.QuerierID)
 		copy(dAtA[i:], m.QuerierID)
@@ -1078,6 +1129,34 @@ func (m *SchedulerToQuerier) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+
+	if m.IsRoot {
+		i--
+		if m.IsRoot {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x48
+	}
+	for iNdEx := len(m.ChildAddr) - 1; iNdEx >= 0; iNdEx-- {
+		i -= len(m.ChildAddr[iNdEx])
+		copy(dAtA[i:], m.ChildAddr[iNdEx])
+		i = encodeVarintScheduler(dAtA, i, uint64(len(m.ChildAddr[iNdEx])))
+		i--
+		dAtA[i] = 0x42
+	}
+	for iNdEx := len(m.ChildFragmentID) - 1; iNdEx >= 0; iNdEx-- {
+		i = encodeVarintScheduler(dAtA, i, uint64(m.ChildFragmentID[iNdEx]))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.FragmentID != 0 {
+		i = encodeVarintScheduler(dAtA, i, uint64(m.FragmentID))
+		i--
+		dAtA[i] = 0x30
+	}
 	if m.StatsEnabled {
 		i--
 		if m.StatsEnabled {
@@ -1300,6 +1379,10 @@ func (m *QuerierToScheduler) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovScheduler(uint64(l))
 	}
+	l  = len(m.QuerierAddress)
+	if l > 0 {
+		n += 1 + l + sovScheduler(uint64(l))
+	}
 	return n
 }
 
@@ -1325,6 +1408,23 @@ func (m *SchedulerToQuerier) Size() (n int) {
 		n += 1 + l + sovScheduler(uint64(l))
 	}
 	if m.StatsEnabled {
+		n += 2
+	}
+	if m.FragmentID != 0 {
+		n += 1 + sovScheduler(uint64(m.FragmentID))
+	}
+	if len(m.ChildFragmentID) > 0 {
+		for _, v := range m.ChildFragmentID {
+			n += 1 + sovScheduler(uint64(v))
+		}
+	}
+	for _, s := range m.ChildAddr {
+		l = len(s)
+		if l > 0 {
+			n += 1 + l + sovScheduler(uint64(l))
+		}
+	}
+	if m.IsRoot {
 		n += 2
 	}
 	return n
@@ -1410,6 +1510,7 @@ func (this *QuerierToScheduler) String() string {
 	}
 	s := strings.Join([]string{`&QuerierToScheduler{`,
 		`QuerierID:` + fmt.Sprintf("%v", this.QuerierID) + `,`,
+		`QuerierAddress:` + fmt.Sprintf("%v", this.QuerierAddress) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1424,6 +1525,9 @@ func (this *SchedulerToQuerier) String() string {
 		`FrontendAddress:` + fmt.Sprintf("%v", this.FrontendAddress) + `,`,
 		`UserID:` + fmt.Sprintf("%v", this.UserID) + `,`,
 		`StatsEnabled:` + fmt.Sprintf("%v", this.StatsEnabled) + `,`,
+		`FragmentID:` + fmt.Sprintf("%v", this.FragmentID) + `,`,
+		`ChildFragmentID:` + fmt.Sprintf("%v", this.ChildFragmentID) + `,`,
+		`IsRoot:` + fmt.Sprintf("%v", this.IsRoot) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -1541,6 +1645,38 @@ func (m *QuerierToScheduler) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.QuerierID = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field QuerierAddress", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowScheduler
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthScheduler
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthScheduler
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.QuerierAddress = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -1734,6 +1870,98 @@ func (m *SchedulerToQuerier) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.StatsEnabled = bool(v != 0)
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field FragmentID", wireType)
+			}
+			m.FragmentID = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowScheduler
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.FragmentID |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ChildFragmentID", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowScheduler
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.ChildFragmentID = append(m.ChildFragmentID, v)
+
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ChildAddr", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowScheduler
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthScheduler
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthScheduler
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ChildAddr = append(m.ChildAddr, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field IsRoot", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowScheduler
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.IsRoot = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipScheduler(dAtA[iNdEx:])
@@ -1752,7 +1980,6 @@ func (m *SchedulerToQuerier) Unmarshal(dAtA []byte) error {
 			iNdEx += skippy
 		}
 	}
-
 	if iNdEx > l {
 		return io.ErrUnexpectedEOF
 	}
