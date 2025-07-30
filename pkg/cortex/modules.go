@@ -546,7 +546,7 @@ func (t *Cortex) initQueryFrontendTripperware() (serv services.Service, err erro
 		shardedPrometheusCodec,
 		t.Cfg.Querier.LookbackDelta,
 		t.Cfg.Querier.DefaultEvaluationInterval,
-		t.Cfg.Frontend.DistributedExecEnabled,
+		t.Cfg.Querier.DistributedExecEnabled,
 	)
 	if err != nil {
 		return nil, err
@@ -559,7 +559,7 @@ func (t *Cortex) initQueryFrontendTripperware() (serv services.Service, err erro
 		queryAnalyzer,
 		t.Cfg.Querier.LookbackDelta,
 		t.Cfg.Querier.DefaultEvaluationInterval,
-		t.Cfg.Frontend.DistributedExecEnabled)
+		t.Cfg.Querier.DistributedExecEnabled)
 	if err != nil {
 		return nil, err
 	}
