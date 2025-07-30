@@ -172,7 +172,7 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 			}
 
 			// Report back to scheduler that processing of the query has finished.
-			if err := c.Send(&schedulerpb.QuerierToScheduler{}); err != nil {
+			if err := c.Send(&schedulerpb.QuerierToScheduler{QuerierID: sp.querierID, QuerierAddress: sp.querierAddress}); err != nil {
 				level.Error(logger).Log("msg", "error notifying scheduler about finished query", "err", err, "addr", address)
 			}
 		}()

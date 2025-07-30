@@ -520,7 +520,7 @@ func (s *Scheduler) forwardRequestToQuerier(querier schedulerpb.SchedulerForQuer
 			return
 		}
 		r, err := querier.Recv()
-		if err == nil {
+		if err == nil && !req.fragment.IsEmpty() {
 			if req.fragment.IsRoot {
 				s.fragmentTable.ClearMappings(req.queryID)
 			} else {

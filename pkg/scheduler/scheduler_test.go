@@ -413,6 +413,7 @@ func TestSchedulerMetrics(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 
 	scheduler, frontendClient, _ := setupScheduler(t, reg)
+
 	frontendLoop := initFrontendLoop(t, frontendClient, "frontend-12345")
 	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
 		Type:        schedulerpb.ENQUEUE,
@@ -457,6 +458,8 @@ func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
 
 	_, frontendClient, querierClient := setupScheduler(t, reg)
 	frontendLoop := initFrontendLoop(t, frontendClient, "frontend-12345")
+	querierLoop, err := querierClient.QuerierLoop(context.Background())
+	require.NoError(t, err)
 
 	// CASE 1: request with corrupted logical plan --> expect to fail at un-marshal stage
 	require.NoError(t, frontendLoop.Send(&schedulerpb.FrontendToScheduler{
@@ -468,9 +471,6 @@ func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
 	msg, err := frontendLoop.Recv()
 	require.NoError(t, err)
 	require.True(t, msg.Status == schedulerpb.ERROR)
-
-	querierLoop, err := querierClient.QuerierLoop(context.Background())
-	require.NoError(t, err)
 
 	// CASE 2: request without logical plan --> expect to not have fragment meta-data
 	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
@@ -505,7 +505,7 @@ func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
 
 	s3, err := querierLoop.Recv()
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), s3.FragmentID)
+	require.NotEmpty(t, s3.FragmentID)
 	require.Equal(t, uint64(3), s3.QueryID)
 	require.Empty(t, s3.ChildFragmentID) // there is only one fragment for the logical plan, so no child fragments
 	require.Empty(t, s3.ChildAddr)

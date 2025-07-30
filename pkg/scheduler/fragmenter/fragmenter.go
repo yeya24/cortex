@@ -15,6 +15,22 @@ func getNewID() uint64 {
 	return 1 // for dummy fragmenter testing
 }
 
+func (s *Fragment) IsEmpty() bool {
+	if s.Node != nil {
+		return false
+	}
+	if s.FragmentID != 0 {
+		return false
+	}
+	if s.IsRoot {
+		return false
+	}
+	if len(s.ChildIDs) != 0 {
+		return false
+	}
+	return true
+}
+
 func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
 	// TODO: remote node fragmentation logic
 	return []Fragment{
