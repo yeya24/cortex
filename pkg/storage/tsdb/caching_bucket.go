@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	supportedBucketCacheBackends = []string{CacheBackendInMemory, CacheBackendMemcached, CacheBackendRedis}
+	supportedBucketCacheBackends = []string{CacheBackendInMemory, CacheBackendMemcached, CacheBackendRedis, CacheBackendDisk}
 
 	errUnsupportedBucketCacheBackend = errors.New("unsupported cache backend")
 	errDuplicatedBucketCacheBackend  = errors.New("duplicated cache backend")
@@ -36,13 +36,43 @@ const (
 	CacheBackendMemcached = "memcached"
 	CacheBackendRedis     = "redis"
 	CacheBackendInMemory  = "inmemory"
+	CacheBackendDisk      = "disk"
 )
+
+type DiskBucketCacheConfig struct {
+	CacheDir         string        `yaml:"cache_dir"`
+	MaxSizeBytes     uint64        `yaml:"max_size_bytes"`
+	SyncWrites       bool          `yaml:"sync_writes"`
+	TTLCheckInterval time.Duration `yaml:"ttl_check_interval"`
+}
+
+func (cfg *DiskBucketCacheConfig) Validate() error {
+	if cfg.CacheDir == "" {
+		return errors.New("disk cache directory must be specified")
+	}
+	if cfg.MaxSizeBytes == 0 {
+		return errors.New("disk cache max size must be greater than 0")
+	}
+	if cfg.TTLCheckInterval == 0 {
+		cfg.TTLCheckInterval = 5 * time.Minute // Default TTL check interval
+	}
+
+	return nil
+}
+
+func (cfg *DiskBucketCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix string, item string) {
+	f.StringVar(&cfg.CacheDir, prefix+"cache-dir", "/var/cache/cortex", fmt.Sprintf("Directory path for disk-based %s cache storage.", item))
+	f.Uint64Var(&cfg.MaxSizeBytes, prefix+"max-size-bytes", uint64(100*units.Gibibyte), fmt.Sprintf("Maximum size in bytes of disk %s cache.", item))
+	f.BoolVar(&cfg.SyncWrites, prefix+"sync-writes", false, fmt.Sprintf("Whether to use synchronous writes for disk %s cache.", item))
+	f.DurationVar(&cfg.TTLCheckInterval, prefix+"ttl-check-interval", 5*time.Minute, fmt.Sprintf("Interval for checking TTL expiration in disk %s cache.", item))
+}
 
 type BucketCacheBackend struct {
 	Backend    string                      `yaml:"backend"`
 	InMemory   InMemoryBucketCacheConfig   `yaml:"inmemory"`
 	Memcached  MemcachedClientConfig       `yaml:"memcached"`
 	Redis      RedisClientConfig           `yaml:"redis"`
+	Disk       DiskBucketCacheConfig       `yaml:"disk"`
 	MultiLevel MultiLevelBucketCacheConfig `yaml:"multilevel"`
 }
 
@@ -80,6 +110,10 @@ func (cfg *BucketCacheBackend) Validate() error {
 				return err
 			}
 		case CacheBackendInMemory:
+		case CacheBackendDisk:
+			if err := cfg.Disk.Validate(); err != nil {
+				return err
+			}
 		}
 
 		configuredBackends[backend] = struct{}{}
@@ -99,12 +133,13 @@ type ChunksCacheConfig struct {
 
 func (cfg *ChunksCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix string) {
 	f.StringVar(&cfg.Backend, prefix+"backend", "", fmt.Sprintf("The chunks cache backend type. Single or Multiple cache backend can be provided. "+
-		"Supported values in single cache: %s, %s, %s, and '' (disable). "+
-		"Supported values in multi level cache: a comma-separated list of (%s)", CacheBackendMemcached, CacheBackendRedis, CacheBackendInMemory, strings.Join(supportedBucketCacheBackends, ", ")))
+		"Supported values in single cache: %s, %s, %s, %s, and '' (disable). "+
+		"Supported values in multi level cache: a comma-separated list of (%s)", CacheBackendMemcached, CacheBackendRedis, CacheBackendInMemory, CacheBackendDisk, strings.Join(supportedBucketCacheBackends, ", ")))
 
 	cfg.Memcached.RegisterFlagsWithPrefix(f, prefix+"memcached.")
 	cfg.Redis.RegisterFlagsWithPrefix(f, prefix+"redis.")
 	cfg.InMemory.RegisterFlagsWithPrefix(f, prefix+"inmemory.", "chunks")
+	cfg.Disk.RegisterFlagsWithPrefix(f, prefix+"disk.", "chunks")
 	cfg.MultiLevel.RegisterFlagsWithPrefix(f, prefix+"multilevel.")
 
 	f.Int64Var(&cfg.SubrangeSize, prefix+"subrange-size", 16000, "Size of each subrange that bucket object is split into for better caching.")
@@ -162,12 +197,13 @@ type MetadataCacheConfig struct {
 
 func (cfg *MetadataCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix string) {
 	f.StringVar(&cfg.Backend, prefix+"backend", "", fmt.Sprintf("The metadata cache backend type. Single or Multiple cache backend can be provided. "+
-		"Supported values in single cache: %s, %s, %s, and '' (disable). "+
-		"Supported values in multi level cache: a comma-separated list of (%s)", CacheBackendMemcached, CacheBackendRedis, CacheBackendInMemory, strings.Join(supportedBucketCacheBackends, ", ")))
+		"Supported values in single cache: %s, %s, %s, %s, and '' (disable). "+
+		"Supported values in multi level cache: a comma-separated list of (%s)", CacheBackendMemcached, CacheBackendRedis, CacheBackendInMemory, CacheBackendDisk, strings.Join(supportedBucketCacheBackends, ", ")))
 
 	cfg.Memcached.RegisterFlagsWithPrefix(f, prefix+"memcached.")
 	cfg.Redis.RegisterFlagsWithPrefix(f, prefix+"redis.")
 	cfg.InMemory.RegisterFlagsWithPrefix(f, prefix+"inmemory.", "metadata")
+	cfg.Disk.RegisterFlagsWithPrefix(f, prefix+"disk.", "metadata")
 	cfg.MultiLevel.RegisterFlagsWithPrefix(f, prefix+"multilevel.")
 
 	f.DurationVar(&cfg.TenantsListTTL, prefix+"tenants-list-ttl", 15*time.Minute, "How long to cache list of tenants in the bucket.")
@@ -199,12 +235,13 @@ type ParquetLabelsCacheConfig struct {
 
 func (cfg *ParquetLabelsCacheConfig) RegisterFlagsWithPrefix(f *flag.FlagSet, prefix string) {
 	f.StringVar(&cfg.Backend, prefix+"backend", "", fmt.Sprintf("The parquet labels cache backend type. Single or Multiple cache backend can be provided. "+
-		"Supported values in single cache: %s, %s, %s, and '' (disable). "+
-		"Supported values in multi level cache: a comma-separated list of (%s)", CacheBackendMemcached, CacheBackendRedis, CacheBackendInMemory, strings.Join(supportedBucketCacheBackends, ", ")))
+		"Supported values in single cache: %s, %s, %s, %s, and '' (disable). "+
+		"Supported values in multi level cache: a comma-separated list of (%s)", CacheBackendMemcached, CacheBackendRedis, CacheBackendInMemory, CacheBackendDisk, strings.Join(supportedBucketCacheBackends, ", ")))
 
 	cfg.Memcached.RegisterFlagsWithPrefix(f, prefix+"memcached.")
 	cfg.Redis.RegisterFlagsWithPrefix(f, prefix+"redis.")
 	cfg.InMemory.RegisterFlagsWithPrefix(f, prefix+"inmemory.", "parquet-labels")
+	cfg.Disk.RegisterFlagsWithPrefix(f, prefix+"disk.", "parquet-labels")
 	cfg.MultiLevel.RegisterFlagsWithPrefix(f, prefix+"multilevel.")
 
 	f.Int64Var(&cfg.SubrangeSize, prefix+"subrange-size", 16000, "Size of each subrange that bucket object is split into for better caching.")
@@ -351,6 +388,12 @@ func createBucketCache(cacheName string, cacheBackend *BucketCacheBackend, logge
 				return nil, errors.Wrapf(err, "failed to create redis client")
 			}
 			caches = append(caches, cache.NewRedisCache(cacheName, logger, redisCache, reg))
+		case CacheBackendDisk:
+			diskCache, err := NewDiskCache(cacheName, cacheBackend.Disk, logger, reg)
+			if err != nil {
+				return nil, errors.Wrapf(err, "failed to create disk cache")
+			}
+			caches = append(caches, diskCache)
 		}
 	}
 

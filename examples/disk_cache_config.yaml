@@ -1,0 +1,99 @@
+# Example configurations for the local disk cache
+
+# Single-level disk cache only
+chunks_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "/var/cache/cortex/chunks"
+    max_size_bytes: 107374182400  # 100GB
+    sync_writes: false            # Set to true for durability over performance
+    ttl_check_interval: "5m"
+
+# Multi-level cache: In-memory + Disk
+chunks_cache:
+  backend: "inmemory,disk"
+  inmemory:
+    max_size_bytes: 1073741824    # 1GB in-memory
+  disk:
+    cache_dir: "/var/cache/cortex/chunks"
+    max_size_bytes: 107374182400  # 100GB on disk
+    ttl_check_interval: "5m"
+
+# Multi-level cache: In-memory + Memcached + Disk (complete hierarchy)
+chunks_cache:
+  backend: "inmemory,memcached,disk"
+  inmemory:
+    max_size_bytes: 1073741824    # 1GB L1 cache (fastest)
+  memcached:
+    addresses: "memcached-1:11211,memcached-2:11211"
+    timeout: "500ms"
+    max_idle_connections: 100
+  disk:
+    cache_dir: "/var/cache/cortex/chunks"  # L3 cache (largest, persistent)
+    max_size_bytes: 107374182400  # 100GB
+    ttl_check_interval: "10m"     # Less frequent cleanup for disk
+
+# Metadata cache with disk storage
+metadata_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "/var/cache/cortex/metadata"
+    max_size_bytes: 10737418240   # 10GB for metadata
+    sync_writes: true             # Metadata durability is important
+    ttl_check_interval: "15m"     # Metadata has longer TTLs
+
+# Per-tenant disk cache configuration
+chunks_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "/var/cache/cortex/tenant-chunks"
+    max_size_bytes: 536870912000  # 500GB total
+    ttl_check_interval: "5m"
+
+# Performance-optimized configuration
+chunks_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "/var/cache/cortex/chunks"
+    max_size_bytes: 107374182400  # 100GB
+    sync_writes: false            # Async writes for performance
+    ttl_check_interval: "1m"      # Frequent cleanup
+
+# Durability-focused configuration
+chunks_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "/var/cache/cortex/chunks"
+    max_size_bytes: 107374182400  # 100GB
+    sync_writes: true             # Sync every write for durability
+    ttl_check_interval: "30m"     # Less frequent, more thorough cleanup
+
+# Development/Testing configuration
+chunks_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "./cache/chunks"   # Local directory
+    max_size_bytes: 1073741824    # 1GB for testing
+    ttl_check_interval: "30s"     # Frequent cleanup for testing
+
+# Key format for tenant isolation:
+# Keys should be formatted as "tenant:<tenant-id>:<actual-key>"
+# Examples:
+# - "tenant:user123:chunk:01234567890abcdef"
+# - "tenant:org456:metadata:block:98765432"
+# - "tenant:default:labels:series123"
+#
+# This ensures:
+# 1. Files are stored in separate tenant directories: /cache/user123/, /cache/org456/
+# 2. Encryption keys can be derived per tenant (when enabled)
+# 3. Per-tenant size limits and eviction policies
+# 4. Audit trails and access control per tenant
+
+# Simple configuration with only supported options
+chunks_cache:
+  backend: "disk"
+  disk:
+    cache_dir: "/var/cache/cortex/chunks"
+    max_size_bytes: 107374182400    # 100GB total cache size
+    sync_writes: false              # Async writes for better performance
+    ttl_check_interval: "5m"        # How often to check for expired entries 

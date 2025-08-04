@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-kit/log"
@@ -74,8 +75,10 @@ func getBlockStoreType(ctx context.Context, defaultBlockStoreType blockStoreType
 }
 
 type parquetQueryableFallbackMetrics struct {
-	blocksQueriedTotal *prometheus.CounterVec
-	operationsTotal    *prometheus.CounterVec
+	blocksQueriedTotal    *prometheus.CounterVec
+	operationsTotal       *prometheus.CounterVec
+	shardOpenDuration     prometheus.Histogram
+	allShardsOpenDuration prometheus.Histogram
 }
 
 func newParquetQueryableFallbackMetrics(reg prometheus.Registerer) *parquetQueryableFallbackMetrics {
@@ -88,6 +91,16 @@ func newParquetQueryableFallbackMetrics(reg prometheus.Registerer) *parquetQuery
 			Name: "cortex_parquet_queryable_operations_total",
 			Help: "Total number of Operations.",
 		}, []string{"type", "method"}),
+		shardOpenDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
+			Name:    "cortex_parquet_shard_open_duration_seconds",
+			Help:    "Time taken to open a single parquet shard.",
+			Buckets: prometheus.DefBuckets,
+		}),
+		allShardsOpenDuration: promauto.With(reg).NewHistogram(prometheus.HistogramOpts{
+			Name:    "cortex_parquet_all_shards_open_duration_seconds",
+			Help:    "Time taken to open all parquet shards for a query.",
+			Buckets: prometheus.DefBuckets,
+		}),
 	}
 }
 
@@ -137,6 +150,7 @@ func NewParquetQueryable(
 		return nil, err
 	}
 
+	metrics := newParquetQueryableFallbackMetrics(reg)
 	cDecoder := schema.NewPrometheusParquetChunksDecoder(chunkenc.NewPool())
 
 	parquetQueryableOpts := []queryable.QueryableOpts{
@@ -214,11 +228,21 @@ func NewParquetQueryable(
 		span, ctx := opentracing.StartSpanFromContext(ctx, "parquetQuerierWithFallback.OpenShards")
 		defer span.Finish()
 
+		totalStartTime := time.Now()
+		var cacheHits, cacheMisses int64
+
+		span.SetTag("total_shards", len(blocks))
+
 		for i, block := range blocks {
 			errGroup.Go(func() error {
 				cacheKey := fmt.Sprintf("%v-%v", userID, block.ID)
 				shard := cache.Get(cacheKey)
 				if shard == nil {
+					atomic.AddInt64(&cacheMisses, 1)
+
+					// Track time for individual shard opening
+					shardStartTime := time.Now()
+
 					// we always only have 1 shard - shard 0
 					// Use context.Background() here as the file can be cached and live after the request ends.
 					shard, err = parquet_storage.NewParquetShardOpener(
@@ -234,10 +258,16 @@ func NewParquetQueryable(
 							parquet.OptimisticRead(true),
 						),
 					)
+
+					// Record individual shard opening time
+					metrics.shardOpenDuration.Observe(time.Since(shardStartTime).Seconds())
+
 					if err != nil {
 						return errors.Wrapf(err, "failed to open parquet shard. block: %v", block.ID.String())
 					}
 					cache.Set(cacheKey, shard)
+				} else {
+					atomic.AddInt64(&cacheHits, 1)
 				}
 
 				shards[i] = shard
@@ -245,7 +275,18 @@ func NewParquetQueryable(
 			})
 		}
 
-		return shards, errGroup.Wait()
+		err = errGroup.Wait()
+
+		// Record total time for opening all shards
+		totalDuration := time.Since(totalStartTime)
+		metrics.allShardsOpenDuration.Observe(totalDuration.Seconds())
+
+		// Set span attributes
+		span.SetTag("cache_hits", atomic.LoadInt64(&cacheHits))
+		span.SetTag("cache_misses", atomic.LoadInt64(&cacheMisses))
+		span.SetTag("total_duration_seconds", totalDuration.Seconds())
+
+		return shards, err
 	}, parquetQueryableOpts...)
 
 	p := &parquetQueryableWithFallback{
@@ -255,7 +296,7 @@ func NewParquetQueryable(
 		queryStoreAfter:       config.QueryStoreAfter,
 		subservicesWatcher:    services.NewFailureWatcher(),
 		finder:                blockStorageQueryable.finder,
-		metrics:               newParquetQueryableFallbackMetrics(reg),
+		metrics:               metrics,
 		limits:                limits,
 		logger:                logger,
 		defaultBlockStoreType: blockStoreType(config.ParquetQueryableDefaultBlockStore),
