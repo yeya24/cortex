@@ -3,8 +3,10 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/querier/tripperware"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -456,7 +458,7 @@ func TestSchedulerMetrics(t *testing.T) {
 func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
 
-	_, frontendClient, querierClient := setupScheduler(t, reg)
+	scheduler, frontendClient, querierClient := setupScheduler(t, reg)
 	frontendLoop := initFrontendLoop(t, frontendClient, "frontend-12345")
 	querierLoop, err := querierClient.QuerierLoop(context.Background())
 	require.NoError(t, err)
@@ -494,14 +496,17 @@ func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
 	// CASE 3: request with correct logical plan --> expect to have fragment metadata
 	lp := createTestLogicalPlan(t, time.Now(), time.Now(), 0, "up")
 	bytesLp, err := logicalplan.Marshal(lp.Root())
+	form := url.Values{}
+	form.Set("plan", string(bytesLp)) // this is to imitate how the real format of http request body
 	require.NoError(t, err)
 	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
-		Type:        schedulerpb.ENQUEUE,
-		QueryID:     3,
-		UserID:      "test",
-		HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: bytesLp},
+		Type:    schedulerpb.ENQUEUE,
+		QueryID: 3,
+		UserID:  "test",
+		//HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: []byte{}},
+		HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: []byte(form.Encode())},
 	})
-	require.NoError(t, querierLoop.Send(&schedulerpb.QuerierToScheduler{QuerierID: "querier-2", QuerierAddress: "localhost:8000"}))
+	require.NoError(t, querierLoop.Send(&schedulerpb.QuerierToScheduler{QuerierID: "querier-1", QuerierAddress: "localhost:8000"}))
 
 	s3, err := querierLoop.Recv()
 	require.NoError(t, err)
@@ -509,12 +514,43 @@ func TestQuerierLoopClient_WithLogicalPlan(t *testing.T) {
 	require.Equal(t, uint64(3), s3.QueryID)
 	require.Empty(t, s3.ChildFragmentID) // there is only one fragment for the logical plan, so no child fragments
 	require.Empty(t, s3.ChildAddr)
-	require.Equal(t, s3.HttpRequest.Body, bytesLp)
+	require.Equal(t, s3.HttpRequest.Body, []byte(form.Encode()))
 	require.True(t, s3.IsRoot)
+
+	// CASE 4
+	scheduler.cleanupMetricsForInactiveUser("test")
+
+	lp_long := createTestLogicalPlan(t, time.Now(), time.Now(), 0, "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) + sum(rate(node_memory_Active_bytes[5m]))")
+	bytesLp_long, err := logicalplan.Marshal(lp_long.Root())
+	form_long := url.Values{}
+	form_long.Set("plan", string(bytesLp_long)) // this is to imitate how the real format of http request body
+	require.NoError(t, err)
+	frontendToScheduler(t, frontendLoop, &schedulerpb.FrontendToScheduler{
+		Type:        schedulerpb.ENQUEUE,
+		QueryID:     4,
+		UserID:      "test",
+		HttpRequest: &httpgrpc.HTTPRequest{Method: "POST", Url: "/hello", Body: []byte(form_long.Encode())},
+	})
+	require.NoError(t, querierLoop.Send(&schedulerpb.QuerierToScheduler{QuerierID: "querier-1", QuerierAddress: "localhost:8000"}))
+	require.NoError(t, promtest.GatherAndCompare(reg, strings.NewReader(`
+		# HELP cortex_query_scheduler_queue_length Number of queries in the queue.
+		# TYPE cortex_query_scheduler_queue_length gauge
+		cortex_query_scheduler_queue_length{priority="0",type="fifo",user="test"} 3
+		# HELP cortex_request_queue_requests_total Total number of query requests going to the request queue.
+		# TYPE cortex_request_queue_requests_total counter
+		cortex_request_queue_requests_total{priority="0",user="test"} 3
+	`), "cortex_query_scheduler_queue_length", "cortex_request_queue_requests_total"))
+
+	s4, err := querierLoop.Recv()
+	require.NoError(t, err)
+	require.NotEmpty(t, s4.FragmentID)
+	require.Equal(t, uint64(4), s4.QueryID)
+	require.NotEmpty(t, s4.ChildFragmentID) // there is only one fragment for the logical plan, so no child fragments
+	require.NotEmpty(t, s4.ChildAddr)
+	require.True(t, s4.IsRoot)
 }
 
 func createTestLogicalPlan(t *testing.T, startTime time.Time, endTime time.Time, step time.Duration, q string) logicalplan.Plan {
-
 	qOpts := query.Options{
 		Start:              startTime,
 		End:                startTime,
@@ -537,8 +573,12 @@ func createTestLogicalPlan(t *testing.T, startTime time.Time, endTime time.Time,
 	}
 
 	logicalPlan := logicalplan.NewFromAST(expr, &qOpts, planOpts)
+	optimizedPlan, _ := logicalPlan.Optimize(logicalplan.DefaultOptimizers)
+	dOptimizer := tripperware.DistributedOptimizer{}
+	dOptimizedPlanNode, _ := dOptimizer.Optimize(optimizedPlan.Root(), &qOpts)
+	lp := logicalplan.New(dOptimizedPlanNode, &qOpts, planOpts)
 
-	return logicalPlan
+	return lp
 }
 
 func initFrontendLoop(t *testing.T, client schedulerpb.SchedulerForFrontendClient, frontendAddr string) schedulerpb.SchedulerForFrontend_FrontendLoopClient {

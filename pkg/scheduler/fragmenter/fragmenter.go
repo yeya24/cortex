@@ -33,14 +33,35 @@ func (s *Fragment) IsEmpty() bool {
 
 func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
 	// TODO: remote node fragmentation logic
-	return []Fragment{
-		{
-			Node:       node,
-			FragmentID: getNewID(),
-			ChildIDs:   []uint64{},
-			IsRoot:     true,
-		},
-	}, nil
+	newFragment := Fragment{}
+	fragments := []Fragment{}
+	nextChildrenIDs := []uint64{}
+	logicalplan.TraverseBottomUp(nil, &node, func(parent, current *logicalplan.Node) bool {
+		if parent == nil { // if we have reached the root
+			newFragment = Fragment{
+				Node:       node,
+				FragmentID: getNewID(),
+				ChildIDs:   nextChildrenIDs,
+				IsRoot:     true,
+			}
+			fragments = append(fragments, newFragment)
+			return false // break the loop
+		}
+		if logicalplan.RemoteExecutionNode == (*parent).Type() {
+			newFragment = Fragment{
+				Node:       *current,
+				FragmentID: getNewID(),
+				ChildIDs:   []uint64{},
+				IsRoot:     false,
+			}
+			fragments = append(fragments, newFragment)
+			nextChildrenIDs = append(nextChildrenIDs, newFragment.ChildIDs...)
+
+		}
+		return false
+	})
+
+	return fragments, nil
 }
 
 type fragmentKey struct {

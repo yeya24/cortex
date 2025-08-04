@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package querierpb;
+
+import "gogoproto/gogo.proto";
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+
+option go_package = "github.com/cortexproject/cortex/pkg/engine/distributed_execution/querierpb";
+
+service QueryServer {
+  rpc Series(SeriesRequest) returns (stream OneSeries) {}
+  rpc Next(NextRequest) returns (stream StepVectorBatch) {}
+}
+
+message SeriesRequest {
+  uint64 fragmentID = 1;
+  int64 batchsize = 2;
+}
+
+message NextRequest {
+  uint64 fragmentID = 1;
+  int64 batchsize = 2;
+}
+
+message OneSeries {
+  repeated Label labels = 1;
+}
+
+message StepVectorBatch {
+  repeated StepVector step_vectors = 1;
+}
+
+message StepVector {
+  int64 t = 1;
+  repeated uint64 sample_IDs = 2;
+  repeated double samples = 3;
+  repeated uint64 histogram_IDs = 4;
+  repeated FloatHistogram histograms = 5;
+}
+
+message Label {
+  string name = 1;
+  string value = 2;
+}
+
+message FloatHistogram {
+
+}

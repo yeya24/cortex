@@ -4,8 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -16,7 +18,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/thanos-io/promql-engine/logicalplan"
 	"github.com/weaveworks/common/httpgrpc"
 	"github.com/weaveworks/common/middleware"
 	"github.com/weaveworks/common/user"
@@ -295,7 +296,12 @@ func (s *Scheduler) fragmentLogicalPlan(req *httpgrpc.HTTPRequest) ([]fragmenter
 		return nil, nil
 	}
 
-	lpNode, err := logicalplan.Unmarshal(req.Body)
+	values, err := url.ParseQuery(string(req.Body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse serialized logical plan: %w", err)
+	}
+	plan := values.Get("plan")
+	lpNode, err := distributed_execution.Unmarshal([]byte(plan))
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal logical plan: %w", err)
 	}

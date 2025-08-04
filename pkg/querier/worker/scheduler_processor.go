@@ -158,7 +158,7 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 			if request.StatsEnabled {
 				level.Info(logger).Log("msg", "started running request")
 			}
-			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest)
+			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest, request.IsRoot)
 
 			if err = ctx.Err(); err != nil {
 				return
@@ -172,7 +172,7 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 	}
 }
 
-func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger, queryID uint64, frontendAddress string, statsEnabled bool, request *httpgrpc.HTTPRequest) {
+func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger, queryID uint64, frontendAddress string, statsEnabled bool, request *httpgrpc.HTTPRequest, isRoot bool) {
 	var stats *querier_stats.QueryStats
 	if statsEnabled {
 		stats, ctx = querier_stats.ContextWithEmptyStats(ctx)
@@ -208,21 +208,23 @@ func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger,
 		}
 	}
 
-	c, err := sp.frontendPool.GetClientFor(frontendAddress)
-	if err == nil {
-		// To prevent querier panic, the panic could happen when the go-routines not-exited
-		// yet in `fetchSeriesFromStores` are increment query-stats while progressing
-		// (*QueryResultRequest).MarshalToSizedBuffer under the same query-stat objects are used.
-		copiedStats := stats.Copy()
-		// Response is empty and uninteresting.
-		_, err = c.(frontendv2pb.FrontendForQuerierClient).QueryResult(ctx, &frontendv2pb.QueryResultRequest{
-			QueryID:      queryID,
-			HttpResponse: response,
-			Stats:        copiedStats,
-		})
-	}
-	if err != nil {
-		level.Error(logger).Log("msg", "error notifying frontend about finished query", "err", err, "frontend", frontendAddress)
+	if isRoot {
+		c, err := sp.frontendPool.GetClientFor(frontendAddress)
+		if err == nil {
+			// To prevent querier panic, the panic could happen when the go-routines not-exited
+			// yet in `fetchSeriesFromStores` are increment query-stats while progressing
+			// (*QueryResultRequest).MarshalToSizedBuffer under the same query-stat objects are used.
+			copiedStats := stats.Copy()
+			// Response is empty and uninteresting.
+			_, err = c.(frontendv2pb.FrontendForQuerierClient).QueryResult(ctx, &frontendv2pb.QueryResultRequest{
+				QueryID:      queryID,
+				HttpResponse: response,
+				Stats:        copiedStats,
+			})
+		}
+		if err != nil {
+			level.Error(logger).Log("msg", "error notifying frontend about finished query", "err", err, "frontend", frontendAddress)
+		}
 	}
 }
 
