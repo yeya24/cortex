@@ -14,6 +14,10 @@ import (
 type NodeType = logicalplan.NodeType
 type Node = logicalplan.Node
 
+const (
+	RemoteNode = "RemoteNode"
+)
+
 // (to verify interface implementations)
 var _ logicalplan.Node = (*Remote)(nil)
 var _ logicalplan.UserDefinedExpr = (*Remote)(nil)
@@ -21,12 +25,13 @@ var _ logicalplan.UserDefinedExpr = (*Remote)(nil)
 type Remote struct {
 	Op   parser.ItemType
 	Expr Node `json:"-"`
+
+	Address string
 }
 
 func NewRemoteNode() Node {
 	return &Remote{}
 }
-
 func (p *Remote) Clone() Node {
 	return &Remote{Op: p.Op, Expr: p.Expr.Clone()}
 }
@@ -39,9 +44,7 @@ func (p *Remote) String() string {
 func (p *Remote) ReturnType() parser.ValueType {
 	return p.Expr.ReturnType()
 }
-func (p *Remote) Type() NodeType {
-	return logicalplan.RemoteExecutionNode
-}
+func (p *Remote) Type() NodeType { return RemoteNode }
 
 func (p *Remote) MakeExecutionOperator(
 	ctx context.Context,
@@ -62,6 +65,8 @@ type DistributedRemoteExecution struct {
 }
 
 func newDistributedRemoteExecution() *DistributedRemoteExecution {
+
+	//
 	return &DistributedRemoteExecution{}
 }
 

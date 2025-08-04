@@ -8,7 +8,7 @@ option (gogoproto.unmarshaler_all) = true;
 
 option go_package = "github.com/cortexproject/cortex/pkg/engine/distributed_execution/querierpb";
 
-service QueryServer {
+service QuerierService {
   rpc Series(SeriesRequest) returns (stream OneSeries) {}
   rpc Next(NextRequest) returns (stream StepVectorBatch) {}
 }
@@ -45,5 +45,4 @@ message Label {
 }
 
 message FloatHistogram {
-
 }

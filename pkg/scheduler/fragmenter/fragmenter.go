@@ -1,6 +1,7 @@
 package fragmenter
 
 import (
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"github.com/thanos-io/promql-engine/logicalplan"
 )
 
@@ -47,7 +48,7 @@ func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
 			fragments = append(fragments, newFragment)
 			return false // break the loop
 		}
-		if logicalplan.RemoteExecutionNode == (*parent).Type() {
+		if distributed_execution.RemoteNode == (*parent).Type() {
 			newFragment = Fragment{
 				Node:       *current,
 				FragmentID: getNewID(),

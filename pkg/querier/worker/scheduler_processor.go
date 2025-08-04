@@ -225,6 +225,13 @@ func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger,
 		if err != nil {
 			level.Error(logger).Log("msg", "error notifying frontend about finished query", "err", err, "frontend", frontendAddress)
 		}
+	} else {
+		// distributed execution enabled and the current fragment is not the root
+		// start timer and wait for parent querier to pick up the response, call it distributed execution
+		
+		// querier client here?
+
+		// level.Error(logger).Log("msg", "waiting for parent querier to pick up fragment result", "err", err, "frontend", frontendAddress)
 	}
 }
 

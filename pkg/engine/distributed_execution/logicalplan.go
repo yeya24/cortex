@@ -176,7 +176,7 @@ func unmarshalNode(data []byte) (logicalplan.Node, error) {
 			return nil, err
 		}
 		return u, nil
-	case logicalplan.RemoteExecutionNode:
+	case RemoteNode:
 		r := &Remote{}
 		if err := json.Unmarshal(t.Data, r); err != nil {
 			return nil, err

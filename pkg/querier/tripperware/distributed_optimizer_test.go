@@ -2,6 +2,7 @@ package tripperware
 
 import (
 	"context"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"github.com/stretchr/testify/require"
 	"github.com/thanos-io/promql-engine/logicalplan"
 	"testing"
@@ -180,7 +181,7 @@ func TestDistributedOptimizer(t *testing.T) {
 			root := req.LogicalPlan.Root()
 			remoteNodeCount := 0
 			logicalplan.TraverseBottomUp(nil, &root, func(parent, current *logicalplan.Node) bool {
-				if logicalplan.RemoteExecutionNode == (*current).Type() {
+				if distributed_execution.RemoteNode == (*current).Type() {
 					remoteNodeCount++
 				}
 				return false
