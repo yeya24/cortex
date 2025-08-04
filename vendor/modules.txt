@@ -1799,6 +1799,9 @@ google.golang.org/grpc/balancer/weightedtarget
 google.golang.org/grpc/balancer/weightedtarget/weightedaggregator
 google.golang.org/grpc/binarylog/grpc_binarylog_v1
 google.golang.org/grpc/channelz
+google.golang.org/grpc/channelz/grpc_channelz_v1
+google.golang.org/grpc/channelz/internal/protoconv
+google.golang.org/grpc/channelz/service
 google.golang.org/grpc/codes
 google.golang.org/grpc/connectivity
 google.golang.org/grpc/credentials

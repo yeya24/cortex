@@ -19,6 +19,20 @@ import (
 	"github.com/cortexproject/cortex/pkg/util/services"
 )
 
+// FrontendPoolConfig is config for creating frontend client pool.
+type FrontendPoolConfig struct {
+	CheckInterval      time.Duration `yaml:"check_interval"`
+	HealthCheckEnabled bool          `yaml:"health_check_enabled"`
+	HealthCheckTimeout time.Duration `yaml:"health_check_timeout"`
+}
+
+// RegisterFlags adds the flags required to config this to the given FlagSet.
+func (cfg *FrontendPoolConfig) RegisterFlags(f *flag.FlagSet) {
+	f.DurationVar(&cfg.CheckInterval, "querier.frontend-pool-check-interval", 5*time.Second, "How frequently to clean up connections to frontend or scheduler.")
+	f.BoolVar(&cfg.HealthCheckEnabled, "querier.frontend-pool-health-check-enabled", true, "Enable health check for frontend or scheduler connections.")
+	f.DurationVar(&cfg.HealthCheckTimeout, "querier.frontend-pool-health-check-timeout", 1*time.Second, "Timeout for health check of frontend or scheduler connections.")
+}
+
 type Config struct {
 	FrontendAddress  string        `yaml:"frontend_address"`
 	SchedulerAddress string        `yaml:"scheduler_address"`
@@ -30,7 +44,8 @@ type Config struct {
 
 	QuerierID string `yaml:"id"`
 
-	GRPCClientConfig grpcclient.Config `yaml:"grpc_client_config"`
+	GRPCClientConfig   grpcclient.Config  `yaml:"grpc_client_config"`
+	FrontendPoolConfig FrontendPoolConfig `yaml:"frontend_pool_config"`
 
 	TargetHeaders []string `yaml:"-"` // Propagated by config.
 }
@@ -46,6 +61,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.StringVar(&cfg.QuerierID, "querier.id", "", "Querier ID, sent to frontend service to identify requests from the same querier. Defaults to hostname.")
 
 	cfg.GRPCClientConfig.RegisterFlagsWithPrefix("querier.frontend-client", "", f)
+	cfg.FrontendPoolConfig.RegisterFlags(f)
 }
 
 func (cfg *Config) Validate(log log.Logger) error {

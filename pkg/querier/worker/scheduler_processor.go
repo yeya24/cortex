@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
@@ -55,9 +54,9 @@ func newSchedulerProcessor(cfg Config, handler RequestHandler, log log.Logger, r
 	})
 
 	poolConfig := client.PoolConfig{
-		CheckInterval:      5 * time.Second,
-		HealthCheckEnabled: true,
-		HealthCheckTimeout: 1 * time.Second,
+		CheckInterval:      cfg.FrontendPoolConfig.CheckInterval,
+		HealthCheckEnabled: cfg.FrontendPoolConfig.HealthCheckEnabled,
+		HealthCheckTimeout: cfg.FrontendPoolConfig.HealthCheckTimeout,
 	}
 
 	p.frontendPool = client.NewPool("frontend", poolConfig, nil, p.createFrontendClient, frontendClientsGauge, log)

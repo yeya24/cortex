@@ -18,6 +18,7 @@ import (
 	prom_storage "github.com/prometheus/prometheus/storage"
 	"github.com/weaveworks/common/server"
 	"github.com/weaveworks/common/signals"
+	channelzservice "google.golang.org/grpc/channelz/service"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"gopkg.in/yaml.v2"
 
@@ -442,6 +443,7 @@ func (t *Cortex) Run() error {
 	// It should reflect entire Cortex.
 	t.Server.HTTP.Path("/ready").Handler(t.readyHandler(sm))
 	grpc_health_v1.RegisterHealthServer(t.Server.GRPC, grpcutil.NewHealthCheck(sm))
+	channelzservice.RegisterChannelzServiceToServer(t.Server.GRPC)
 
 	// Let's listen for events from this manager, and log them.
 	healthy := func() { level.Info(util_log.Logger).Log("msg", "Cortex started") }
