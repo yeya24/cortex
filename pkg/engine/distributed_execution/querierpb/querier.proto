@@ -6,9 +6,9 @@ import "gogoproto/gogo.proto";
 option (gogoproto.marshaler_all) = true;
 option (gogoproto.unmarshaler_all) = true;
 
-option go_package = "github.com/cortexproject/cortex/pkg/engine/distributed_execution/querierpb";
+option go_package = "./pkg/engine/distributed_execution/querierpb";
 
-service QuerierService {
+service Querier {
   rpc Series(SeriesRequest) returns (stream OneSeries) {}
   rpc Next(NextRequest) returns (stream StepVectorBatch) {}
 }
@@ -36,7 +36,7 @@ message StepVector {
   repeated uint64 sample_IDs = 2;
   repeated double samples = 3;
   repeated uint64 histogram_IDs = 4;
-  repeated Histogram histograms = 5;
+  repeated Histogram histograms = 5 [(gogoproto.nullable) = false];
 }
 
 message Label {
