@@ -4,13 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
-
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
+	"github.com/cortexproject/cortex/pkg/ring/client"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"log/slog"
 	"net"
 	"net/http"
 	"runtime"
 	"runtime/debug"
 	"strconv"
+	"time"
 
 	"github.com/go-kit/log/level"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
@@ -363,6 +366,27 @@ func (t *Cortex) initTenantFederation() (serv services.Service, err error) {
 //	                                          │                  │
 //	                                          └──────────────────┘
 func (t *Cortex) initQuerier() (serv services.Service, err error) {
+	// Create new map for caching partial results during distributed execution
+	var queryResultCache *distributed_execution.QueryResultCache
+	var queryServer *distributed_execution.QuerierServer
+
+	if t.Cfg.Querier.DistributedExecEnabled {
+		// set up querier server service and register it
+		queryResultCache = distributed_execution.NewQueryResultCache()
+		queryServer = distributed_execution.NewQuerierServer(queryResultCache)
+
+		go func() {
+			// TODO: make expire time a config var
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+
+			for range ticker.C {
+				queryResultCache.CleanExpired()
+			}
+		}()
+		t.API.RegisterQuerierServer(queryServer)
+	}
+
 	// Create a internal HTTP handler that is configured with the Prometheus API routes and points
 	// to a Prometheus API struct instantiated with the Cortex Queryable.
 	internalQuerierRouter := api.NewQuerierHandler(
@@ -370,6 +394,7 @@ func (t *Cortex) initQuerier() (serv services.Service, err error) {
 		t.QuerierQueryable,
 		t.ExemplarQueryable,
 		t.QuerierEngine,
+		queryResultCache,
 		t.MetadataQuerier,
 		prometheus.DefaultRegisterer,
 		util_log.Logger,
@@ -420,7 +445,33 @@ func (t *Cortex) initQuerier() (serv services.Service, err error) {
 		return nil, err
 	}
 	serverAddress := net.JoinHostPort(ipAddr, strconv.Itoa(t.Cfg.Server.HTTPListenPort))
-	return querier_worker.NewQuerierWorker(t.Cfg.Worker, httpgrpc_server.NewServer(internalQuerierRouter), util_log.Logger, prometheus.DefaultRegisterer, serverAddress)
+
+	if t.Cfg.Querier.DistributedExecEnabled {
+		poolConfig := client.PoolConfig{
+			CheckInterval:      5 * time.Second,
+			HealthCheckEnabled: true,
+			HealthCheckTimeout: 1 * time.Second,
+		}
+
+		querierClientsGauge := promauto.With(prometheus.DefaultRegisterer).NewGauge(prometheus.GaugeOpts{
+			Name: "cortex_querier_service_clients",
+			Help: "The current number of clients connected to this querier",
+		})
+		factory := func(addr string) (client.PoolClient, error) {
+			return distributed_execution.CreateQuerierClient(t.Cfg.QueryScheduler.GRPCClientConfig, addr)
+		}
+		querierPool := client.NewPool("querier", poolConfig, nil, factory, querierClientsGauge, util_log.Logger)
+		internalQuerierRouter = injectPool(internalQuerierRouter, querierPool)
+	}
+
+	return querier_worker.NewQuerierWorker(t.Cfg.Worker, httpgrpc_server.NewServer(internalQuerierRouter), util_log.Logger, prometheus.DefaultRegisterer, serverAddress, t.Cfg.Querier.DistributedExecEnabled, queryResultCache)
+}
+
+func injectPool(next http.Handler, pool *client.Pool) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := distributed_execution.ContextWithPool(r.Context(), pool)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (t *Cortex) initStoreQueryables() (services.Service, error) {

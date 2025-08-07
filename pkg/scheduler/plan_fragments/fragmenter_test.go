@@ -1,38 +1,20 @@
-package fragmenter
+package plan_fragments
 
 import (
-	"github.com/cortexproject/cortex/pkg/querier/tripperware"
-	"github.com/prometheus/prometheus/promql/parser"
-	"github.com/thanos-io/promql-engine/logicalplan"
-	"github.com/thanos-io/promql-engine/query"
 	"testing"
 	"time"
 
+	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/stretchr/testify/require"
+	"github.com/thanos-io/promql-engine/logicalplan"
+	"github.com/thanos-io/promql-engine/query"
+
+	"github.com/cortexproject/cortex/pkg/querier/tripperware"
 )
 
-func TestSchedulerCoordination(t *testing.T) {
-	table := NewFragmentTable()
-	table.AddMapping(uint64(0), uint64(1), "localhost:8000")
-	table.AddMapping(uint64(0), uint64(2), "localhost:8001")
-
-	result, exist := table.GetMapping(uint64(0), []uint64{1, 2})
-	require.True(t, exist)
-	require.Equal(t, []string{"localhost:8000", "localhost:8001"}, result)
-
-	result, exist = table.GetMapping(uint64(0), []uint64{1, 3})
-	require.False(t, exist)
-	require.Empty(t, result)
-
-	result, exist = table.GetMapping(uint64(0), []uint64{1})
-	require.True(t, exist)
-	require.Equal(t, []string{"localhost:8000"}, result)
-
-	table.ClearMappings(uint64(0))
-	result, exist = table.GetMapping(uint64(0), []uint64{1})
-	require.False(t, exist)
-	require.Empty(t, result)
-}
+// This test makes sure that the fragmenter fragments logical plan into the correct number of sub-plans
+// (the number of fragments also depends on the distributed optimizer
+// , so if it changes the expected value will also need to be adjusted)
 
 func TestFragmenter(t *testing.T) {
 	lp := createTestLogicalPlan(t, time.Now(), time.Now(), 0, "sum(rate(node_cpu_seconds_total{mode!=\"idle\"}[5m])) + sum(rate(node_memory_Active_bytes[5m]))")

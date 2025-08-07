@@ -75,6 +75,7 @@ type schedulerProcessor struct {
 	querierAddress string
 
 	frontendPool                  *client.Pool
+	querierPool                   *client.Pool
 	frontendClientRequestDuration *prometheus.HistogramVec
 
 	targetHeaders          []string
@@ -158,27 +159,28 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 			if request.StatsEnabled {
 				level.Info(logger).Log("msg", "started running request")
 			}
-			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest, request.IsRoot)
+
+			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest)
 
 			if err = ctx.Err(); err != nil {
 				return
 			}
 
 			// Report back to scheduler that processing of the query has finished.
-			if err := c.Send(&schedulerpb.QuerierToScheduler{QuerierID: sp.querierID, QuerierAddress: sp.querierAddress}); err != nil {
+			if err := c.Send(&schedulerpb.QuerierToScheduler{}); err != nil {
 				level.Error(logger).Log("msg", "error notifying scheduler about finished query", "err", err, "addr", address)
 			}
 		}()
 	}
 }
 
-func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger, queryID uint64, frontendAddress string, statsEnabled bool, request *httpgrpc.HTTPRequest, isRoot bool) {
+func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger, queryID uint64, frontendAddress string, statsEnabled bool, request *httpgrpc.HTTPRequest) {
 	var stats *querier_stats.QueryStats
 	if statsEnabled {
 		stats, ctx = querier_stats.ContextWithEmptyStats(ctx)
 	}
 
-	response, err := sp.handler.Handle(ctx, request)
+	response, err := sp.handler.Handle(ctx, request) // inject isRoot to ctx then use r.Context().value()
 	if err != nil {
 		var ok bool
 		response, ok = httpgrpc.HTTPResponseFromError(err)
@@ -207,31 +209,21 @@ func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger,
 			Body: []byte(errMsg),
 		}
 	}
-
-	if isRoot {
-		c, err := sp.frontendPool.GetClientFor(frontendAddress)
-		if err == nil {
-			// To prevent querier panic, the panic could happen when the go-routines not-exited
-			// yet in `fetchSeriesFromStores` are increment query-stats while progressing
-			// (*QueryResultRequest).MarshalToSizedBuffer under the same query-stat objects are used.
-			copiedStats := stats.Copy()
-			// Response is empty and uninteresting.
-			_, err = c.(frontendv2pb.FrontendForQuerierClient).QueryResult(ctx, &frontendv2pb.QueryResultRequest{
-				QueryID:      queryID,
-				HttpResponse: response,
-				Stats:        copiedStats,
-			})
-		}
-		if err != nil {
-			level.Error(logger).Log("msg", "error notifying frontend about finished query", "err", err, "frontend", frontendAddress)
-		}
-	} else {
-		// distributed execution enabled and the current fragment is not the root
-		// start timer and wait for parent querier to pick up the response, call it distributed execution
-		
-		// querier client here?
-
-		// level.Error(logger).Log("msg", "waiting for parent querier to pick up fragment result", "err", err, "frontend", frontendAddress)
+	c, err := sp.frontendPool.GetClientFor(frontendAddress)
+	if err == nil {
+		// To prevent querier panic, the panic could happen when the go-routines not-exited
+		// yet in `fetchSeriesFromStores` are increment query-stats while progressing
+		// (*QueryResultRequest).MarshalToSizedBuffer under the same query-stat objects are used.
+		copiedStats := stats.Copy()
+		// Response is empty and uninteresting.
+		_, err = c.(frontendv2pb.FrontendForQuerierClient).QueryResult(ctx, &frontendv2pb.QueryResultRequest{
+			QueryID:      queryID,
+			HttpResponse: response,
+			Stats:        copiedStats,
+		})
+	}
+	if err != nil {
+		level.Error(logger).Log("msg", "error notifying frontend about finished query", "err", err, "frontend", frontendAddress)
 	}
 }
 

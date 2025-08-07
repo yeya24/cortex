@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"flag"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"os"
 	"sync"
 	"time"
@@ -91,7 +92,8 @@ type querierWorker struct {
 	managers map[string]*processorManager
 }
 
-func NewQuerierWorker(cfg Config, handler RequestHandler, log log.Logger, reg prometheus.Registerer, querierAddr string) (services.Service, error) {
+func NewQuerierWorker(cfg Config, handler RequestHandler, log log.Logger, reg prometheus.Registerer, querierAddr string,
+	distributedExecEnabled bool, queryResultCache *distributed_execution.QueryResultCache) (services.Service, error) {
 	if cfg.QuerierID == "" {
 		hostname, err := os.Hostname()
 		if err != nil {

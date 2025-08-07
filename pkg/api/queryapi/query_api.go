@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
+	"github.com/cortexproject/cortex/pkg/scheduler/plan_fragments"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,17 +27,19 @@ import (
 )
 
 type QueryAPI struct {
-	queryable     storage.SampleAndChunkQueryable
-	queryEngine   engine.QueryEngine
-	now           func() time.Time
-	statsRenderer v1.StatsRenderer
-	logger        log.Logger
-	codecs        []v1.Codec
-	CORSOrigin    *regexp.Regexp
+	queryable        storage.SampleAndChunkQueryable
+	queryEngine      engine.QueryEngine
+	queryResultCache *distributed_execution.QueryResultCache
+	now              func() time.Time
+	statsRenderer    v1.StatsRenderer
+	logger           log.Logger
+	codecs           []v1.Codec
+	CORSOrigin       *regexp.Regexp
 }
 
 func NewQueryAPI(
 	qe engine.QueryEngine,
+	queryResultCache *distributed_execution.QueryResultCache,
 	q storage.SampleAndChunkQueryable,
 	statsRenderer v1.StatsRenderer,
 	logger log.Logger,
@@ -44,13 +47,14 @@ func NewQueryAPI(
 	CORSOrigin *regexp.Regexp,
 ) *QueryAPI {
 	return &QueryAPI{
-		queryEngine:   qe,
-		queryable:     q,
-		statsRenderer: statsRenderer,
-		logger:        logger,
-		codecs:        codecs,
-		CORSOrigin:    CORSOrigin,
-		now:           time.Now,
+		queryEngine:      qe,
+		queryResultCache: queryResultCache,
+		queryable:        q,
+		statsRenderer:    statsRenderer,
+		logger:           logger,
+		codecs:           codecs,
+		CORSOrigin:       CORSOrigin,
+		now:              time.Now,
 	}
 }
 
@@ -136,6 +140,13 @@ func (q *QueryAPI) RangeQueryHandler(r *http.Request) (result apiFuncResult) {
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
+	// TODO: if distributed exec enabled
+	isRoot, queryID, fragmentID, _ := plan_fragments.ExtractFragmentMetaData(ctx)
+	if !isRoot {
+		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+		q.queryResultCache.InitWriting(key)
+	}
+
 	res := qry.Exec(ctx)
 	if res.Err != nil {
 		return apiFuncResult{nil, returnAPIError(res.Err), res.Warnings, qry.Close}
@@ -178,6 +189,13 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 	ctx = engine.AddEngineTypeToContext(ctx, r)
 	ctx = querier.AddBlockStoreTypeToContext(ctx, r.Header.Get(querier.BlockStoreTypeHeader))
 
+	// TODO: if distributed exec enabled
+	isRoot, queryID, fragmentID, _ := plan_fragments.ExtractFragmentMetaData(ctx)
+	if !isRoot {
+		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+		q.queryResultCache.InitWriting(key)
+	}
+
 	var qry promql.Query
 	tsTime := convertMsToTime(ts)
 
@@ -185,10 +203,18 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 	if len(byteLP) != 0 {
 		logicalPlan, err := distributed_execution.Unmarshal(byteLP)
 		if err != nil {
+			if !isRoot {
+				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+				q.queryResultCache.SetError(key)
+			}
 			return apiFuncResult{nil, &apiError{errorInternal, fmt.Errorf("invalid logical plan: %v", err)}, nil, nil}
 		}
 		qry, err = q.queryEngine.MakeInstantQueryFromPlan(ctx, q.queryable, opts, logicalPlan, tsTime, r.FormValue("query"))
 		if err != nil {
+			if !isRoot {
+				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+				q.queryResultCache.SetError(key)
+			}
 			return apiFuncResult{nil, &apiError{errorInternal, fmt.Errorf("failed to create instant query from logical plan: %v", err)}, nil, nil}
 		}
 	} else { // if there is logical plan field is empty, fall back
@@ -239,6 +265,18 @@ func (q *QueryAPI) Wrap(f apiFunc) http.HandlerFunc {
 		}
 
 		if result.data != nil {
+			// TODO: if distributed exec enabled
+			ctx := httputil.ContextFromRequest(r.Context(), r)
+			isRoot, queryID, fragmentID, _ := plan_fragments.ExtractFragmentMetaData(ctx)
+			if !isRoot {
+				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+				result := distributed_execution.FragmentResult{
+					Data:       result.data,
+					Expiration: time.Now().Add(time.Hour),
+				}
+				q.queryResultCache.SetComplete(key, result)
+				return
+			}
 			q.respond(w, r, result.data, result.warnings, r.FormValue("query"))
 			return
 		}

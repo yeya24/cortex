@@ -5,6 +5,7 @@ package querierpb;
 import "gogoproto/gogo.proto";
 option (gogoproto.marshaler_all) = true;
 option (gogoproto.unmarshaler_all) = true;
+option (gogoproto.sizer_all) = true;
 
 option go_package = "./pkg/engine/distributed_execution/querierpb";
 
@@ -14,13 +15,15 @@ service Querier {
 }
 
 message SeriesRequest {
-  uint64 fragmentID = 1;
-  int64 batchsize = 2;
+  uint64 queryID = 1;
+  uint64 fragmentID = 2;
+  int64 batchsize = 3;
 }
 
 message NextRequest {
-  uint64 fragmentID = 1;
-  int64 batchsize = 2;
+  uint64 queryID = 1;
+  uint64 fragmentID = 2;
+  int64 batchsize = 3;
 }
 
 message OneSeries {

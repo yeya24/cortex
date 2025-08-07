@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"flag"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution/querierpb"
 	"net/http"
 	"path"
 	"strings"
@@ -478,6 +480,10 @@ func (a *API) RegisterQueryFrontend2(f *frontendv2.Frontend) {
 func (a *API) RegisterQueryScheduler(f *scheduler.Scheduler) {
 	schedulerpb.RegisterSchedulerForFrontendServer(a.server.GRPC, f)
 	schedulerpb.RegisterSchedulerForQuerierServer(a.server.GRPC, f)
+}
+
+func (a *API) RegisterQuerierServer(q *distributed_execution.QuerierServer) {
+	querierpb.RegisterQuerierServer(a.server.GRPC, q)
 }
 
 // RegisterServiceMapHandler registers the Cortex structs service handler

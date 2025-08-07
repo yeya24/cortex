@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"html/template"
 	"net/http"
 	"path"
@@ -164,6 +165,7 @@ func NewQuerierHandler(
 	queryable storage.SampleAndChunkQueryable,
 	exemplarQueryable storage.ExemplarQueryable,
 	engine engine.QueryEngine,
+	queryResultCache *distributed_execution.QueryResultCache,
 	metadataQuerier querier.MetadataQuerier,
 	reg prometheus.Registerer,
 	logger log.Logger,
@@ -280,7 +282,7 @@ func NewQuerierHandler(
 	legacyPromRouter := route.New().WithPrefix(path.Join(legacyPrefix, "/api/v1"))
 	api.Register(legacyPromRouter)
 
-	queryAPI := queryapi.NewQueryAPI(engine, translateSampleAndChunkQueryable, statsRenderer, logger, codecs, corsOrigin)
+	queryAPI := queryapi.NewQueryAPI(engine, queryResultCache, translateSampleAndChunkQueryable, statsRenderer, logger, codecs, corsOrigin)
 
 	// TODO(gotjosh): This custom handler is temporary until we're able to vendor the changes in:
 	// https://github.com/prometheus/prometheus/pull/7125/files

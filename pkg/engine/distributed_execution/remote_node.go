@@ -3,12 +3,9 @@ package distributed_execution
 import (
 	"context"
 	"fmt"
-	otgrpc "github.com/opentracing-contrib/go-grpc"
-	"github.com/opentracing/opentracing-go"
-	"google.golang.org/grpc"
+	"github.com/cortexproject/cortex/pkg/ring/client"
 	"io"
 
-	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
@@ -55,13 +52,31 @@ func (p *Remote) ReturnType() parser.ValueType {
 }
 func (p *Remote) Type() NodeType { return RemoteNode }
 
+type poolKey struct{}
+
+func ContextWithPool(ctx context.Context, pool *client.Pool) context.Context {
+	return context.WithValue(ctx, poolKey{}, pool)
+}
+
+func PoolFromContext(ctx context.Context) *client.Pool {
+	if pool, ok := ctx.Value(poolKey{}).(*client.Pool); ok {
+		return pool
+	}
+	return nil
+}
+
 func (p *Remote) MakeExecutionOperator(
 	ctx context.Context,
 	vectors *model.VectorPool,
 	opts *query.Options,
 	hints storage.SelectHints,
 ) (model.VectorOperator, error) {
-	remoteExec, err := newDistributedRemoteExecution(p.Address)
+	pool := PoolFromContext(ctx)
+	if pool == nil {
+		return nil, fmt.Errorf("client pool not found in context")
+	}
+
+	remoteExec, err := newDistributedRemoteExecution(p.Address, pool)
 	if err != nil {
 		return nil, err
 	}
@@ -73,25 +88,22 @@ type DistributedRemoteExecution struct {
 	fragmentID uint64
 	batchSize  int64
 	series     []labels.Labels
-	conn       *grpc.ClientConn
 	addr       string
 }
 
-func newDistributedRemoteExecution(addr string) (*DistributedRemoteExecution, error) {
-	opts := []grpc.DialOption{
-		grpc.WithUnaryInterceptor(otgrpc.OpenTracingClientInterceptor(opentracing.GlobalTracer())),
-		grpc.WithStreamInterceptor(otgrpc.OpenTracingStreamClientInterceptor(opentracing.GlobalTracer())),
-	}
-
-	conn, err := grpc.NewClient(addr, opts...)
+func newDistributedRemoteExecution(addr string, pool *client.Pool) (*DistributedRemoteExecution, error) {
+	poolClient, err := pool.GetClientFor(addr)
 	if err != nil {
 		return nil, err
 	}
 
-	client := querierpb.NewQuerierClient(conn)
+	client, ok := poolClient.(*querierClient)
+	if !ok {
+		return nil, fmt.Errorf("invalid client type from pool")
+	}
+
 	return &DistributedRemoteExecution{
 		client:    client,
-		conn:      conn,
 		addr:      addr,
 		batchSize: 1000,
 	}, nil
@@ -162,49 +174,7 @@ func (d *DistributedRemoteExecution) Next(ctx context.Context) ([]model.StepVect
 			Histograms:   FloatHistogramProtoToFloatHistograms(sv.Histograms),
 		}
 	}
-
 	return result, nil
-}
-
-func (d *DistributedRemoteExecution) Close() error {
-	return d.conn.Close()
-}
-
-func FloatHistogramProtoToFloatHistograms(hps []querierpb.Histogram) []*histogram.FloatHistogram {
-	floatHistograms := make([]*histogram.FloatHistogram, len(hps))
-	for _, hp := range hps {
-		newHist := FloatHistogramProtoToFloatHistogram(hp)
-		floatHistograms = append(floatHistograms, newHist)
-	}
-	return floatHistograms
-}
-
-func FloatHistogramProtoToFloatHistogram(hp querierpb.Histogram) *histogram.FloatHistogram {
-	_, IsFloatHist := hp.GetCount().(*querierpb.Histogram_CountFloat)
-	if !IsFloatHist {
-		panic("FloatHistogramProtoToFloatHistogram called with an integer histogram")
-	}
-	return &histogram.FloatHistogram{
-		CounterResetHint: histogram.CounterResetHint(hp.ResetHint),
-		Schema:           hp.Schema,
-		ZeroThreshold:    hp.ZeroThreshold,
-		ZeroCount:        hp.GetZeroCountFloat(),
-		Count:            hp.GetCountFloat(),
-		Sum:              hp.Sum,
-		PositiveSpans:    spansProtoToSpans(hp.GetPositiveSpans()),
-		PositiveBuckets:  hp.GetPositiveCounts(),
-		NegativeSpans:    spansProtoToSpans(hp.GetNegativeSpans()),
-		NegativeBuckets:  hp.GetNegativeCounts(),
-	}
-}
-
-func spansProtoToSpans(s []querierpb.BucketSpan) []histogram.Span {
-	spans := make([]histogram.Span, len(s))
-	for i := 0; i < len(s); i++ {
-		spans[i] = histogram.Span{Offset: s[i].Offset, Length: s[i].Length}
-	}
-
-	return spans
 }
 
 func (d DistributedRemoteExecution) GetPool() *model.VectorPool {

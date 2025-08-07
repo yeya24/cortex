@@ -1,7 +1,9 @@
-package fragmenter
+package plan_fragments
 
 import (
+	"encoding/binary"
 	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
+	"github.com/google/uuid"
 	"github.com/thanos-io/promql-engine/logicalplan"
 )
 
@@ -13,7 +15,8 @@ type Fragment struct {
 }
 
 func getNewID() uint64 {
-	return 1 // for dummy fragmenter testing
+	id := uuid.New()
+	return binary.BigEndian.Uint64(id[:8])
 }
 
 func (s *Fragment) IsEmpty() bool {
@@ -33,7 +36,6 @@ func (s *Fragment) IsEmpty() bool {
 }
 
 func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
-	// TODO: remote node fragmentation logic
 	newFragment := Fragment{}
 	fragments := []Fragment{}
 	nextChildrenIDs := []uint64{}
@@ -56,52 +58,10 @@ func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
 				IsRoot:     false,
 			}
 			fragments = append(fragments, newFragment)
-			nextChildrenIDs = append(nextChildrenIDs, newFragment.ChildIDs...)
-
+			nextChildrenIDs = append(nextChildrenIDs, newFragment.FragmentID)
 		}
 		return false
 	})
 
 	return fragments, nil
-}
-
-type fragmentKey struct {
-	queryID    uint64
-	fragmentID uint64
-}
-
-type FragmentTable struct {
-	mappings map[fragmentKey]string
-}
-
-func NewFragmentTable() *FragmentTable {
-	return &FragmentTable{
-		mappings: make(map[fragmentKey]string),
-	}
-}
-
-func (f *FragmentTable) AddMapping(queryID uint64, fragmentID uint64, addr string) {
-	key := fragmentKey{queryID: queryID, fragmentID: fragmentID}
-	f.mappings[key] = addr
-}
-
-func (f *FragmentTable) GetMapping(queryID uint64, fragmentIDs []uint64) ([]string, bool) {
-	var addresses []string
-	for _, fragmentID := range fragmentIDs {
-		key := fragmentKey{queryID: queryID, fragmentID: fragmentID}
-		if addr, ok := f.mappings[key]; ok {
-			addresses = append(addresses, addr)
-		} else {
-			return nil, false
-		}
-	}
-	return addresses, true
-}
-
-func (f *FragmentTable) ClearMappings(queryID uint64) {
-	for key := range f.mappings {
-		if key.queryID == queryID {
-			delete(f.mappings, key)
-		}
-	}
 }
