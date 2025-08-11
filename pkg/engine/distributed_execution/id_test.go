@@ -1,7 +1,8 @@
-package plan_fragments
+package distributed_execution
 
 import (
 	"context"
+	"github.com/cortexproject/cortex/pkg/scheduler/plan_fragments"
 	"github.com/stretchr/testify/require"
 	"testing"
 )
@@ -13,13 +14,13 @@ func TestFragmentMetadata(t *testing.T) {
 	t.Run("basic injection and extraction", func(t *testing.T) {
 
 		ctx := context.Background()
-		fragment := Fragment{
+		fragment := plan_fragments.Fragment{
 			FragmentID: 123,
 			IsRoot:     true,
 		}
 		queryID := uint64(456)
 
-		ctx = InjectFragmentMetaData(ctx, fragment, queryID)
+		ctx = InjectFragmentMetaData(ctx, fragment.FragmentID, queryID, fragment.IsRoot, fragment.ChildIDs)
 
 		isRoot, qID, fID, ok := ExtractFragmentMetaData(ctx)
 		require.True(t, ok)
@@ -40,8 +41,8 @@ func TestFragmentMetadata(t *testing.T) {
 
 	t.Run("zero values", func(t *testing.T) {
 		ctx := context.Background()
-		fragment := Fragment{}
-		ctx = InjectFragmentMetaData(ctx, fragment, 0)
+		fragment := plan_fragments.Fragment{}
+		ctx = InjectFragmentMetaData(ctx, fragment.FragmentID, 0, fragment.IsRoot, fragment.ChildIDs)
 
 		isRoot, queryID, fragmentID, ok := ExtractFragmentMetaData(ctx)
 		require.True(t, ok)

@@ -35,7 +35,9 @@ func (s *Fragment) IsEmpty() bool {
 	return true
 }
 
-func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
+// FragmentLogicalPlanNode fragment the logical plan by the remote node
+// and inserts the child fragment information into it
+func FragmentLogicalPlanNode(queryID uint64, node logicalplan.Node) ([]Fragment, error) {
 	newFragment := Fragment{}
 	fragments := []Fragment{}
 	nextChildrenIDs := []uint64{}
@@ -59,6 +61,10 @@ func FragmentLogicalPlanNode(node logicalplan.Node) ([]Fragment, error) {
 			}
 			fragments = append(fragments, newFragment)
 			nextChildrenIDs = append(nextChildrenIDs, newFragment.FragmentID)
+
+			// append remote node information that will be used in the execution stage
+			key := distributed_execution.MakeFragmentKey(queryID, newFragment.FragmentID)
+			(*parent).(*distributed_execution.Remote).FragmentKey = *key
 		}
 		return false
 	})

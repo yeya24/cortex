@@ -3,6 +3,7 @@ package queryrange
 import (
 	"bytes"
 	"context"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,7 +15,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	otlog "github.com/opentracing/opentracing-go/log"
 	"github.com/prometheus/common/model"
-	"github.com/thanos-io/promql-engine/logicalplan"
 	"github.com/weaveworks/common/httpgrpc"
 
 	"github.com/cortexproject/cortex/pkg/api/queryapi"
@@ -165,7 +165,7 @@ func (c prometheusCodec) getSerializedBody(promReq *tripperware.PrometheusReques
 	var err error
 
 	if promReq.LogicalPlan != nil {
-		byteLP, err = logicalplan.Marshal(promReq.LogicalPlan.Root())
+		byteLP, err = distributed_execution.Marshal(promReq.LogicalPlan.Root())
 		if err != nil {
 			return nil, err
 		}

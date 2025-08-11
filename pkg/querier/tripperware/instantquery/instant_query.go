@@ -3,6 +3,7 @@ package instantquery
 import (
 	"bytes"
 	"context"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"io"
 	"net/http"
 	"net/url"
@@ -23,8 +24,6 @@ import (
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/cortexproject/cortex/pkg/util/limiter"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
-
-	"github.com/thanos-io/promql-engine/logicalplan"
 )
 
 var (
@@ -173,7 +172,7 @@ func (c instantQueryCodec) getSerializedBody(promReq *tripperware.PrometheusRequ
 	var err error
 
 	if promReq.LogicalPlan != nil {
-		byteLP, err = logicalplan.Marshal(promReq.LogicalPlan.Root())
+		byteLP, err = distributed_execution.Marshal(promReq.LogicalPlan.Root())
 		if err != nil {
 			return nil, err
 		}

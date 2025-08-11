@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"net/http"
 	"time"
 
@@ -47,7 +48,7 @@ func newSchedulerProcessor(cfg Config, handler RequestHandler, log log.Logger, r
 			Help:    "Time spend doing requests to frontend.",
 			Buckets: prometheus.ExponentialBuckets(0.001, 4, 6),
 		}, []string{"operation", "status_code"}),
-		querierAddress: querierAddress,
+		querierAddress: querierAddress, // the current querier's address
 	}
 
 	frontendClientsGauge := promauto.With(reg).NewGauge(prometheus.GaugeOpts{
@@ -159,6 +160,13 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 			if request.StatsEnabled {
 				level.Info(logger).Log("msg", "started running request")
 			}
+
+			ctx = distributed_execution.InjectFragmentMetaData(ctx, request.FragmentID, request.QueryID, request.IsRoot, request.ChildFragmentID, request.ChildAddr)
+
+			// if this is a child fragment, then it doesn't matter
+			// if this is a parent fragment (with remote nodes), then we need the addresses of the queriers that have the child fragments
+
+			ctx = context.WithValue(ctx, distributed_execution.QuerierAddrKey{}, sp.querierAddress)
 
 			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest)
 

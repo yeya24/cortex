@@ -21,7 +21,7 @@ func (f *FragmentTable) AddMapping(queryID uint64, fragmentID uint64, addr strin
 	defer f.mu.Unlock()
 
 	key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-	f.mappings[key] = addr
+	f.mappings[*key] = addr
 }
 
 func (f *FragmentTable) GetMapping(queryID uint64, fragmentIDs []uint64) ([]string, bool) {
@@ -32,7 +32,7 @@ func (f *FragmentTable) GetMapping(queryID uint64, fragmentIDs []uint64) ([]stri
 
 	for _, fragmentID := range fragmentIDs {
 		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-		if addr, ok := f.mappings[key]; ok {
+		if addr, ok := f.mappings[*key]; ok {
 			addresses = append(addresses, addr)
 		} else {
 			return nil, false

@@ -3,10 +3,9 @@ package distributed_execution
 import (
 	"bytes"
 	"encoding/json"
-	"math"
-
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/thanos-io/promql-engine/logicalplan"
+	"math"
 )
 
 type jsonNode struct {
@@ -20,6 +19,46 @@ const (
 	infVal    = `"+Inf"`
 	negInfVal = `"-Inf"`
 )
+
+func Marshal(node Node) ([]byte, error) {
+	clone := node.Clone()
+	return marshalNode(clone)
+}
+
+func marshalNode(node Node) ([]byte, error) {
+	children := make([]json.RawMessage, 0, len(node.Children()))
+	for _, c := range node.Children() {
+		childData, err := marshalNode(*c)
+		if err != nil {
+			return nil, err
+		}
+		children = append(children, childData)
+	}
+	var data json.RawMessage = nil
+	if n, ok := node.(*logicalplan.NumberLiteral); ok {
+		if math.IsInf(n.Val, 1) {
+			data = json.RawMessage(infVal)
+		}
+		if math.IsInf(n.Val, -1) {
+			data = json.RawMessage(negInfVal)
+		}
+		if math.IsNaN(n.Val) {
+			data = json.RawMessage(nanVal)
+		}
+	}
+	if data == nil {
+		var err error
+		data, err = json.Marshal(node)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(jsonNode{
+		Type:     node.Type(),
+		Data:     data,
+		Children: children,
+	})
+}
 
 func Unmarshal(data []byte) (logicalplan.Node, error) {
 	return unmarshalNode(data)

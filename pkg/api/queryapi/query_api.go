@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
-	"github.com/cortexproject/cortex/pkg/scheduler/plan_fragments"
 	"net/http"
 	"strconv"
 	"time"
@@ -141,10 +140,10 @@ func (q *QueryAPI) RangeQueryHandler(r *http.Request) (result apiFuncResult) {
 	ctx = httputil.ContextFromRequest(ctx, r)
 
 	// TODO: if distributed exec enabled
-	isRoot, queryID, fragmentID, _ := plan_fragments.ExtractFragmentMetaData(ctx)
+	isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
 	if !isRoot {
 		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-		q.queryResultCache.InitWriting(key)
+		q.queryResultCache.InitWriting(*key)
 	}
 
 	res := qry.Exec(ctx)
@@ -190,10 +189,10 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 	ctx = querier.AddBlockStoreTypeToContext(ctx, r.Header.Get(querier.BlockStoreTypeHeader))
 
 	// TODO: if distributed exec enabled
-	isRoot, queryID, fragmentID, _ := plan_fragments.ExtractFragmentMetaData(ctx)
+	isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
 	if !isRoot {
 		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-		q.queryResultCache.InitWriting(key)
+		q.queryResultCache.InitWriting(*key)
 	}
 
 	var qry promql.Query
@@ -205,7 +204,7 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 		if err != nil {
 			if !isRoot {
 				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-				q.queryResultCache.SetError(key)
+				q.queryResultCache.SetError(*key)
 			}
 			return apiFuncResult{nil, &apiError{errorInternal, fmt.Errorf("invalid logical plan: %v", err)}, nil, nil}
 		}
@@ -213,7 +212,7 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 		if err != nil {
 			if !isRoot {
 				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-				q.queryResultCache.SetError(key)
+				q.queryResultCache.SetError(*key)
 			}
 			return apiFuncResult{nil, &apiError{errorInternal, fmt.Errorf("failed to create instant query from logical plan: %v", err)}, nil, nil}
 		}
@@ -267,14 +266,14 @@ func (q *QueryAPI) Wrap(f apiFunc) http.HandlerFunc {
 		if result.data != nil {
 			// TODO: if distributed exec enabled
 			ctx := httputil.ContextFromRequest(r.Context(), r)
-			isRoot, queryID, fragmentID, _ := plan_fragments.ExtractFragmentMetaData(ctx)
+			isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
 			if !isRoot {
 				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
 				result := distributed_execution.FragmentResult{
 					Data:       result.data,
 					Expiration: time.Now().Add(time.Hour),
 				}
-				q.queryResultCache.SetComplete(key, result)
+				q.queryResultCache.SetComplete(*key, result)
 				return
 			}
 			q.respond(w, r, result.data, result.warnings, r.FormValue("query"))
