@@ -23,16 +23,17 @@ func NewCygnusWriter(writer DataFileEntryWriter) *CygnusWriter {
 }
 
 type Writer interface {
-	Write(ctx context.Context, path string, tenantID string) error
+	Write(ctx context.Context, filePath, keyPath string, tenantID string) error
 }
 
-func (c *CygnusWriter) Write(ctx context.Context, path string, tenantID string) error {
-	f, err := parquet_storage.OpenFromFile(ctx, path, c.parquetFileOptions)
+func (c *CygnusWriter) Write(ctx context.Context, filePath, keyPath string, tenantID string) error {
+	f, err := parquet_storage.OpenFromFile(ctx, filePath, c.parquetFileOptions)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
-	df := ParquetToDataFileV1(f)
+	df := ParquetToDataFileV1(f, keyPath)
 	if err := c.writer.Publish(ctx, []*DataFileV1{df}, tenantID); err != nil {
 		return err
 	}

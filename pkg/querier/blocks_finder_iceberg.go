@@ -21,7 +21,6 @@ import (
 
 	"github.com/cortexproject/cortex/pkg/cygnus"
 
-	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	"github.com/cortexproject/cortex/pkg/storage/parquet"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	"github.com/cortexproject/cortex/pkg/util/services"
@@ -39,11 +38,11 @@ type IcebergBlocksFinderConfig struct {
 type IcebergBlocksFinder struct {
 	services.Service
 
-	cfg     BucketIndexBlocksFinderConfig
+	cfg     IcebergBlocksFinderConfig
 	catalog table.CatalogIO
 }
 
-func NewIcebergBlocksFinder(cfg BucketIndexBlocksFinderConfig, bkt objstore.Bucket, cfgProvider bucket.TenantConfigProvider, logger log.Logger, reg prometheus.Registerer) *IcebergBlocksFinder {
+func NewIcebergBlocksFinder(cfg BucketIndexBlocksFinderConfig, bkt objstore.Bucket, logger log.Logger, reg prometheus.Registerer) *IcebergBlocksFinder {
 	catalog := cygnus.NewCatalog(ddb, tableName)
 	return &IcebergBlocksFinder{
 		cfg:     cfg,
@@ -100,7 +99,7 @@ func (r *IcebergBlocksFinder) GetBlocks(ctx context.Context, userID string, minT
 				results = append(results, &bucketindex.Block{
 					Parquet: &parquet.ConverterMarkMeta{},
 					// TODO: fix it
-					ID: entry.DataFile().FilePath(),
+					ID: ulid.MustNew(0, nil),
 				})
 				resultsMtx.Unlock()
 			}

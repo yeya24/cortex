@@ -6,7 +6,7 @@ import (
 )
 
 // ParquetToDataFileV1 extracts metadata from a parquet file and converts it to DataFileV1 format
-func ParquetToDataFileV1(pf parquet.FileView) *DataFileV1 {
+func ParquetToDataFileV1(pf parquet.FileView, filePath string) *DataFileV1 {
 	metadata := pf.Metadata()
 	if metadata == nil {
 		// Create empty metadata if none exists
@@ -17,6 +17,7 @@ func ParquetToDataFileV1(pf parquet.FileView) *DataFileV1 {
 
 	// Extract basic file information
 	dataFileV1 := &DataFileV1{
+		FilePath:         filePath,
 		FileFormat:       FileFormatParquet,
 		RecordCount:      uint64(metadata.NumRows),
 		FileSizeInBytes:  uint64(pf.Size()),
@@ -106,20 +107,9 @@ func ParquetToDataFileV1(pf parquet.FileView) *DataFileV1 {
 		}
 	}
 
-	// // Extract schema references
-	// if len(metadata.Schema) > 0 {
-	// 	for _, schemaElement := range metadata.Schema {
-	// 		if schemaElement.Name != "" {
-	// 			// Create a simple hash for the schema element
-	// 			hash := fmt.Sprintf("%s-%d", schemaElement.Name, schemaElement.Type)
-	// 			schemaRef := &SchemaReference{
-	// 				Name: schemaElement.Name,
-	// 				Hash: hash,
-	// 			}
-	// 			dataFileV1.SchemaReferences = append(dataFileV1.SchemaReferences, schemaRef)
-	// 		}
-	// 	}
-	// }
+	for _, col := range schema.Columns() {
+		dataFileV1.IndexedFields = append(dataFileV1.IndexedFields, col[0])
+	}
 
 	return dataFileV1
 }

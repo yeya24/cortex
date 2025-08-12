@@ -7,6 +7,7 @@ import (
 	"github.com/apache/iceberg-go"
 	iceio "github.com/apache/iceberg-go/io"
 	"github.com/apache/iceberg-go/table"
+	"github.com/apache/iceberg-go/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -21,12 +22,14 @@ const (
 type Catalog struct {
 	tableName string
 	ddb       *dynamodb.Client
+	awsCfg    *aws.Config
 }
 
-func NewCatalog(ddb *dynamodb.Client, tableName string) *Catalog {
+func NewCatalog(awsCfg *aws.Config, tableName string) *Catalog {
 	return &Catalog{
 		tableName: tableName,
-		ddb:       ddb,
+		ddb:       dynamodb.NewFromConfig(*awsCfg),
+		awsCfg:    awsCfg,
 	}
 }
 
@@ -34,24 +37,29 @@ func (c *Catalog) LoadTable(ctx context.Context, identifier table.Identifier, _ 
 	output, err := c.ddb.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: aws.String(c.tableName),
 		Key: map[string]types.AttributeValue{
-			identifierKey: &types.AttributeValueMemberS{Value: identifier[0]},
-			namespaceKey:  &types.AttributeValueMemberS{Value: identifier[1]},
+			namespaceKey:  &types.AttributeValueMemberS{Value: identifier[0]},
+			identifierKey: &types.AttributeValueMemberS{Value: identifier[1]},
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	metadataLocation, ok := output.Item[metadataLocationColumn].(*types.AttributeValueMemberS)
+	metadataLocationS, ok := output.Item[metadataLocationColumn].(*types.AttributeValueMemberS)
 	if !ok {
 		return nil, fmt.Errorf("metadata location not found")
 	}
 
+	metadataLocation := metadataLocationS.Value
+	fmt.Println("metadataLocation", metadataLocation)
+
+	ctx = utils.WithAwsConfig(ctx, c.awsCfg)
+
 	return table.NewFromLocation(
 		ctx,
 		identifier,
-		metadataLocation.Value,
-		iceio.LoadFSFunc(nil, metadataLocation.Value),
+		metadataLocation,
+		iceio.LoadFSFunc(nil, metadataLocation),
 		c,
 	)
 }

@@ -495,7 +495,7 @@ func (c *Converter) convertUser(ctx context.Context, logger log.Logger, ring rin
 
 		labelsFileName := schema.LabelsPfileNameForShard(b.ULID.String(), 0)
 		path := filepath.Join(bdir, labelsFileName)
-		if err := c.cygnusWriter.Write(ctx, path, userID); err != nil {
+		if err := c.cygnusWriter.Write(ctx, path, labelsFileName, userID); err != nil {
 			level.Error(logger).Log("msg", "failed to write labels file", "block", b.ULID.String(), "err", err)
 			continue
 		}
