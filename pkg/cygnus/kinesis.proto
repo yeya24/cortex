@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package cygnus;
+
+option go_package = "cygnus";
+
+import "gogoproto/gogo.proto";
+
+option (gogoproto.marshaler_all) = true;
+option (gogoproto.unmarshaler_all) = true;
+
+/*=================================*/
+/*       DataFileEntry Stream      */
+/*=================================*/
+message DataFileEntryRecord {
+  DataFileEntry dataFileEntry = 1;
+  DataFileInfo dataFileInfo = 2;
+}
+
+message DataFileEntry {
+  enum Type {
+    DataFileEntryTypeUnknown = 0;
+    DataFileEntryTypeStandard = 1;
+    DataFileEntryTypeLarge = 2;
+  }
+  Type type = 1;
+
+  StandardDataFileEntry standardDataFileEntry = 2;
+  LargeDataFileEntry largeDataFileEntry = 3;
+}
+
+message StandardDataFileEntry {
+  enum Version {
+    StandardDataFileEntryVersionUnknown = 0;
+    StandardDataFileEntryVersionV1 = 1;
+  }
+  Version version = 1;
+
+  DataFileV1 dataFileV1 = 2;
+}
+
+message DataFileV1 {
+  string filePath = 1;
+  FileFormat fileFormat = 2;
+  uint64 recordCount = 3;
+  uint64 fileSizeInBytes = 4;
+  map<sfixed32, uint64> columnSizes = 5;
+  map<sfixed32, uint64> valueCounts = 6;
+  map<sfixed32, uint64> nullValueCounts = 7;
+  map<sfixed32, uint64> nanValueCounts = 8;
+  map<sfixed32, bytes> lowerBounds = 9;
+  map<sfixed32, bytes> upperBounds = 10;
+  repeated string indexedFields = 11;
+  repeated SchemaReference schemaReferences = 12;
+}
+
+message LargeDataFileEntry {
+  string key = 1;
+}
+
+message DataFileInfo {
+  string filePath = 1;
+  uint64 creationTime = 2;
+  string accountId = 3;
+}
+
+/*=================================*/
+/*       MetadataCommit Stream     */
+/*=================================*/
+message MetadataCommitRecord {
+  enum Type {
+    MetadataCommitRecordTypeUnknown = 0;
+    MetadataCommitRecordTypeIcebergCommitRecord = 1;
+  }
+  Type type = 1;
+  IcebergCommitRecord icebergCommitRecord = 2;
+}
+
+message IcebergCommitRecord {
+  enum Version {
+    IcebergCommitRecordVersionUnknown = 0;
+    IcebergCommitRecordVersionV1 = 1;
+  }
+  Version version = 1;
+  IcebergCommitRecordV1 icebergCommitRecordV1 = 2;
+}
+
+message IcebergCommitRecordV1 {
+  IcebergCommitInfo commitInfo = 1;
+  FieldIndexInfo fieldIndexInfo = 2;
+}
+
+message IcebergCommitInfo {
+  ResourceInfo resourceInfo = 1;
+  ManifestFileUpdate manifestFileUpdate = 2;
+  uint64 commitTimestamp = 3;
+}
+
+message ResourceInfo {
+  string accountId = 1;
+  string logGroupName = 2;
+  string logGroupInternalId = 3;
+  string schemaId = 4;
+}
+
+message FieldIndexInfo {
+  repeated string indexedFields = 1;
+}
+
+message ManifestFileUpdate {
+  /* The portion of the path following the base location e.g. /metadata/.../filename.avro */
+  string previousManifestFilePathSuffix = 1;
+  string newManifestFilePathSuffix = 2;
+  string baseLocation = 3;
+  AddedDataFiles addedDataFiles = 4;
+}
+
+message AddedDataFiles {
+  enum Type {
+    AddedDataFilesTypeUnknown = 0;
+    AddedDataFilesTypeEmbedded = 1;
+    AddedDataFilesTypeLarge = 2;
+  }
+  Type type = 1;
+  EmbeddedAddedDataFiles embeddedAddedDataFiles = 2;
+  LargeAddedDataFiles largeAddedDataFiles = 3;
+}
+
+message EmbeddedAddedDataFiles {
+  repeated AddedDataFile addedDataFiles = 1;
+}
+
+message LargeAddedDataFiles {
+  string key = 1;
+}
+
+message AddedDataFile {
+  /* The portion of the path following the base location e.g. /data/.../filename.parquet */
+  string dataFilePathSuffix = 1;
+  uint32 manifestFilePosition = 2;
+  uint64 timestampFrom = 3;
+  uint64 timestampTo = 4;
+  uint64 recordCount = 5;
+  uint64 uncompressedSize = 6;
+  uint64 creationTime = 7;
+  FileFormat fileFormat = 8;
+}
+
+/*=================================*/
+/*           Common types          */
+/*=================================*/
+enum FileFormat {
+  FileFormatUnknown = 0;
+  FileFormatParquet = 1;
+}
+
+message SchemaReference {
+  string name = 1;
+  string hash = 2;
+}
+

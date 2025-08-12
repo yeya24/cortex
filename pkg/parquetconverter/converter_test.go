@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/go-kit/log"
 	"github.com/oklog/ulid/v2"
 	"github.com/prometheus/client_golang/prometheus"
@@ -182,7 +183,12 @@ func prepare(t *testing.T, cfg Config, bucketClient objstore.InstrumentedBucket,
 		Strategy: cortex_tsdb.UserScanStrategyList,
 	}, bucketClient, logger, registry)
 	require.NoError(t, err)
-	c := newConverter(cfg, bucketClient, storageCfg, blockRanges.ToMilliseconds(), logger, registry, overrides, scanner)
+
+	// Load default AWS config for testing
+	awsCfg, err := config.LoadDefaultConfig(context.Background())
+	require.NoError(t, err)
+
+	c := newConverter(cfg, bucketClient, storageCfg, blockRanges.ToMilliseconds(), logger, registry, overrides, scanner, awsCfg)
 	return c, logger, registry
 }
 
@@ -194,7 +200,12 @@ func TestConverter_CleanupMetricsForNotOwnedUser(t *testing.T) {
 	cfg := Config{}
 	storageCfg := cortex_tsdb.BlocksStorageConfig{}
 	limits := &validation.Overrides{}
-	converter := newConverter(cfg, nil, storageCfg, []int64{7200000}, nil, reg, limits, nil)
+
+	// Load default AWS config for testing
+	awsCfg, err := config.LoadDefaultConfig(context.Background())
+	require.NoError(t, err)
+
+	converter := newConverter(cfg, nil, storageCfg, []int64{7200000}, nil, reg, limits, nil, awsCfg)
 
 	// Add some test metrics for a user
 	userID := "test-user"
@@ -272,7 +283,11 @@ func TestConverter_BlockConversionFailure(t *testing.T) {
 		uploadFailure: fmt.Errorf("mock upload failure"),
 	}
 
-	converter := newConverter(cfg, objstore.WithNoopInstr(mockBucket), storageCfg, []int64{3600000, 7200000}, nil, reg, overrides, nil)
+	// Load default AWS config for testing
+	awsCfg, err := config.LoadDefaultConfig(context.Background())
+	require.NoError(t, err)
+
+	converter := newConverter(cfg, objstore.WithNoopInstr(mockBucket), storageCfg, []int64{3600000, 7200000}, nil, reg, overrides, nil, awsCfg)
 	converter.ringLifecycler = &ring.Lifecycler{
 		Addr: "1.2.3.4",
 	}
@@ -338,7 +353,11 @@ func TestConverter_ShouldNotFailOnAccessDenyError(t *testing.T) {
 		}
 	})
 
-	converter := newConverter(cfg, objstore.WithNoopInstr(mb), storageCfg, []int64{3600000, 7200000}, nil, reg, overrides, nil)
+	// Load default AWS config for testing
+	awsCfg, err := config.LoadDefaultConfig(context.Background())
+	require.NoError(t, err)
+
+	converter := newConverter(cfg, objstore.WithNoopInstr(mb), storageCfg, []int64{3600000, 7200000}, nil, reg, overrides, nil, awsCfg)
 	converter.ringLifecycler = &ring.Lifecycler{
 		Addr: "1.2.3.4",
 	}

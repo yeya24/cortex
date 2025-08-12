@@ -13,11 +13,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/parquet-go/parquet-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/parquet-common/convert"
+	"github.com/prometheus-community/parquet-common/schema"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/tsdb"
@@ -30,6 +35,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cortexproject/cortex/pkg/cygnus"
 	"github.com/cortexproject/cortex/pkg/ring"
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	cortex_parquet "github.com/cortexproject/cortex/pkg/storage/parquet"
@@ -99,6 +105,8 @@ type Converter struct {
 	// Keep track of the last owned users.
 	// This is not thread safe now.
 	lastOwnedUsers map[string]struct{}
+
+	cygnusWriter cygnus.Writer
 }
 
 func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
@@ -122,10 +130,14 @@ func NewConverter(cfg Config, storageCfg cortex_tsdb.BlocksStorageConfig, blockR
 		return nil, errors.Wrap(err, "unable to initialize users scanner")
 	}
 
-	return newConverter(cfg, bkt, storageCfg, blockRanges, logger, registerer, limits, usersScanner), err
+	awsConf, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to load AWS config")
+	}
+	return newConverter(cfg, bkt, storageCfg, blockRanges, logger, registerer, limits, usersScanner, awsConf), nil
 }
 
-func newConverter(cfg Config, bkt objstore.InstrumentedBucket, storageCfg cortex_tsdb.BlocksStorageConfig, blockRanges []int64, logger log.Logger, registerer prometheus.Registerer, limits *validation.Overrides, usersScanner users.Scanner) *Converter {
+func newConverter(cfg Config, bkt objstore.InstrumentedBucket, storageCfg cortex_tsdb.BlocksStorageConfig, blockRanges []int64, logger log.Logger, registerer prometheus.Registerer, limits *validation.Overrides, usersScanner users.Scanner, awsConf aws.Config) *Converter {
 	c := &Converter{
 		cfg:            cfg,
 		reg:            registerer,
@@ -145,6 +157,11 @@ func newConverter(cfg Config, bkt objstore.InstrumentedBucket, storageCfg cortex
 		},
 	}
 
+	kinesisClient := kinesis.NewFromConfig(awsConf)
+	cygnusMetrics := cygnus.NewKinesisMetrics(registerer)
+	largePayloadStore := cygnus.NewS3LargePayloadStore(s3.NewFromConfig(awsConf), "cygnus-bucket")
+	kinesisWriter := cygnus.NewKinesisWriter(kinesisClient, "cygnus-stream", largePayloadStore, 3, cygnusMetrics)
+	c.cygnusWriter = cygnus.NewCygnusWriter(kinesisWriter)
 	c.Service = services.NewBasicService(c.starting, c.running, c.stopping)
 	return c
 }
@@ -475,6 +492,13 @@ func (c *Converter) convertUser(ctx context.Context, logger log.Logger, ring rin
 		}
 		delayMinutes := time.Since(metaAttrs.LastModified).Minutes()
 		c.metrics.convertParquetBlockDelay.Observe(delayMinutes)
+
+		labelsFileName := schema.LabelsPfileNameForShard(b.ULID.String(), 0)
+		path := filepath.Join(bdir, labelsFileName)
+		if err := c.cygnusWriter.Write(ctx, path, userID); err != nil {
+			level.Error(logger).Log("msg", "failed to write labels file", "block", b.ULID.String(), "err", err)
+			continue
+		}
 	}
 
 	return nil
