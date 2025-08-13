@@ -115,12 +115,17 @@ func (p *Remote) MakeExecutionOperator(
 }
 
 type DistributedRemoteExecution struct {
-	client    querierpb.QuerierClient
-	batchSize int64
-	series    []labels.Labels
+	client querierpb.QuerierClient
 
+	stream      querierpb.Querier_NextClient
+	buffer      []model.StepVector
+	bufferIndex int
+
+	batchSize   int64
+	series      []labels.Labels
 	fragmentKey FragmentKey
 	addr        string
+	initialized bool // Track if stream is initialized
 }
 
 type QuerierAddrKey struct{}
@@ -144,9 +149,12 @@ func newDistributedRemoteExecution(ctx context.Context, pool *client.Pool, fragm
 
 	return &DistributedRemoteExecution{
 		client:      client,
+		batchSize:   10,
 		fragmentKey: fragmentKey,
 		addr:        childIDToAddr[fragmentKey.fragmentID],
-		batchSize:   1000, // TODO: make it a config param?
+		buffer:      nil,
+		bufferIndex: 0,
+		initialized: false,
 	}, nil
 }
 
@@ -188,64 +196,124 @@ func (d *DistributedRemoteExecution) Series(ctx context.Context) ([]labels.Label
 }
 
 func (d *DistributedRemoteExecution) Next(ctx context.Context) ([]model.StepVector, error) {
-	req := &querierpb.NextRequest{
-		QueryID:    d.fragmentKey.queryID,
-		FragmentID: d.fragmentKey.fragmentID,
-		Batchsize:  d.batchSize,
-	}
 
-	//stream, err := d.client.Next(ctx, req)
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//batch, err := stream.Recv()
-	//if err == io.EOF {
-	//	break
-	//}
-	//if err != nil {
-	//	return nil, err
-	//}
-	//
-	//result := make([]model.StepVector, len(batch.StepVectors))
-	//
-	//for i, sv := range batch.StepVectors {
-	//	result[i] = model.StepVector{
-	//		T:            sv.T,
-	//		SampleIDs:    sv.Sample_IDs,
-	//		Samples:      sv.Samples,
-	//		HistogramIDs: sv.Histogram_IDs,
-	//		Histograms:   FloatHistogramProtoToFloatHistograms(sv.Histograms),
-	//	}
-	//}
-
-	stream, err := d.client.Next(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	var result []model.StepVector
-	for {
-		stepVectorBatch, err := stream.Recv()
-		if err == io.EOF {
-			break
+	// return from buffer first
+	if d.buffer != nil && d.bufferIndex < len(d.buffer) {
+		end := d.bufferIndex + int(d.batchSize)
+		if end > len(d.buffer) {
+			end = len(d.buffer)
 		}
+		result := d.buffer[d.bufferIndex:end]
+		d.bufferIndex = end
+
+		if d.bufferIndex >= len(d.buffer) {
+			d.buffer = nil
+			d.bufferIndex = 0
+		}
+
+		return result, nil
+	}
+
+	// initialize stream if havent
+	if !d.initialized {
+		req := &querierpb.NextRequest{
+			QueryID:    d.fragmentKey.queryID,
+			FragmentID: d.fragmentKey.fragmentID,
+			Batchsize:  d.batchSize,
+		}
+		stream, err := d.client.Next(ctx, req)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to initialize stream: %w", err)
 		}
+		d.stream = stream
+		d.initialized = true
+	}
 
-		for i, sv := range stepVectorBatch.StepVectors {
-			result[i] = model.StepVector{
-				T:            sv.T,
-				SampleIDs:    sv.Sample_IDs,
-				Samples:      sv.Samples,
-				HistogramIDs: sv.Histogram_IDs,
-				Histograms:   FloatHistogramProtoToFloatHistograms(sv.Histograms)}
+	// get new batch from server
+	batch, err := d.stream.Recv()
+	if err == io.EOF {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("error receiving from stream: %w", err)
+	}
+
+	// return new batch and save it
+	d.buffer = make([]model.StepVector, len(batch.StepVectors))
+	for i, sv := range batch.StepVectors {
+		d.buffer[i] = model.StepVector{
+			T:            sv.T,
+			SampleIDs:    sv.Sample_IDs,
+			Samples:      sv.Samples,
+			HistogramIDs: sv.Histogram_IDs,
+			Histograms:   FloatHistogramProtoToFloatHistograms(sv.Histograms),
 		}
+	}
+
+	end := int(d.batchSize)
+	if end > len(d.buffer) {
+		end = len(d.buffer)
+	}
+	result := d.buffer[:end]
+	d.bufferIndex = end
+
+	if d.bufferIndex >= len(d.buffer) {
+		d.buffer = nil
+		d.bufferIndex = 0
 	}
 
 	return result, nil
 }
+
+func (d *DistributedRemoteExecution) Close() error {
+	if d.stream != nil {
+
+		if err := d.stream.CloseSend(); err != nil {
+			return fmt.Errorf("error closing stream: %w", err)
+		}
+	}
+	d.buffer = nil
+	d.bufferIndex = 0
+	d.initialized = false
+	return nil
+}
+
+//
+//func (d *DistributedRemoteExecution) Next(ctx context.Context) ([]model.StepVector, error) {
+//	req := &querierpb.NextRequest{
+//		QueryID:    d.fragmentKey.queryID,
+//		FragmentID: d.fragmentKey.fragmentID,
+//		Batchsize:  d.batchSize,
+//	}
+//
+//	stream, err := d.client.Next(ctx, req)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	// init do once Do (func)
+//	batch, err := stream.Recv()
+//	if err == io.EOF {
+//		return nil, nil
+//	}
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	result := make([]model.StepVector, len(batch.StepVectors))
+//
+//	for i, sv := range batch.StepVectors {
+//		result[i] = model.StepVector{
+//			T:            sv.T,
+//			SampleIDs:    sv.Sample_IDs,
+//			Samples:      sv.Samples,
+//			HistogramIDs: sv.Histogram_IDs,
+//			Histograms:   FloatHistogramProtoToFloatHistograms(sv.Histograms),
+//		}
+//	}
+//
+//	return result, nil
+//}
 
 func (d DistributedRemoteExecution) GetPool() *model.VectorPool {
 	//TODO

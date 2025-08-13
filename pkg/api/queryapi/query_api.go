@@ -26,14 +26,15 @@ import (
 )
 
 type QueryAPI struct {
-	queryable        storage.SampleAndChunkQueryable
-	queryEngine      engine.QueryEngine
-	queryResultCache *distributed_execution.QueryResultCache
-	now              func() time.Time
-	statsRenderer    v1.StatsRenderer
-	logger           log.Logger
-	codecs           []v1.Codec
-	CORSOrigin       *regexp.Regexp
+	queryable              storage.SampleAndChunkQueryable
+	queryEngine            engine.QueryEngine
+	queryResultCache       *distributed_execution.QueryResultCache
+	now                    func() time.Time
+	statsRenderer          v1.StatsRenderer
+	logger                 log.Logger
+	codecs                 []v1.Codec
+	CORSOrigin             *regexp.Regexp
+	distributedExecEnabled bool
 }
 
 func NewQueryAPI(
@@ -44,16 +45,18 @@ func NewQueryAPI(
 	logger log.Logger,
 	codecs []v1.Codec,
 	CORSOrigin *regexp.Regexp,
+	distributedExecEnabled bool,
 ) *QueryAPI {
 	return &QueryAPI{
-		queryEngine:      qe,
-		queryResultCache: queryResultCache,
-		queryable:        q,
-		statsRenderer:    statsRenderer,
-		logger:           logger,
-		codecs:           codecs,
-		CORSOrigin:       CORSOrigin,
-		now:              time.Now,
+		queryEngine:            qe,
+		queryResultCache:       queryResultCache,
+		queryable:              q,
+		statsRenderer:          statsRenderer,
+		logger:                 logger,
+		codecs:                 codecs,
+		CORSOrigin:             CORSOrigin,
+		now:                    time.Now,
+		distributedExecEnabled: distributedExecEnabled,
 	}
 }
 
@@ -139,11 +142,12 @@ func (q *QueryAPI) RangeQueryHandler(r *http.Request) (result apiFuncResult) {
 
 	ctx = httputil.ContextFromRequest(ctx, r)
 
-	// TODO: if distributed exec enabled
-	isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
-	if !isRoot {
-		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-		q.queryResultCache.InitWriting(*key)
+	if q.distributedExecEnabled {
+		isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
+		if !isRoot {
+			key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+			q.queryResultCache.InitWriting(*key)
+		}
 	}
 
 	res := qry.Exec(ctx)
@@ -188,11 +192,14 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 	ctx = engine.AddEngineTypeToContext(ctx, r)
 	ctx = querier.AddBlockStoreTypeToContext(ctx, r.Header.Get(querier.BlockStoreTypeHeader))
 
-	// TODO: if distributed exec enabled
-	isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
-	if !isRoot {
-		key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-		q.queryResultCache.InitWriting(*key)
+	var isRoot bool
+	var queryID, fragmentID uint64
+	if q.distributedExecEnabled {
+		isRoot, queryID, fragmentID, _, _ = distributed_execution.ExtractFragmentMetaData(ctx)
+		if !isRoot {
+			key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+			q.queryResultCache.InitWriting(*key)
+		}
 	}
 
 	var qry promql.Query
@@ -202,9 +209,11 @@ func (q *QueryAPI) InstantQueryHandler(r *http.Request) (result apiFuncResult) {
 	if len(byteLP) != 0 {
 		logicalPlan, err := distributed_execution.Unmarshal(byteLP)
 		if err != nil {
-			if !isRoot {
-				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-				q.queryResultCache.SetError(*key)
+			if q.distributedExecEnabled {
+				if !isRoot {
+					key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+					q.queryResultCache.SetError(*key)
+				}
 			}
 			return apiFuncResult{nil, &apiError{errorInternal, fmt.Errorf("invalid logical plan: %v", err)}, nil, nil}
 		}
@@ -264,17 +273,18 @@ func (q *QueryAPI) Wrap(f apiFunc) http.HandlerFunc {
 		}
 
 		if result.data != nil {
-			// TODO: if distributed exec enabled
 			ctx := httputil.ContextFromRequest(r.Context(), r)
-			isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
-			if !isRoot {
-				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-				result := distributed_execution.FragmentResult{
-					Data:       result.data,
-					Expiration: time.Now().Add(time.Hour),
+			if q.distributedExecEnabled {
+				isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
+				if !isRoot {
+					key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+					result := distributed_execution.FragmentResult{
+						Data:       result.data,
+						Expiration: time.Now().Add(time.Hour),
+					}
+					q.queryResultCache.SetComplete(*key, result)
+					return
 				}
-				q.queryResultCache.SetComplete(*key, result)
-				return
 			}
 			q.respond(w, r, result.data, result.warnings, r.FormValue("query"))
 			return

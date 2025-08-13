@@ -149,9 +149,9 @@ type SchedulerToQuerier struct {
 	StatsEnabled bool `protobuf:"varint,5,opt,name=statsEnabled,proto3" json:"statsEnabled,omitempty"`
 	// The ID of logical query plan fragment.
 	FragmentID uint64 `protobuf:"varint,6,opt,name=fragmentID,proto3" json:"fragmentID,omitempty"`
-	// The IDs of the child plan_fragments
+	// The IDs of the child fragments
 	ChildFragmentID []uint64 `protobuf:"varint,7,rep,packed,name=childFragmentID,proto3" json:"childFragmentID,omitempty"`
-	// The address of the queriers that have the child plan_fragments
+	// The address of the queriers that have the child fragments
 	ChildAddr []string `protobuf:"bytes,8,rep,name=childAddr,proto3" json:"childAddr,omitempty"`
 	// Whether the current fragment is the root
 	IsRoot bool `protobuf:"varint,9,opt,name=isRoot,proto3" json:"isRoot,omitempty"`

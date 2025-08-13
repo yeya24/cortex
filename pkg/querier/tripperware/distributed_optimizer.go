@@ -23,6 +23,9 @@ func (d *DistributedOptimizer) Optimize(root logicalplan.Node, opts *query.Optio
 		if (*current).Type() == logicalplan.BinaryNode {
 			ch := (*current).Children()
 
+			// TODO: add more checks so it's not 1+1
+			// meed to be vector for lhs and rhs
+
 			for _, child := range ch {
 				temp := (*child).Clone()
 				*child = distributed_execution.NewRemoteNode()

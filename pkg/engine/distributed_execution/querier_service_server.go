@@ -37,7 +37,7 @@ func (s *QuerierServer) Series(req *querierpb.SeriesRequest, srv querierpb.Queri
 			return fmt.Errorf("fragment not found: %v", key)
 		}
 
-		batchSize := int(req.Batchsize)
+		batchSize := int(req.Batchsize) // TODO: remove this
 		if batchSize <= 0 {
 			batchSize = BATCHSIZE
 		}
@@ -47,7 +47,8 @@ func (s *QuerierServer) Series(req *querierpb.SeriesRequest, srv querierpb.Queri
 			fragmentResult := result.Data.(FragmentResult)
 			v1ResultData := fragmentResult.Data.(*v1.QueryData)
 
-			if v1ResultData.ResultType == parser.ValueTypeMatrix {
+			switch v1ResultData.ResultType {
+			case parser.ValueTypeMatrix:
 				series := v1ResultData.Result.(promql.Matrix)
 				for i := 0; i < len(series); i += batchSize {
 					end := i + batchSize
@@ -72,7 +73,7 @@ func (s *QuerierServer) Series(req *querierpb.SeriesRequest, srv querierpb.Queri
 				}
 				return nil
 
-			} else if v1ResultData.ResultType == parser.ValueTypeVector {
+			case parser.ValueTypeVector:
 				series := v1ResultData.Result.(promql.Vector)
 				for i := 0; i < len(series); i += batchSize {
 					end := i + batchSize
@@ -110,8 +111,12 @@ func (s *QuerierServer) Series(req *querierpb.SeriesRequest, srv querierpb.Queri
 func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_NextServer) error {
 	key := MakeFragmentKey(req.QueryID, req.FragmentID)
 
+	batchSize := int(req.Batchsize)
+	if batchSize <= 0 {
+		batchSize = BATCHSIZE
+	}
+
 	for {
-		// TODO: maybe add a timeout thing here too
 		result, ok := s.queryResultCache.Get(*key)
 		if !ok {
 			return fmt.Errorf("fragment not found: %v", key)
@@ -119,52 +124,33 @@ func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_N
 
 		switch result.Status {
 		case StatusDone:
-			batchSize := int(req.Batchsize)
-			if batchSize <= 0 {
-				batchSize = BATCHSIZE
-			}
-
 			fragmentResult := result.Data.(FragmentResult)
 			v1ResultData := fragmentResult.Data.(*v1.QueryData)
 
-			if v1ResultData.ResultType == parser.ValueTypeMatrix {
+			switch v1ResultData.ResultType {
+			case parser.ValueTypeMatrix:
 				matrix := v1ResultData.Result.(promql.Matrix)
 
-				for i := 0; i < len(matrix); i += batchSize {
-					end := i + batchSize
-					if end > len(matrix) {
-						end = len(matrix)
-					}
+				numTimeSteps := matrix.TotalSamples()
 
-					batch := &querierpb.StepVectorBatch{
-						StepVectors: make([]*querierpb.StepVector, 0, end-i),
-					}
+				for timeStep := 0; timeStep < numTimeSteps; timeStep++ {
 
-					for _, v := range (matrix)[i:end] {
-						var floats []float64
-						var histograms []*histogram.FloatHistogram
-
-						for _, f := range v.Floats {
-							floats = append(floats, f.F)
+					for i, series := range matrix {
+						batch := &querierpb.StepVectorBatch{
+							StepVectors: make([]*querierpb.StepVector, 0, len(matrix)),
 						}
-
-						for _, h := range v.Histograms {
-							histograms = append(histograms, h.H)
+						vector, err := s.createVectorForTimestep(&series, timeStep, uint64(i))
+						if err != nil {
+							return err
 						}
-
-						protoVector := &querierpb.StepVector{
-							T:          0,
-							Samples:    floats,
-							Histograms: FloatHistogramsToFloatHistogramProto(histograms),
+						batch.StepVectors = append(batch.StepVectors, vector)
+						if err := srv.Send(batch); err != nil {
+							return fmt.Errorf("error sending batch: %w", err)
 						}
-						batch.StepVectors = append(batch.StepVectors, protoVector)
 					}
-					if err := srv.Send(batch); err != nil {
-						return err
-					}
+
 				}
-
-			} else if v1ResultData.ResultType == parser.ValueTypeVector {
+			case parser.ValueTypeVector:
 				vector := v1ResultData.Result.(promql.Vector)
 
 				for i := 0; i < len(vector); i += batchSize {
@@ -190,13 +176,12 @@ func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_N
 						return err
 					}
 				}
+
+			default:
+				return fmt.Errorf("unsupported result type: %v", v1ResultData.ResultType)
 			}
-
-			return nil
-
 		case StatusError:
 			return fmt.Errorf("fragment processing failed")
-
 		case StatusWriting:
 			time.Sleep(WritingTimeout)
 			continue
@@ -204,9 +189,39 @@ func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_N
 	}
 }
 
+func (s *QuerierServer) createVectorForTimestep(series *promql.Series, timeStep int, sampleID uint64) (*querierpb.StepVector, error) {
+	var samples []float64
+	var sampleIDs []uint64
+	var histograms []*histogram.FloatHistogram
+	var histogramIDs []uint64
+	var timestamp int64
+
+	if timeStep < len(series.Floats) {
+		point := series.Floats[timeStep]
+		timestamp = point.T
+		samples = append(samples, point.F)
+		sampleIDs = append(sampleIDs, sampleID)
+	}
+
+	if timeStep < len(series.Histograms) {
+		point := series.Histograms[timeStep]
+		timestamp = point.T
+		histograms = append(histograms, point.H)
+		histogramIDs = append(histogramIDs, uint64(timeStep))
+	}
+
+	return &querierpb.StepVector{
+		T:             timestamp,
+		Sample_IDs:    sampleIDs,
+		Samples:       samples,
+		Histogram_IDs: histogramIDs,
+		Histograms:    FloatHistogramsToFloatHistogramProto(histograms),
+	}, nil
+}
+
 func FloatHistogramsToFloatHistogramProto(histograms []*histogram.FloatHistogram) []querierpb.Histogram {
 	if histograms == nil {
-		return nil
+		return []querierpb.Histogram{}
 	}
 
 	protoHistograms := make([]querierpb.Histogram, 0, len(histograms))
