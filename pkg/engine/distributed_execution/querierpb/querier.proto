@@ -10,7 +10,7 @@ option (gogoproto.sizer_all) = true;
 option go_package = "./pkg/engine/distributed_execution/querierpb";
 
 service Querier {
-  rpc Series(SeriesRequest) returns (stream OneSeries) {}
+  rpc Series(SeriesRequest) returns (stream SeriesBatch) {}
   rpc Next(NextRequest) returns (stream StepVectorBatch) {}
 }
 
@@ -24,6 +24,10 @@ message NextRequest {
   uint64 queryID = 1;
   uint64 fragmentID = 2;
   int64 batchsize = 3;
+}
+
+message SeriesBatch {
+  repeated OneSeries OneSeries = 1;
 }
 
 message OneSeries {

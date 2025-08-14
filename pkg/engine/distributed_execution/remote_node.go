@@ -107,7 +107,7 @@ func (p *Remote) MakeExecutionOperator(
 		return nil, fmt.Errorf("client pool not found in context")
 	}
 
-	remoteExec, err := newDistributedRemoteExecution(ctx, pool, p.FragmentKey)
+	remoteExec, err := newDistributedRemoteExecution(ctx, pool, p.FragmentKey, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +116,12 @@ func (p *Remote) MakeExecutionOperator(
 
 type DistributedRemoteExecution struct {
 	client querierpb.QuerierClient
+
+	mint        int64
+	maxt        int64
+	step        int64
+	currentStep int64
+	numSteps    int
 
 	stream      querierpb.Querier_NextClient
 	buffer      []model.StepVector
@@ -130,9 +136,7 @@ type DistributedRemoteExecution struct {
 
 type QuerierAddrKey struct{}
 
-type ChildFragmentKey struct{}
-
-func newDistributedRemoteExecution(ctx context.Context, pool *client.Pool, fragmentKey FragmentKey) (*DistributedRemoteExecution, error) {
+func newDistributedRemoteExecution(ctx context.Context, pool *client.Pool, fragmentKey FragmentKey, queryOpts *query.Options) (*DistributedRemoteExecution, error) {
 
 	_, _, _, childIDToAddr, _ := ExtractFragmentMetaData(ctx)
 
@@ -147,15 +151,28 @@ func newDistributedRemoteExecution(ctx context.Context, pool *client.Pool, fragm
 		return nil, fmt.Errorf("invalid client type from pool")
 	}
 
-	return &DistributedRemoteExecution{
-		client:      client,
+	d := &DistributedRemoteExecution{
+		client: client,
+
+		mint:        queryOpts.Start.UnixMilli(),
+		maxt:        queryOpts.End.UnixMilli(),
+		step:        queryOpts.Step.Milliseconds(),
+		currentStep: queryOpts.Start.UnixMilli(),
+		numSteps:    queryOpts.NumSteps(),
+
 		batchSize:   10,
 		fragmentKey: fragmentKey,
 		addr:        childIDToAddr[fragmentKey.fragmentID],
 		buffer:      nil,
 		bufferIndex: 0,
 		initialized: false,
-	}, nil
+	}
+
+	if d.step == 0 {
+		d.step = 1
+	}
+
+	return d, nil
 }
 
 func (d *DistributedRemoteExecution) Series(ctx context.Context) ([]labels.Labels, error) {
@@ -175,8 +192,9 @@ func (d *DistributedRemoteExecution) Series(ctx context.Context) ([]labels.Label
 	}
 
 	var series []labels.Labels
+
 	for {
-		oneSeries, err := stream.Recv()
+		seriesBatch, err := stream.Recv()
 		if err == io.EOF {
 			break
 		}
@@ -184,11 +202,13 @@ func (d *DistributedRemoteExecution) Series(ctx context.Context) ([]labels.Label
 			return nil, err
 		}
 
-		lbs := make(labels.Labels, len(oneSeries.Labels))
-		for i, l := range oneSeries.Labels {
-			lbs[i] = labels.Label{Name: l.Name, Value: l.Value}
+		for _, s := range seriesBatch.OneSeries {
+			oneSeries := make([]labels.Label, len(s.Labels))
+			for j, l := range s.Labels {
+				oneSeries[j] = labels.Label{Name: l.Name, Value: l.Value}
+			}
+			series = append(series, oneSeries)
 		}
-		series = append(series, lbs)
 	}
 
 	d.series = series
@@ -196,6 +216,23 @@ func (d *DistributedRemoteExecution) Series(ctx context.Context) ([]labels.Label
 }
 
 func (d *DistributedRemoteExecution) Next(ctx context.Context) ([]model.StepVector, error) {
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	if d.currentStep > d.maxt {
+		return nil, nil
+	}
+
+	ts := d.currentStep
+	numVectorsNeeded := 0
+	for currStep := 0; currStep < d.numSteps && ts <= d.maxt; currStep++ {
+		numVectorsNeeded++
+		ts += d.step
+	}
 
 	// return from buffer first
 	if d.buffer != nil && d.bufferIndex < len(d.buffer) {
@@ -214,7 +251,7 @@ func (d *DistributedRemoteExecution) Next(ctx context.Context) ([]model.StepVect
 		return result, nil
 	}
 
-	// initialize stream if havent
+	// initialize stream if haven't
 	if !d.initialized {
 		req := &querierpb.NextRequest{
 			QueryID:    d.fragmentKey.queryID,
@@ -261,6 +298,8 @@ func (d *DistributedRemoteExecution) Next(ctx context.Context) ([]model.StepVect
 		d.buffer = nil
 		d.bufferIndex = 0
 	}
+
+	d.currentStep += d.step * int64(len(result))
 
 	return result, nil
 }

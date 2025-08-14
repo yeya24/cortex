@@ -37,11 +37,6 @@ func (s *QuerierServer) Series(req *querierpb.SeriesRequest, srv querierpb.Queri
 			return fmt.Errorf("fragment not found: %v", key)
 		}
 
-		batchSize := int(req.Batchsize) // TODO: remove this
-		if batchSize <= 0 {
-			batchSize = BATCHSIZE
-		}
-
 		switch result.Status {
 		case StatusDone:
 			fragmentResult := result.Data.(FragmentResult)
@@ -50,52 +45,44 @@ func (s *QuerierServer) Series(req *querierpb.SeriesRequest, srv querierpb.Queri
 			switch v1ResultData.ResultType {
 			case parser.ValueTypeMatrix:
 				series := v1ResultData.Result.(promql.Matrix)
-				for i := 0; i < len(series); i += batchSize {
-					end := i + batchSize
-					if end > len(series) {
-						end = len(series)
-					}
 
-					for _, s := range (series)[i:end] {
-						protoLabels := make([]*querierpb.Label, len(s.Metric))
-						for j, l := range s.Metric {
-							protoLabels[j] = &querierpb.Label{
-								Name:  l.Name,
-								Value: l.Value,
-							}
-						}
-						if err := srv.Send(&querierpb.OneSeries{
-							Labels: protoLabels,
-						}); err != nil {
-							return err
-						}
+				seriesBatch := []*querierpb.OneSeries{}
+				for _, s := range series {
+					oneSeries := querierpb.OneSeries{}
+					for j, l := range s.Metric {
+						oneSeries.Labels[j] = &querierpb.Label{
+							Name:  l.Name,
+							Value: l.Value}
 					}
+					seriesBatch = append(seriesBatch, &oneSeries)
 				}
+				if err := srv.Send(&querierpb.SeriesBatch{
+					OneSeries: seriesBatch}); err != nil {
+					return err
+				}
+
 				return nil
 
 			case parser.ValueTypeVector:
-				series := v1ResultData.Result.(promql.Vector)
-				for i := 0; i < len(series); i += batchSize {
-					end := i + batchSize
-					if end > len(series) {
-						end = len(series)
-					}
+				samples := v1ResultData.Result.(promql.Vector)
 
-					for _, s := range (series)[i:end] {
-						protoLabels := make([]*querierpb.Label, len(s.Metric))
-						for j, l := range s.Metric {
-							protoLabels[j] = &querierpb.Label{
-								Name:  l.Name,
-								Value: l.Value,
-							}
-						}
-						if err := srv.Send(&querierpb.OneSeries{
-							Labels: protoLabels,
-						}); err != nil {
-							return err
+				seriesBatch := []*querierpb.OneSeries{}
+				for _, s := range samples {
+					oneSeries := querierpb.OneSeries{}
+					for j, l := range s.Metric {
+						oneSeries.Labels[j] = &querierpb.Label{
+							Name:  l.Name,
+							Value: l.Value,
 						}
 					}
+					seriesBatch = append(seriesBatch, &oneSeries)
 				}
+				if err := srv.Send(&querierpb.SeriesBatch{
+					OneSeries: seriesBatch,
+				}); err != nil {
+					return err
+				}
+				return nil
 			}
 
 		case StatusError:
@@ -133,23 +120,25 @@ func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_N
 
 				numTimeSteps := matrix.TotalSamples()
 
-				for timeStep := 0; timeStep < numTimeSteps; timeStep++ {
-
-					for i, series := range matrix {
-						batch := &querierpb.StepVectorBatch{
-							StepVectors: make([]*querierpb.StepVector, 0, len(matrix)),
-						}
-						vector, err := s.createVectorForTimestep(&series, timeStep, uint64(i))
-						if err != nil {
-							return err
-						}
-						batch.StepVectors = append(batch.StepVectors, vector)
-						if err := srv.Send(batch); err != nil {
-							return fmt.Errorf("error sending batch: %w", err)
+				for timeStep := 0; timeStep < numTimeSteps; timeStep += batchSize {
+					batch := &querierpb.StepVectorBatch{
+						StepVectors: make([]*querierpb.StepVector, 0, len(matrix)),
+					}
+					for t := 0; t < batchSize; t++ {
+						for i, series := range matrix {
+							vector, err := s.createVectorForTimestep(&series, timeStep+t, uint64(i))
+							if err != nil {
+								return err
+							}
+							batch.StepVectors = append(batch.StepVectors, vector)
 						}
 					}
-
+					if err := srv.Send(batch); err != nil {
+						return fmt.Errorf("error sending batch: %w", err)
+					}
 				}
+				return nil
+
 			case parser.ValueTypeVector:
 				vector := v1ResultData.Result.(promql.Vector)
 
@@ -163,19 +152,39 @@ func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_N
 						StepVectors: make([]*querierpb.StepVector, 0, end-i),
 					}
 
-					for _, v := range (vector)[i:end] {
-						protoVector := &querierpb.StepVector{
-							T:          v.T,
-							Samples:    []float64{v.F},
-							Histograms: FloatHistogramsToFloatHistogramProto([]*histogram.FloatHistogram{v.H}),
+					//sampleIDs := make([]uint64, 0, batchSize)
+					//samples := make([]float64, 0, batchSize)
+					//histogramIDs := make([]uint64, 0, batchSize)
+					//histograms := make([]*querierpb.Histogram, 0, batchSize)
+
+					for j, sample := range (vector)[i:end] {
+						vec := &querierpb.StepVector{}
+
+						if sample.H == nil {
+							vec = &querierpb.StepVector{
+								T:             sample.T,            // all samples have the same timestamp
+								Sample_IDs:    []uint64{uint64(j)}, // only one sample
+								Samples:       []float64{sample.F},
+								Histogram_IDs: []uint64{},
+								Histograms:    FloatHistogramsToFloatHistogramProto([]*histogram.FloatHistogram{sample.H}),
+							}
+						} else {
+							vec = &querierpb.StepVector{
+								T:             sample.T,
+								Sample_IDs:    []uint64{},
+								Samples:       []float64{sample.F},
+								Histogram_IDs: []uint64{uint64(j)},
+								Histograms:    FloatHistogramsToFloatHistogramProto([]*histogram.FloatHistogram{sample.H}),
+							}
 						}
-						batch.StepVectors = append(batch.StepVectors, protoVector)
+						batch.StepVectors = append(batch.StepVectors, vec)
 					}
 
 					if err := srv.Send(batch); err != nil {
 						return err
 					}
 				}
+				return nil
 
 			default:
 				return fmt.Errorf("unsupported result type: %v", v1ResultData.ResultType)

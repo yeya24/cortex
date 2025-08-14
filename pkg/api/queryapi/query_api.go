@@ -274,18 +274,23 @@ func (q *QueryAPI) Wrap(f apiFunc) http.HandlerFunc {
 
 		if result.data != nil {
 			ctx := httputil.ContextFromRequest(r.Context(), r)
+
 			if q.distributedExecEnabled {
 				isRoot, queryID, fragmentID, _, _ := distributed_execution.ExtractFragmentMetaData(ctx)
-				if !isRoot {
-					key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
-					result := distributed_execution.FragmentResult{
-						Data:       result.data,
-						Expiration: time.Now().Add(time.Hour),
-					}
-					q.queryResultCache.SetComplete(*key, result)
-					return
+				key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
+
+				fragResult := distributed_execution.FragmentResult{
+					Data:       result.data,
+					Expiration: time.Now().Add(time.Hour),
 				}
+				q.queryResultCache.SetComplete(*key, fragResult)
+
+				if isRoot {
+					q.respond(w, r, result.data, result.warnings, r.FormValue("query"))
+				}
+				return
 			}
+
 			q.respond(w, r, result.data, result.warnings, r.FormValue("query"))
 			return
 		}
@@ -323,7 +328,9 @@ func (q *QueryAPI) respond(w http.ResponseWriter, req *http.Request, data interf
 	w.Header().Set("Content-Type", codec.ContentType().String())
 	w.Header().Set("X-Uncompressed-Length", strconv.Itoa(len(b)))
 	w.WriteHeader(http.StatusOK)
-	if n, err := w.Write(b); err != nil {
+
+	n, err := w.Write(b)
+	if err != nil {
 		level.Error(q.logger).Log("error writing response", "url", req.URL, "bytesWritten", n, "err", err)
 	}
 }
