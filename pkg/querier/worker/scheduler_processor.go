@@ -161,7 +161,10 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 				level.Info(logger).Log("msg", "started running request")
 			}
 
-			ctx = distributed_execution.InjectFragmentMetaData(ctx, request.FragmentID, request.QueryID, request.IsRoot, request.ChildFragmentID, request.ChildAddr)
+			ctx, err = distributed_execution.InjectFragmentMetaData(ctx, request.FragmentID, request.QueryID, request.IsRoot, request.ChildFragmentID, request.ChildAddr)
+			if err != nil {
+				level.Error(logger).Log("msg", "failed to inject fragment meta data", "err", err)
+			}
 
 			// if this is a child fragment, then it doesn't matter
 			// if this is a parent fragment (with remote nodes), then we need the addresses of the queriers that have the child fragments

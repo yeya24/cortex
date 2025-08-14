@@ -20,7 +20,7 @@ func TestFragmentMetadata(t *testing.T) {
 		}
 		queryID := uint64(456)
 
-		ctx = InjectFragmentMetaData(ctx, fragment.FragmentID, queryID, fragment.IsRoot, fragment.ChildIDs)
+		ctx, err := InjectFragmentMetaData(ctx, fragment.FragmentID, queryID, fragment.IsRoot, fragment.ChildIDs)
 
 		isRoot, qID, fID, ok := ExtractFragmentMetaData(ctx)
 		require.True(t, ok)
