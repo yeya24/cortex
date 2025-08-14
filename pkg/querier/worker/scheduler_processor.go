@@ -171,7 +171,7 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 
 			ctx = context.WithValue(ctx, distributed_execution.QuerierAddrKey{}, sp.querierAddress)
 
-			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest)
+			sp.runRequest(ctx, logger, request.QueryID, request.FrontendAddress, request.StatsEnabled, request.HttpRequest, request.IsRoot)
 
 			if err = ctx.Err(); err != nil {
 				return
@@ -185,7 +185,7 @@ func (sp *schedulerProcessor) querierLoop(c schedulerpb.SchedulerForQuerier_Quer
 	}
 }
 
-func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger, queryID uint64, frontendAddress string, statsEnabled bool, request *httpgrpc.HTTPRequest) {
+func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger, queryID uint64, frontendAddress string, statsEnabled bool, request *httpgrpc.HTTPRequest, isRoot bool) {
 	var stats *querier_stats.QueryStats
 	if statsEnabled {
 		stats, ctx = querier_stats.ContextWithEmptyStats(ctx)
@@ -202,6 +202,10 @@ func (sp *schedulerProcessor) runRequest(ctx context.Context, logger log.Logger,
 			}
 		}
 	}
+	if !isRoot {
+		return
+	}
+
 	if statsEnabled {
 		level.Info(logger).Log("msg", "finished request", "status_code", response.Code, "response_size", len(response.GetBody()))
 	}
