@@ -149,37 +149,32 @@ func (s *QuerierServer) Next(req *querierpb.NextRequest, srv querierpb.Querier_N
 					}
 
 					batch := &querierpb.StepVectorBatch{
-						StepVectors: make([]*querierpb.StepVector, 0, end-i),
+						StepVectors: []*querierpb.StepVector{},
 					}
 
-					//sampleIDs := make([]uint64, 0, batchSize)
-					//samples := make([]float64, 0, batchSize)
-					//histogramIDs := make([]uint64, 0, batchSize)
-					//histograms := make([]*querierpb.Histogram, 0, batchSize)
+					var timestamp int64
+					sampleIDs := make([]uint64, 0, batchSize)
+					samples := make([]float64, 0, batchSize)
+					histogramIDs := make([]uint64, 0, batchSize)
+					histograms := make([]*histogram.FloatHistogram, 0, batchSize)
 
 					for j, sample := range (vector)[i:end] {
-						vec := &querierpb.StepVector{}
-
 						if sample.H == nil {
-							vec = &querierpb.StepVector{
-								T:             sample.T,            // all samples have the same timestamp
-								Sample_IDs:    []uint64{uint64(j)}, // only one sample
-								Samples:       []float64{sample.F},
-								Histogram_IDs: []uint64{},
-								Histograms:    FloatHistogramsToFloatHistogramProto([]*histogram.FloatHistogram{sample.H}),
-							}
+							sampleIDs = append(sampleIDs, uint64(j))
+							samples = append(samples, sample.F)
 						} else {
-							vec = &querierpb.StepVector{
-								T:             sample.T,
-								Sample_IDs:    []uint64{},
-								Samples:       []float64{sample.F},
-								Histogram_IDs: []uint64{uint64(j)},
-								Histograms:    FloatHistogramsToFloatHistogramProto([]*histogram.FloatHistogram{sample.H}),
-							}
+							histogramIDs = append(histogramIDs, uint64(j))
+							histograms = append(histograms, sample.H)
 						}
-						batch.StepVectors = append(batch.StepVectors, vec)
 					}
-
+					vec := &querierpb.StepVector{
+						T:             timestamp,
+						Sample_IDs:    sampleIDs,
+						Samples:       samples,
+						Histogram_IDs: histogramIDs,
+						Histograms:    FloatHistogramsToFloatHistogramProto(histograms),
+					}
+					batch.StepVectors = append(batch.StepVectors, vec)
 					if err := srv.Send(batch); err != nil {
 						return err
 					}

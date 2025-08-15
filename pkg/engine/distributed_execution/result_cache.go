@@ -112,15 +112,6 @@ func (qrc *QueryResultCache) GetFragmentStatus(key FragmentKey) FragmentStatus {
 	return result.Status
 }
 
-//go func() {
-//	ticker := time.NewTicker(5 * time.Minute)
-//	defer ticker.Stop()
-//
-//	for range ticker.C {
-//		cache.CleanExpired()
-//	}
-//}()
-
 func (qrc *QueryResultCache) CleanExpired() {
 	qrc.Lock()
 	defer qrc.Unlock()
