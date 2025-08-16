@@ -2,6 +2,7 @@ package cortexpb
 
 import (
 	"fmt"
+	"github.com/cortexproject/cortex/pkg/scheduler/schedulerpb"
 
 	gogoproto "github.com/gogo/protobuf/proto"
 	"google.golang.org/grpc/encoding"
@@ -72,9 +73,22 @@ func (c *cortexCodec) Marshal(v any) (data mem.BufferSlice, err error) {
 	} else {
 		pool := c.defaultBufferPool
 		buf := pool.Get(size)
+		fmt.Println("buffer pool size:", size)
+		if x, ok := v.(*schedulerpb.SchedulerToQuerier); ok {
+			if len(x.HttpRequest.Body) > size {
+				newSize := x.Size()
+				fmt.Println("will panic", newSize)
+			}
+		}
 
 		// If v implements MarshalToSizedBuffer we should use it as it is more optimized
 		if m, ok := v.(GogoProtoMessage); ok {
+			if x, ok := v.(*schedulerpb.SchedulerToQuerier); ok {
+				if len(x.HttpRequest.Body) > size {
+					newSize := x.Size()
+					fmt.Println("will panic", newSize)
+				}
+			}
 			if _, err := m.MarshalToSizedBuffer((*buf)[:size]); err != nil {
 				pool.Put(buf)
 				return nil, err

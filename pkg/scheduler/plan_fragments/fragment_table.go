@@ -1,6 +1,7 @@
 package plan_fragments
 
 import (
+	"fmt"
 	"github.com/cortexproject/cortex/pkg/engine/distributed_execution"
 	"sync"
 )
@@ -22,6 +23,7 @@ func (f *FragmentTable) AddMapping(queryID uint64, fragmentID uint64, addr strin
 
 	key := distributed_execution.MakeFragmentKey(queryID, fragmentID)
 	f.mappings[*key] = addr
+	fmt.Printf("added query mapping: %d %d\n", queryID, fragmentID)
 }
 
 func (f *FragmentTable) GetMapping(queryID uint64, fragmentIDs []uint64) ([]string, bool) {
@@ -56,4 +58,5 @@ func (f *FragmentTable) ClearMappings(queryID uint64) {
 	for _, key := range keysToDelete {
 		delete(f.mappings, key)
 	}
+	fmt.Printf("deleted query mapping: %d\n", queryID)
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -367,7 +368,7 @@ func (s *Scheduler) enqueueRequest(frontendContext context.Context, frontendAddr
 			queryID:         msg.QueryID,
 			request:         msg.HttpRequest,
 			statsEnabled:    msg.StatsEnabled,
-			fragment:        plan_fragments.Fragment{},
+			fragment:        plan_fragments.Fragment{IsRoot: true},
 		}
 
 		now := time.Now()
@@ -415,8 +416,17 @@ func (s *Scheduler) enqueueRequest(frontendContext context.Context, frontendAddr
 					return err
 				}
 
+				newBody, err := s.updatePlanInHTTPRequest(frag)
+				if err != nil {
+					return err
+				}
 				// modify request with fragment info
-				msg.HttpRequest.Body, err = s.updatePlanInHTTPRequest(frag)
+				msg.HttpRequest = &httpgrpc.HTTPRequest{
+					Method:  msg.HttpRequest.Method,
+					Url:     msg.HttpRequest.Url,
+					Headers: msg.HttpRequest.Headers,
+					Body:    newBody,
+				}
 				if err != nil {
 					return err
 				}
@@ -563,8 +573,15 @@ func (s *Scheduler) forwardRequestToQuerier(querier schedulerpb.SchedulerForQuer
 	go func() {
 		childAddrs := []string{}
 		if len(req.fragment.ChildIDs) != 0 {
-			childAddrs, _ = s.fragmentTable.GetMapping(req.queryID, req.fragment.ChildIDs)
+			for {
+				childAddrs, _ = s.fragmentTable.GetMapping(req.queryID, req.fragment.ChildIDs)
+				if len(childAddrs) > 0 {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
+		fmt.Printf("send query ID: %d, frag ID: %d is Root: %s\n", req.queryID, req.fragment.FragmentID, strconv.FormatBool(req.fragment.IsRoot))
 		err := querier.Send(&schedulerpb.SchedulerToQuerier{
 			UserID:          req.userID,
 			QueryID:         req.queryID,
@@ -579,7 +596,7 @@ func (s *Scheduler) forwardRequestToQuerier(querier schedulerpb.SchedulerForQuer
 
 		if !req.fragment.IsEmpty() {
 			if req.fragment.IsRoot {
-				s.fragmentTable.ClearMappings(req.queryID)
+				defer s.fragmentTable.ClearMappings(req.queryID)
 			} else {
 				s.fragmentTable.AddMapping(req.queryID, req.fragment.FragmentID, querierAddress)
 			}
