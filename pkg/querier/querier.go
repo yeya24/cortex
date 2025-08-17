@@ -92,11 +92,13 @@ type Config struct {
 	EnablePromQLExperimentalFunctions bool `yaml:"enable_promql_experimental_functions"`
 
 	// Query Parquet files if available
-	EnableParquetQueryable            bool   `yaml:"enable_parquet_queryable"`
-	ParquetQueryableShardCacheSize    int    `yaml:"parquet_queryable_shard_cache_size"`
-	ParquetQueryableDefaultBlockStore string `yaml:"parquet_queryable_default_block_store"`
-	ParquetQueryableFallbackDisabled  bool   `yaml:"parquet_queryable_fallback_disabled"`
-	DistributedExecEnabled            bool   `yaml:"distributed_exec_enabled" doc:"hidden"`
+	EnableParquetQueryable                bool   `yaml:"enable_parquet_queryable"`
+	ParquetQueryableShardCacheSize        int    `yaml:"parquet_queryable_shard_cache_size"`
+	ParquetQueryableMetadataCacheSize     int    `yaml:"parquet_queryable_metadata_cache_size"`
+	ParquetQueryableMetadataCacheMaxBytes int64  `yaml:"parquet_queryable_metadata_cache_max_bytes"`
+	ParquetQueryableDefaultBlockStore     string `yaml:"parquet_queryable_default_block_store"`
+	ParquetQueryableFallbackDisabled      bool   `yaml:"parquet_queryable_fallback_disabled"`
+	DistributedExecEnabled                bool   `yaml:"distributed_exec_enabled" doc:"hidden"`
 }
 
 var (
@@ -146,6 +148,8 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&cfg.EnablePromQLExperimentalFunctions, "querier.enable-promql-experimental-functions", false, "[Experimental] If true, experimental promQL functions are enabled.")
 	f.BoolVar(&cfg.EnableParquetQueryable, "querier.enable-parquet-queryable", false, "[Experimental] If true, querier will try to query the parquet files if available.")
 	f.IntVar(&cfg.ParquetQueryableShardCacheSize, "querier.parquet-queryable-shard-cache-size", 512, "[Experimental] Maximum size of the Parquet queryable shard cache. 0 to disable.")
+	f.IntVar(&cfg.ParquetQueryableMetadataCacheSize, "querier.parquet-queryable-metadata-cache-size", 1024, "[Experimental] Maximum number of items in the Parquet queryable metadata cache. 0 to disable.")
+	f.Int64Var(&cfg.ParquetQueryableMetadataCacheMaxBytes, "querier.parquet-queryable-metadata-cache-max-bytes", 100*1024*1024, "[Experimental] Maximum size in bytes of the Parquet queryable metadata cache. 0 to disable.")
 	f.StringVar(&cfg.ParquetQueryableDefaultBlockStore, "querier.parquet-queryable-default-block-store", string(parquetBlockStore), "[Experimental] Parquet queryable's default block store to query. Valid options are tsdb and parquet. If it is set to tsdb, parquet queryable always fallback to store gateway.")
 	f.BoolVar(&cfg.DistributedExecEnabled, "querier.distributed-exec-enabled", false, "Experimental: Enables distributed execution of queries by passing logical query plan fragments to downstream components.")
 	f.BoolVar(&cfg.ParquetQueryableFallbackDisabled, "querier.parquet-queryable-fallback-disabled", false, "[Experimental] Disable Parquet queryable to fallback queries to Store Gateway if the block is not available as Parquet files but available in TSDB. Setting this to true will disable the fallback and users can remove Store Gateway. But need to make sure Parquet files are created before it is queryable.")

@@ -2,7 +2,9 @@ package querier
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
+	"github.com/thanos-io/objstore"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
 	"github.com/thanos-io/thanos/pkg/strutil"
 	"golang.org/x/sync/errgroup"
@@ -132,7 +135,13 @@ func NewParquetQueryable(
 		return nil, err
 	}
 
-	cache, err := newCache[parquet_storage.ParquetShard]("parquet-shards", config.ParquetQueryableShardCacheSize, newCacheMetrics(reg))
+	shardCache, err := newCache[parquet_storage.ParquetShard]("parquet-shards", config.ParquetQueryableShardCacheSize, 0, newCacheMetrics(reg))
+	if err != nil {
+		return nil, err
+	}
+
+	// Create cache for parquet metadata (footer, column indexes, etc.)
+	metadataCache, err := newCache[[]byte]("parquet-metadata", config.ParquetQueryableMetadataCacheSize, config.ParquetQueryableMetadataCacheMaxBytes, newCacheMetrics(reg))
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +216,8 @@ func NewParquetQueryable(
 			return nil, errors.Errorf("failed to extract blocks from context")
 		}
 		userBkt := bucket.NewUserBucketClient(userID, bucketClient, limits)
-		bucketOpener := parquet_storage.NewParquetBucketOpener(userBkt)
+		// Use cached bucket opener for better performance
+		cachedBucketOpener := newCachedParquetBucketOpener(userBkt, metadataCache)
 		shards := make([]parquet_storage.ParquetShard, len(blocks))
 		errGroup := &errgroup.Group{}
 
@@ -217,15 +227,15 @@ func NewParquetQueryable(
 		for i, block := range blocks {
 			errGroup.Go(func() error {
 				cacheKey := fmt.Sprintf("%v-%v", userID, block.ID)
-				shard := cache.Get(cacheKey)
+				shard := shardCache.Get(cacheKey)
 				if shard == nil {
 					// we always only have 1 shard - shard 0
 					// Use context.Background() here as the file can be cached and live after the request ends.
 					shard, err = parquet_storage.NewParquetShardOpener(
 						context.WithoutCancel(ctx),
 						block.ID.String(),
-						bucketOpener,
-						bucketOpener,
+						cachedBucketOpener,
+						cachedBucketOpener,
 						0,
 						parquet_storage.WithFileOptions(
 							parquet.SkipMagicBytes(true),
@@ -237,7 +247,7 @@ func NewParquetQueryable(
 					if err != nil {
 						return errors.Wrapf(err, "failed to open parquet shard. block: %v", block.ID.String())
 					}
-					cache.Set(cacheKey, shard)
+					shardCache.Set(cacheKey, shard)
 				}
 
 				shards[i] = shard
@@ -621,6 +631,7 @@ type cacheMetrics struct {
 	misses    *prometheus.CounterVec
 	evictions *prometheus.CounterVec
 	size      *prometheus.GaugeVec
+	bytes     *prometheus.GaugeVec
 }
 
 func newCacheMetrics(reg prometheus.Registerer) *cacheMetrics {
@@ -641,6 +652,10 @@ func newCacheMetrics(reg prometheus.Registerer) *cacheMetrics {
 			Name: "cortex_parquet_queryable_cache_item_count",
 			Help: "Current number of cached parquet items",
 		}, []string{"name"}),
+		bytes: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
+			Name: "cortex_parquet_queryable_cache_bytes",
+			Help: "Current size of cached parquet data in bytes",
+		}, []string{"name"}),
 	}
 }
 
@@ -648,25 +663,37 @@ type Cache[T any] struct {
 	cache   *lru.Cache[string, T]
 	name    string
 	metrics *cacheMetrics
+	// Track total bytes for byte size metrics and limits
+	totalBytes int64
+	maxBytes   int64
 }
 
-func newCache[T any](name string, size int, metrics *cacheMetrics) (cacheInterface[T], error) {
+func newCache[T any](name string, size int, maxBytes int64, metrics *cacheMetrics) (cacheInterface[T], error) {
 	if size <= 0 {
 		return &noopCache[T]{}, nil
 	}
+
+	c := &Cache[T]{
+		name:     name,
+		metrics:  metrics,
+		maxBytes: maxBytes,
+	}
+
 	cache, err := lru.NewWithEvict(size, func(key string, value T) {
 		metrics.evictions.WithLabelValues(name).Inc()
 		metrics.size.WithLabelValues(name).Dec()
+		// Update byte metrics on eviction
+		if bytes, ok := c.getBytes(value); ok {
+			c.totalBytes -= bytes
+			metrics.bytes.WithLabelValues(name).Sub(float64(bytes))
+		}
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &Cache[T]{
-		cache:   cache,
-		name:    name,
-		metrics: metrics,
-	}, nil
+	c.cache = cache
+	return c, nil
 }
 
 func (c *Cache[T]) Get(path string) (r T) {
@@ -678,10 +705,45 @@ func (c *Cache[T]) Get(path string) (r T) {
 	return
 }
 
-func (c *Cache[T]) Set(path string, reader T) {
-	if !c.cache.Contains(path) {
-		c.metrics.size.WithLabelValues(c.name).Inc()
+// getBytes returns the size in bytes of the cached value
+func (c *Cache[T]) getBytes(value T) (int64, bool) {
+	switch v := any(value).(type) {
+	case []byte:
+		return int64(len(v)), true
+	case parquet_storage.ParquetShard:
+		// For ParquetShard, we can't easily determine the size, so return 0
+		return 0, false
+	default:
+		// For other types, we can't determine the size
+		return 0, false
 	}
+}
+
+func (c *Cache[T]) Set(path string, reader T) {
+	wasNew := !c.cache.Contains(path)
+	if wasNew {
+		c.metrics.size.WithLabelValues(c.name).Inc()
+	} else {
+		// If updating existing item, subtract old bytes first
+		if oldValue, exists := c.cache.Peek(path); exists {
+			if oldBytes, ok := c.getBytes(oldValue); ok {
+				c.totalBytes -= oldBytes
+				c.metrics.bytes.WithLabelValues(c.name).Sub(float64(oldBytes))
+			}
+		}
+	}
+
+	// Check if adding this item would exceed the byte limit
+	if bytes, ok := c.getBytes(reader); ok {
+		if c.maxBytes > 0 && c.totalBytes+bytes > c.maxBytes {
+			// Would exceed byte limit, don't add
+			c.metrics.misses.WithLabelValues(c.name).Inc()
+			return
+		}
+		c.totalBytes += bytes
+		c.metrics.bytes.WithLabelValues(c.name).Add(float64(bytes))
+	}
+
 	c.metrics.misses.WithLabelValues(c.name).Inc()
 	c.cache.Add(path, reader)
 }
@@ -723,4 +785,161 @@ func convertBlockULIDToString(blocks []*bucketindex.Block) []string {
 		res[idx] = b.ID.String()
 	}
 	return res
+}
+
+type cachedBucketReaderAt struct {
+	parquet_storage.ReadAtWithContextCloser
+}
+
+// cachedReaderAt is used to route specific reads to the caching layer. this must be passed directly into
+// the parquet.File so the Set*Section() methods get called.
+type cachedReaderAt struct {
+	r             parquet_storage.ReadAtWithContextCloser
+	cache         cacheInterface[[]byte]
+	path          string
+	cachedObjects map[int64]int64 // storing offsets and length of objects we want to cache
+
+	readerSize int64
+	footerSize uint32
+}
+
+var (
+	_ io.ReaderAt                             = (*cachedReaderAt)(nil)
+	_ parquet_storage.ReadAtWithContextCloser = (*cachedReaderAt)(nil)
+)
+
+func newCachedReaderAt(r parquet_storage.ReadAtWithContextCloser, cache cacheInterface[[]byte], path string, size int64, footerSize uint32) *cachedReaderAt {
+	return &cachedReaderAt{
+		r:             r,
+		cache:         cache,
+		path:          path,
+		cachedObjects: map[int64]int64{},
+		readerSize:    size,
+		footerSize:    footerSize,
+	}
+}
+
+// called by parquet-go in OpenFile() to set offset and length of footer section
+func (r *cachedReaderAt) SetFooterSection(offset, length int64) {
+	r.cachedObjects[offset] = length
+}
+
+// called by parquet-go in OpenFile() to set offset and length of column indexes
+func (r *cachedReaderAt) SetColumnIndexSection(offset, length int64) {
+	r.cachedObjects[offset] = length
+}
+
+// called by parquet-go in OpenFile() to set offset and length of offset index section
+func (r *cachedReaderAt) SetOffsetIndexSection(offset, length int64) {
+	r.cachedObjects[offset] = length
+}
+
+func (r *cachedReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if len(p) == 4 && off == 0 {
+		// Magic header
+		return copy(p, []byte("PAR1")), nil
+	}
+
+	if len(p) == 8 && off == r.readerSize-8 && r.footerSize > 0 /* not present in previous block metas */ {
+		// Magic footer
+		binary.LittleEndian.PutUint32(p, r.footerSize)
+		copy(p[4:8], []byte("PAR1"))
+		return 8, nil
+	}
+
+	// check if the offset and length is stored as a special object (metadata section)
+	expectedLength, ok := r.cachedObjects[off]
+	if ok && expectedLength == int64(len(p)) {
+		// This is a metadata section, use caching
+		cacheKey := fmt.Sprintf("%s-%d-%d", r.path, off, len(p))
+
+		// Try to get from cache first
+		if cached := r.cache.Get(cacheKey); cached != nil && len(cached) == len(p) {
+			copy(p, cached)
+			return len(p), nil
+		}
+
+		// If not in cache, read from underlying reader
+		n, err := r.r.WithContext(context.Background()).ReadAt(p, off)
+		if err != nil {
+			return n, err
+		}
+
+		// Cache the result if read was successful
+		if n > 0 {
+			cached := make([]byte, n)
+			copy(cached, p[:n])
+			r.cache.Set(cacheKey, cached)
+		}
+
+		return n, nil
+	}
+
+	// For non-metadata sections, use the underlying bucket reader directly
+	return r.r.WithContext(context.Background()).ReadAt(p, off)
+}
+
+// WithContext implements parquet_storage.ReadAtWithContextCloser interface
+func (r *cachedReaderAt) WithContext(ctx context.Context) parquet_storage.SizeReaderAt {
+	return &cachedReaderAtWithContext{
+		cachedReaderAt: r,
+		ctx:            ctx,
+	}
+}
+
+// Close implements parquet_storage.ReadAtWithContextCloser interface
+func (r *cachedReaderAt) Close() error {
+	return nil
+}
+
+// cachedReaderAtWithContext implements parquet_storage.SizeReaderAt
+type cachedReaderAtWithContext struct {
+	*cachedReaderAt
+	ctx context.Context
+}
+
+// Size implements parquet_storage.SizeReaderAt interface
+func (r *cachedReaderAtWithContext) Size() int64 {
+	return r.readerSize
+}
+
+// cachedParquetBucketOpener implements ParquetOpener with caching support
+type cachedParquetBucketOpener struct {
+	bkt   objstore.BucketReader
+	cache cacheInterface[[]byte]
+}
+
+func newCachedParquetBucketOpener(bkt objstore.BucketReader, cache cacheInterface[[]byte]) *cachedParquetBucketOpener {
+	return &cachedParquetBucketOpener{
+		bkt:   bkt,
+		cache: cache,
+	}
+}
+
+func (o *cachedParquetBucketOpener) Open(ctx context.Context, name string, opts ...parquet_storage.FileOption) (*parquet_storage.ParquetFile, error) {
+	attr, err := o.bkt.Attributes(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the base bucket reader
+	baseReader := parquet_storage.NewBucketReadAt(name, o.bkt)
+
+	// Create the cached reader that parquet-go will use
+	// We'll determine the footer size by reading the last 8 bytes
+	footerSize := uint32(0)
+	if attr.Size >= 8 {
+		footerBytes := make([]byte, 8)
+		if _, err := baseReader.WithContext(ctx).ReadAt(footerBytes, attr.Size-8); err == nil {
+			// Check if it's a valid PAR1 footer
+			if string(footerBytes[4:8]) == "PAR1" {
+				footerSize = binary.LittleEndian.Uint32(footerBytes[0:4])
+			}
+		}
+	}
+
+	reader := newCachedReaderAt(baseReader, o.cache, name, attr.Size, footerSize)
+
+	// Open the parquet file with our cached reader
+	return parquet_storage.Open(ctx, reader, attr.Size, opts...)
 }
