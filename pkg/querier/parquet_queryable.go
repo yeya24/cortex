@@ -602,6 +602,14 @@ func (f *shardMatcherLabelsFilter) Close() {
 	f.shardMatcher.Close()
 }
 
+func materializedLabelsFilter1Callback(ctx context.Context, _ *storage.SelectHints) (search.MaterializedLabelsFilter, bool) {
+	shardInfo, exists := extractShardMatcherFromContext(ctx)
+	if !exists || !shardInfo.IsSharded() {
+		return nil, false
+	}
+	return &shardMatcherLabelsFilter{shardMatcher: shardInfo}, true
+}
+
 func materializedLabelsFilterCallback(ctx context.Context, _ *storage.SelectHints) (search.MaterializedLabelsFilter, bool) {
 	shardInfo, exists := extractShardInfoFromContext(ctx)
 	if !exists {
@@ -701,7 +709,8 @@ func (n noopCache[T]) Set(_ string, _ T) {
 }
 
 var (
-	shardInfoCtxKey contextKey = 1
+	shardInfoCtxKey    contextKey = 1
+	shardMatcherCtxKey contextKey = 2
 )
 
 func injectShardInfoIntoContext(ctx context.Context, si *storepb.ShardInfo) context.Context {
@@ -711,6 +720,18 @@ func injectShardInfoIntoContext(ctx context.Context, si *storepb.ShardInfo) cont
 func extractShardInfoFromContext(ctx context.Context) (*storepb.ShardInfo, bool) {
 	if si := ctx.Value(shardInfoCtxKey); si != nil {
 		return si.(*storepb.ShardInfo), true
+	}
+
+	return nil, false
+}
+
+func injectShardMatcherIntoContext(ctx context.Context, si *storepb.ShardMatcher) context.Context {
+	return context.WithValue(ctx, shardMatcherCtxKey, si)
+}
+
+func extractShardMatcherFromContext(ctx context.Context) (*storepb.ShardMatcher, bool) {
+	if si := ctx.Value(shardMatcherCtxKey); si != nil {
+		return si.(*storepb.ShardMatcher), true
 	}
 
 	return nil, false
