@@ -3,6 +3,7 @@ package tsdb
 import (
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,17 +19,18 @@ type UsersScannerConfig struct {
 const (
 	UserScanStrategyList      = "list"
 	UserScanStrategyUserIndex = "user_index"
+	UserScanStrategyDisabled  = "disabled"
 )
 
 var (
 	ErrInvalidUserScannerStrategy = errors.New("invalid user scanner strategy")
 	ErrInvalidMaxStalePeriod      = errors.New("max stale period must be positive")
 	ErrInvalidCacheTTL            = errors.New("cache TTL must be >= 0")
-	supportedStrategies           = []string{UserScanStrategyList, UserScanStrategyUserIndex}
+	supportedStrategies           = []string{UserScanStrategyList, UserScanStrategyUserIndex, UserScanStrategyDisabled}
 )
 
 func (c *UsersScannerConfig) Validate() error {
-	if c.Strategy != UserScanStrategyList && c.Strategy != UserScanStrategyUserIndex {
+	if !slices.Contains(supportedStrategies, c.Strategy) {
 		return ErrInvalidUserScannerStrategy
 	}
 	if c.Strategy == UserScanStrategyUserIndex && c.MaxStalePeriod <= 0 {

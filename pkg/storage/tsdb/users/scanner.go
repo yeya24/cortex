@@ -32,6 +32,8 @@ type Scanner interface {
 func NewScanner(cfg tsdb.UsersScannerConfig, bkt objstore.InstrumentedBucket, logger log.Logger, reg prometheus.Registerer) (Scanner, error) {
 	var scanner Scanner
 	switch cfg.Strategy {
+	case tsdb.UserScanStrategyDisabled:
+		scanner = &disabledScanner{}
 	case tsdb.UserScanStrategyList:
 		scanner = &listScanner{bkt: bkt}
 	case tsdb.UserScanStrategyUserIndex:
@@ -53,6 +55,12 @@ func NewShardedScanner(scanner Scanner, isOwned func(userID string) (bool, error
 		isOwned: isOwned,
 		logger:  logger,
 	}
+}
+
+type disabledScanner struct{}
+
+func (s *disabledScanner) ScanUsers(ctx context.Context) (active, deleting, deleted []string, err error) {
+	return []string{""}, nil, nil, nil
 }
 
 type listScanner struct {
