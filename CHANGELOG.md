@@ -24,6 +24,7 @@
 * [FEATURE] Querier: Support for configuring query optimizers and enabling XFunctions in the Thanos engine. #6873
 * [FEATURE] Query Frontend: Add support /api/v1/format_query API for formatting queries. #6893
 * [FEATURE] Query Frontend: Add support for /api/v1/parse_query API (experimental) to parse a PromQL expression and return it as a JSON-formatted AST (abstract syntax tree). #6978
+* [ENHANCEMENT] Upgrade the Prometheus version to 3.6.0 and add a `-name-validation-scheme` flag to support UTF-8. #7040 #7056
 * [ENHANCEMENT] Distributor: Emit an error with a 400 status code when empty labels are found before the relabelling or label dropping process. #7052
 * [ENHANCEMENT] Parquet Storage: Add support for additional sort columns during Parquet file generation #7003
 * [ENHANCEMENT] Modernizes the entire codebase by using go modernize tool. #7005
@@ -102,6 +103,7 @@
 * [BUGFIX] Runtime-config: Change to check tenant limit validation when loading runtime config only for `all`, `distributor`, `querier`, and `ruler` targets. #6880
 * [BUGFIX] Distributor: Fix the `/distributor/all_user_stats` api to work during rolling updates on ingesters. #7026
 * [BUGFIX] Runtime-config: Fix panic when the runtime config is `null`. #7062
+* [BUGFIX] Scheduler: Avoid all queriers reserved for prioritized requests. #7057
 
 ## 1.19.1 2025-09-20
 
