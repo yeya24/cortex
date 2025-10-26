@@ -190,8 +190,9 @@ func NewValidateMetrics(r prometheus.Registerer) *ValidateMetrics {
 // UpdateSamplesDiscardedForSeries updates discarded samples and discarded samples per labelset for the provided reason and series.
 // Used in test only for now.
 func (m *ValidateMetrics) updateSamplesDiscardedForSeries(userID, reason string, labelSetLimits []LimitsPerLabelSet, lbls labels.Labels, count int) {
-	matchedLimits := LimitsPerLabelSetsForSeries(labelSetLimits, lbls)
+	matchedLimits := LimitsPerLabelSetsForSeries(labelSetLimits, lbls, nil)
 	m.updateSamplesDiscarded(userID, reason, matchedLimits, count)
+	PutLimitsPerLabelSetSlice(matchedLimits)
 }
 
 // updateSamplesDiscarded updates discarded samples and discarded samples per labelset for the provided reason.

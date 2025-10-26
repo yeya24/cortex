@@ -1177,6 +1177,8 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 	// We will report *this* request in the error too.
 	inflight := i.inflightPushRequests.Inc()
 	i.maxInflightPushRequests.Track(inflight)
+
+	var matchedLabelSetLimits []validation.LimitsPerLabelSet
 	defer i.inflightPushRequests.Dec()
 
 	gl := i.getInstanceLimits()
@@ -1358,7 +1360,7 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 			// Copy the label set because both TSDB and the active series tracker may retain it.
 			copiedLabels = cortexpb.FromLabelAdaptersToLabelsWithCopy(ts.Labels)
 		}
-		matchedLabelSetLimits := i.limiter.limitsPerLabelSets(userID, copiedLabels)
+		matchedLabelSetLimits = i.limiter.limitsPerLabelSets(userID, copiedLabels, &matchedLabelSetLimits)
 
 		for _, s := range ts.Samples {
 			var err error
@@ -1392,6 +1394,7 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 				level.Warn(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to rollback on error", "user", userID, "err", rollbackErr)
 			}
 
+			validation.PutLimitsPerLabelSetSlice(matchedLabelSetLimits)
 			return nil, wrapWithUser(err, userID)
 		}
 
@@ -1436,6 +1439,7 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 				if rollbackErr := app.Rollback(); rollbackErr != nil {
 					level.Warn(logutil.WithContext(ctx, i.logger)).Log("msg", "failed to rollback on error", "user", userID, "err", rollbackErr)
 				}
+				validation.PutLimitsPerLabelSetSlice(matchedLabelSetLimits)
 				return nil, wrapWithUser(err, userID)
 			}
 		} else {
@@ -1485,6 +1489,7 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 		}
 	}
 
+	validation.PutLimitsPerLabelSetSlice(matchedLabelSetLimits)
 	// At this point all samples have been added to the appender, so we can track the time it took.
 	i.TSDBState.appenderAddDuration.Observe(time.Since(startAppend).Seconds())
 

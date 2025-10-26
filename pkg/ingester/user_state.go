@@ -216,7 +216,7 @@ func getPostingCardinality(p index.Postings) (int, error) {
 }
 
 func (m *labelSetCounter) increaseSeriesLabelSet(u *userTSDB, metric labels.Labels) {
-	limits := m.limiter.limitsPerLabelSets(u.userID, metric)
+	limits := m.limiter.limitsPerLabelSets(u.userID, metric, nil)
 	for _, l := range limits {
 		s := m.shards[util.HashFP(model.Fingerprint(l.Hash))%numMetricCounterShards]
 		s.Lock()
@@ -230,10 +230,11 @@ func (m *labelSetCounter) increaseSeriesLabelSet(u *userTSDB, metric labels.Labe
 		}
 		s.Unlock()
 	}
+	validation.PutLimitsPerLabelSetSlice(limits)
 }
 
 func (m *labelSetCounter) decreaseSeriesLabelSet(u *userTSDB, metric labels.Labels) {
-	limits := m.limiter.limitsPerLabelSets(u.userID, metric)
+	limits := m.limiter.limitsPerLabelSets(u.userID, metric, nil)
 	for _, l := range limits {
 		s := m.shards[util.HashFP(model.Fingerprint(l.Hash))%numMetricCounterShards]
 		s.Lock()
@@ -242,6 +243,7 @@ func (m *labelSetCounter) decreaseSeriesLabelSet(u *userTSDB, metric labels.Labe
 		}
 		s.Unlock()
 	}
+	validation.PutLimitsPerLabelSetSlice(limits)
 }
 
 func (m *labelSetCounter) UpdateMetric(ctx context.Context, u *userTSDB, metrics *ingesterMetrics) error {

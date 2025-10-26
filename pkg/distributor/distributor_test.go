@@ -4469,3 +4469,38 @@ func TestFindHALabels(t *testing.T) {
 		assert.Equal(t, c.expected.replica, replica)
 	}
 }
+
+func TestAAA(t *testing.T) {
+	type T struct {
+		A int
+		B string
+	}
+	p := sync.Pool{
+		New: func() any {
+			b := make([]T, 0, 10)
+			return &b
+		},
+	}
+
+	a := *p.Get().(*[]T)
+	for i := 0; i < 10; i++ {
+		a = append(a, T{
+			A: i,
+			B: fmt.Sprintf("b%d", i),
+		})
+	}
+	b := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		b = append(b, a[i].B)
+	}
+	a = a[:0]
+	p.Put(&a)
+	a = *p.Get().(*[]T)
+	for i := 0; i < 10; i++ {
+		a = append(a, T{
+			A: i + 10,
+			B: fmt.Sprintf("c%d", i),
+		})
+	}
+	fmt.Println(b)
+}

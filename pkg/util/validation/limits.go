@@ -10,6 +10,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cespare/xxhash/v2"
@@ -120,6 +121,14 @@ type LimitsPerLabelSet struct {
 	LabelSet labels.Labels          `yaml:"label_set" json:"label_set" doc:"nocli|description=LabelSet which the limit should be applied. If no labels are provided, it becomes the default partition which matches any series that doesn't match any other explicitly defined label sets.'"`
 	Id       string                 `yaml:"-" json:"-" doc:"nocli"`
 	Hash     uint64                 `yaml:"-" json:"-" doc:"nocli"`
+}
+
+// Pool for reusing LimitsPerLabelSet slices to reduce allocations
+var limitsPerLabelSetPool = sync.Pool{
+	New: func() any {
+		s := make([]LimitsPerLabelSet, 0, 10)
+		return &s
+	},
 }
 
 // Limits describe all the limits for users; can be used to describe global default
@@ -1193,12 +1202,33 @@ func MaxDurationPerTenant(tenantIDs []string, f func(string) time.Duration) time
 }
 
 // LimitsPerLabelSetsForSeries checks matching labelset limits for the given series.
-func LimitsPerLabelSetsForSeries(limitsPerLabelSets []LimitsPerLabelSet, metric labels.Labels) []LimitsPerLabelSet {
+// If buf is nil, a slice from the pool will be used. If buf is provided, it will be reused.
+//
+// Example usage:
+//
+//	// Using pool (caller must call PutLimitsPerLabelSetSlice)
+//	result := LimitsPerLabelSetsForSeries(limits, metric, nil)
+//	defer PutLimitsPerLabelSetSlice(result)
+//
+//	// Using provided buffer (no pool allocation)
+//	var buf []LimitsPerLabelSet
+//	result := LimitsPerLabelSetsForSeries(limits, metric, &buf)
+func LimitsPerLabelSetsForSeries(limitsPerLabelSets []LimitsPerLabelSet, metric labels.Labels, buf *[]LimitsPerLabelSet) []LimitsPerLabelSet {
 	// returning early to not have any overhead
 	if len(limitsPerLabelSets) == 0 {
 		return nil
 	}
-	r := make([]LimitsPerLabelSet, 0, len(limitsPerLabelSets))
+
+	var r []LimitsPerLabelSet
+	if buf == nil {
+		// Get slice from pool
+		r = *limitsPerLabelSetPool.Get().(*[]LimitsPerLabelSet)
+		r = r[:0] // Reset length but keep capacity
+	} else {
+		// Reuse the provided buffer
+		r = (*buf)[:0] // Reset length but keep capacity
+	}
+
 	defaultPartitionIndex := -1
 outer:
 	for i, lbls := range limitsPerLabelSets {
@@ -1225,4 +1255,21 @@ outer:
 		r = append(r, limitsPerLabelSets[defaultPartitionIndex])
 	}
 	return r
+}
+
+// GetLimitsPerLabelSetSlice gets a slice from the pool for reuse.
+func GetLimitsPerLabelSetSlice() *[]LimitsPerLabelSet {
+	return limitsPerLabelSetPool.Get().(*[]LimitsPerLabelSet)
+}
+
+// PutLimitsPerLabelSetSlice returns a LimitsPerLabelSet slice to the pool for reuse.
+// Callers should call this function when they're done with the slice returned by LimitsPerLabelSetsForSeries.
+// Only slices obtained from the pool should be returned to the pool.
+func PutLimitsPerLabelSetSlice(slice []LimitsPerLabelSet) {
+	if slice == nil {
+		return
+	}
+	// Reset the slice length to 0 but keep the capacity
+	slice = slice[:0]
+	limitsPerLabelSetPool.Put(&slice)
 }

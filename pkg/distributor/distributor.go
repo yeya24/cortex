@@ -999,8 +999,9 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 	limitsPerLabelSet := d.limits.LimitsPerLabelSet(userID)
 
 	var (
-		labelSetCounters map[uint64]*samplesLabelSetEntry
-		firstPartialErr  error
+		matchedLabelSetLimits []validation.LimitsPerLabelSet
+		labelSetCounters      map[uint64]*samplesLabelSetEntry
+		firstPartialErr       error
 	)
 
 	latestSampleTimestampMs := int64(0)
@@ -1009,6 +1010,7 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 		if latestSampleTimestampMs > 0 {
 			d.latestSeenSampleTimestampPerUser.WithLabelValues(userID).Set(float64(latestSampleTimestampMs) / 1000)
 		}
+		validation.PutLimitsPerLabelSetSlice(matchedLabelSetLimits)
 	}()
 
 	// For each timeseries, compute a hash to distribute across ingesters;
@@ -1121,7 +1123,7 @@ func (d *Distributor) prepareSeriesKeys(ctx context.Context, req *cortexpb.Write
 			continue
 		}
 
-		matchedLabelSetLimits := validation.LimitsPerLabelSetsForSeries(limitsPerLabelSet, cortexpb.FromLabelAdaptersToLabels(validatedSeries.Labels))
+		matchedLabelSetLimits = validation.LimitsPerLabelSetsForSeries(limitsPerLabelSet, cortexpb.FromLabelAdaptersToLabels(validatedSeries.Labels), &matchedLabelSetLimits)
 		if len(matchedLabelSetLimits) > 0 && labelSetCounters == nil {
 			// TODO: use pool.
 			labelSetCounters = make(map[uint64]*samplesLabelSetEntry, len(matchedLabelSetLimits))

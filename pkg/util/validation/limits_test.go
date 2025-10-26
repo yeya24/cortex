@@ -939,7 +939,7 @@ func TestLimitsPerLabelSetsForSeries(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			matched := LimitsPerLabelSetsForSeries(tc.limits, tc.metric)
+			matched := LimitsPerLabelSetsForSeries(tc.limits, tc.metric, nil)
 			require.Equal(t, tc.expectedLimits, matched)
 		})
 	}

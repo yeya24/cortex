@@ -120,7 +120,8 @@ func (l *Limiter) AssertMaxMetricsWithMetadataPerUser(userID string, metrics int
 // number of metrics with metadata in input and returns an error if so.
 func (l *Limiter) AssertMaxSeriesPerLabelSet(userID string, metric labels.Labels, f func(allLimits []validation.LimitsPerLabelSet, limit validation.LimitsPerLabelSet) (int, error)) error {
 	limits := l.limits.LimitsPerLabelSet(userID)
-	matchedLimits := validation.LimitsPerLabelSetsForSeries(limits, metric)
+	matchedLimits := validation.LimitsPerLabelSetsForSeries(limits, metric, nil)
+	defer validation.PutLimitsPerLabelSetSlice(matchedLimits)
 	for _, limit := range matchedLimits {
 		maxSeriesFunc := func(string) int {
 			return limit.Limits.MaxSeries
@@ -212,9 +213,9 @@ func (l *Limiter) formatMaxSeriesPerLabelSetError(err errMaxSeriesPerLabelSetLim
 		minNonZero(err.globalLimit, err.actualLocalLimit), err.id, err.globalLimit, err.actualLocalLimit)
 }
 
-func (l *Limiter) limitsPerLabelSets(userID string, metric labels.Labels) []validation.LimitsPerLabelSet {
+func (l *Limiter) limitsPerLabelSets(userID string, metric labels.Labels, buf *[]validation.LimitsPerLabelSet) []validation.LimitsPerLabelSet {
 	m := l.limits.LimitsPerLabelSet(userID)
-	return validation.LimitsPerLabelSetsForSeries(m, metric)
+	return validation.LimitsPerLabelSetsForSeries(m, metric, buf)
 }
 
 func (l *Limiter) maxSeriesPerMetric(userID string) int {
