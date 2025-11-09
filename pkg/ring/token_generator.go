@@ -87,6 +87,20 @@ func (g *MinimizeSpreadTokenGenerator) GenerateTokens(ring *Desc, id, zone strin
 	usedTokens := map[uint32]string{}
 	instanceTokens := make([][]uint32, 0, len(ring.Ingesters))
 	tokensPerInstanceWithDistance := map[string]*totalTokenPerInstance{}
+	emptyIngestersCount := 0
+
+	// First pass: count empty ingesters in the same zone
+	for _, instance := range ring.GetIngesters() {
+		if instance.Zone == zone && len(instance.Tokens) == 0 {
+			emptyIngestersCount++
+		}
+	}
+
+	// Check if current instance is also empty (not in ring yet or has no tokens)
+	currentInstanceDesc, currentInstanceExists := ring.Ingesters[id]
+	if !currentInstanceExists || len(currentInstanceDesc.Tokens) == 0 {
+		emptyIngestersCount++
+	}
 
 	for i, instance := range ring.GetIngesters() {
 		for _, token := range instance.Tokens {
@@ -108,9 +122,28 @@ func (g *MinimizeSpreadTokenGenerator) GenerateTokens(ring *Desc, id, zone strin
 			if len(instance.Tokens) == 0 {
 				// If there is more than one ingester with no tokens, use MinimizeSpread only for the first registered ingester.
 				// In case of a tie, use the ingester ID as a tiebreaker.
-				if instance.RegisteredTimestamp < ring.Ingesters[id].RegisteredTimestamp ||
-					(instance.RegisteredTimestamp == ring.Ingesters[id].RegisteredTimestamp && i < id) {
+				// However, if there are many empty ingesters (>= 3), allow parallel token generation by using random
+				// generation for all to avoid sequential bottlenecks during scale-up scenarios.
+				currentInstanceDesc, ok := ring.Ingesters[id]
+				if !ok {
+					// Current instance is not in the ring yet, fallback to random generation
 					if force {
+						return g.innerGenerator.GenerateTokens(ring, id, zone, numTokens, true)
+					} else {
+						return make([]uint32, 0)
+					}
+				}
+				if instance.RegisteredTimestamp < currentInstanceDesc.RegisteredTimestamp ||
+					(instance.RegisteredTimestamp == currentInstanceDesc.RegisteredTimestamp && i < id) {
+					// If force is true and there are many empty ingesters (>= 3), allow parallel generation
+					// by falling back to random. This helps with concurrent scaling scenarios where multiple
+					// ingesters join simultaneously, avoiding sequential bottlenecks.
+					// When force=false, maintain original behavior to preserve fairness.
+					if force {
+						if emptyIngestersCount >= 3 {
+							// Allow parallel generation when scaling up many ingesters at once
+							return g.innerGenerator.GenerateTokens(ring, id, zone, numTokens, true)
+						}
 						return g.innerGenerator.GenerateTokens(ring, id, zone, numTokens, true)
 					} else {
 						return make([]uint32, 0)

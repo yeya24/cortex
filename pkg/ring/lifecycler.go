@@ -957,9 +957,27 @@ func (i *Lifecycler) autoJoin(ctx context.Context, targetState InstanceState, al
 			return ringDesc, true, nil
 		}
 
-		newTokens := i.tg.GenerateTokens(ringDesc, i.ID, i.Zone, needTokens, false)
+		// Count empty ingesters in the same zone to detect concurrent scale-up scenarios
+		// When many ingesters are joining simultaneously, use force=true to allow parallel
+		// token generation instead of sequential waiting
+		emptyIngestersCount := 0
+		for _, instance := range ringDesc.Ingesters {
+			if instance.Zone == i.Zone && len(instance.Tokens) == 0 {
+				emptyIngestersCount++
+			}
+		}
+		// Include current instance if it's also empty
+		if len(myTokens) == 0 {
+			emptyIngestersCount++
+		}
+
+		// Use force=true when there are many empty ingesters to enable parallel generation
+		// This helps with concurrent scaling scenarios where multiple ingesters join simultaneously
+		forceGeneration := emptyIngestersCount >= 3
+
+		newTokens := i.tg.GenerateTokens(ringDesc, i.ID, i.Zone, needTokens, forceGeneration)
 		if len(newTokens) != needTokens {
-			level.Warn(i.logger).Log("msg", "retrying generate tokens")
+			level.Warn(i.logger).Log("msg", "retrying generate tokens", "empty_ingesters", emptyIngestersCount, "force", forceGeneration)
 			return ringDesc, true, errors.New("could not generate tokens")
 		}
 

@@ -48,8 +48,10 @@ type Config struct {
 	TLS               cortextls.ClientConfig `yaml:",inline"`
 
 	// Used in tests only.
-	MaxCasRetries int           `yaml:"-"`
-	CasRetryDelay time.Duration `yaml:"-"`
+	MaxCasRetries int `yaml:"-"`
+	// CasRetryDelay adds jittered delay between CAS retries to reduce thundering herd.
+	// Zero means no delay (immediate retry). Recommended: 50-200ms for faster concurrent operations.
+	CasRetryDelay time.Duration `yaml:"cas_retry_delay"`
 }
 
 type kv interface {
@@ -79,6 +81,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet, prefix string) {
 	f.Float64Var(&cfg.WatchKeyRateLimit, prefix+"consul.watch-rate-limit", 1, "Rate limit when watching key or prefix in Consul, in requests per second. 0 disables the rate limit.")
 	f.IntVar(&cfg.WatchKeyBurstSize, prefix+"consul.watch-burst-size", 1, "Burst size used in rate limit. Values less than 1 are treated as 1.")
 	f.BoolVar(&cfg.EnableTLS, prefix+"consul.tls-enabled", false, "Enable TLS.")
+	f.DurationVar(&cfg.CasRetryDelay, prefix+"consul.cas-retry-delay", 100*time.Millisecond, "Jittered delay between CAS retries to reduce thundering herd. Zero means no delay (immediate retry). Lower values allow faster retries during concurrent operations.")
 	cfg.TLS.RegisterFlagsWithPrefix(prefix+"consul", f)
 }
 
