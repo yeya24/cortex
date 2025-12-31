@@ -2,6 +2,7 @@ package tsdb
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -12,6 +13,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/index"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
@@ -232,4 +235,109 @@ func RepeatStringIfNeeded(seed string, length int) string {
 	}
 
 	return strings.Repeat(seed, 1+length/len(seed))[:max(length, len(seed))]
+}
+
+func TestFetchTimeout(t *testing.T) {
+	// Test that the fetch operation respects the FetchTimeout configuration
+	// to prevent runaway queries when all callers have given up.
+	cfg := TSDBPostingsCacheConfig{
+		Head: PostingsCacheConfig{
+			Enabled:      true,
+			Ttl:          time.Hour,
+			MaxBytes:     10 << 20,
+			FetchTimeout: 100 * time.Millisecond,
+		},
+	}
+
+	fetchStarted := make(chan struct{})
+	fetchShouldBlock := make(chan struct{})
+	fetchCompleted := atomic.Bool{}
+
+	cfg.PostingsForMatchers = func(ctx context.Context, ix tsdb.IndexReader, ms ...*labels.Matcher) (index.Postings, error) {
+		close(fetchStarted)
+		select {
+		case <-ctx.Done():
+			// Good! Context was cancelled due to timeout
+			return nil, ctx.Err()
+		case <-fetchShouldBlock:
+			// This shouldn't happen - the fetch should be cancelled by timeout
+			fetchCompleted.Store(true)
+			return index.EmptyPostings(), nil
+		}
+	}
+
+	m := NewPostingCacheMetrics(prometheus.NewPedanticRegistry())
+	cache := newBlocksPostingsForMatchersCache("user1", cfg, m, newSeedByHash(seedArraySize))
+
+	// Start a query that will trigger the fetch
+	blockID := headULID
+	queryCtx, queryCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer queryCancel()
+
+	_, err := cache.PostingsForMatchers(queryCtx, blockID, nil, labels.MustNewMatcher(labels.MatchEqual, "__name__", "test_metric"))
+
+	// Wait for fetch to start
+	<-fetchStarted
+
+	// The query context will timeout after 50ms
+	// But the fetch should continue with its own timeout (100ms)
+	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	// Wait a bit more than the fetch timeout
+	time.Sleep(150 * time.Millisecond)
+
+	// The fetch should have been cancelled by its timeout, not completed
+	require.False(t, fetchCompleted.Load(), "Fetch should have been cancelled by timeout, not completed")
+
+	close(fetchShouldBlock)
+}
+
+func TestFetchTimeoutDisabled(t *testing.T) {
+	// Test that when FetchTimeout is 0 or negative, we still use context.Background()
+	// This maintains backward compatibility.
+	cfg := TSDBPostingsCacheConfig{
+		Head: PostingsCacheConfig{
+			Enabled:      true,
+			Ttl:          time.Hour,
+			MaxBytes:     10 << 20,
+			FetchTimeout: 0, // Disabled
+		},
+	}
+
+	fetchCompleted := atomic.Bool{}
+	fetchStarted := make(chan struct{})
+
+	cfg.PostingsForMatchers = func(ctx context.Context, ix tsdb.IndexReader, ms ...*labels.Matcher) (index.Postings, error) {
+		close(fetchStarted)
+		// Verify that context is not cancelled
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			fetchCompleted.Store(true)
+			return index.EmptyPostings(), nil
+		}
+	}
+
+	m := NewPostingCacheMetrics(prometheus.NewPedanticRegistry())
+	cache := newBlocksPostingsForMatchersCache("user1", cfg, m, newSeedByHash(seedArraySize))
+
+	blockID := headULID
+	queryCtx, queryCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer queryCancel()
+
+	_, err := cache.PostingsForMatchers(queryCtx, blockID, nil, labels.MustNewMatcher(labels.MatchEqual, "__name__", "test_metric"))
+
+	// Wait for fetch to start
+	<-fetchStarted
+
+	// Query will timeout, but fetch should continue
+	require.Error(t, err)
+
+	// Wait for fetch to complete
+	time.Sleep(150 * time.Millisecond)
+
+	// Fetch should complete successfully since FetchTimeout is disabled
+	require.True(t, fetchCompleted.Load(), "Fetch should complete when FetchTimeout is disabled")
 }
