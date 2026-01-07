@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/go-kit/log"
 	"github.com/gogo/protobuf/types"
+	"github.com/oklog/ulid/v2"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/parquet-common/convert"
 	"github.com/prometheus-community/parquet-common/schema"
@@ -25,6 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	"github.com/cortexproject/cortex/pkg/util/parquetutil"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
 	"github.com/cortexproject/cortex/pkg/util/validation"
@@ -40,6 +43,10 @@ type parquetBucketStore struct {
 
 	matcherCache      storecache.MatchersCache
 	parquetShardCache parquetutil.CacheInterface[parquet_storage.ParquetShard]
+
+	// Bucket index blocks - currently not used but reserved for future shard support
+	blocksMu sync.RWMutex
+	blocks   map[ulid.ULID]*bucketindex.Block
 }
 
 func (p *parquetBucketStore) Close() error {
@@ -55,19 +62,36 @@ func (p *parquetBucketStore) InitialSync(ctx context.Context) error {
 	return nil
 }
 
+// updateBlocks updates the cached blocks from the bucket index
+func (p *parquetBucketStore) updateBlocks(idx *bucketindex.Index) {
+	p.blocksMu.Lock()
+	defer p.blocksMu.Unlock()
+
+	// Create a new map from the index blocks
+	newBlocks := make(map[ulid.ULID]*bucketindex.Block, len(idx.Blocks))
+	for _, b := range idx.Blocks {
+		newBlocks[b.ID] = b
+	}
+
+	p.blocks = newBlocks
+}
+
 func (p *parquetBucketStore) findParquetBlocks(ctx context.Context, blockMatchers []storepb.LabelMatcher) ([]*parquetBlock, error) {
 	if len(blockMatchers) != 1 || blockMatchers[0].Type != storepb.LabelMatcher_RE || blockMatchers[0].Name != block.BlockIDLabel {
 		return nil, status.Error(codes.InvalidArgument, "only one block matcher is supported")
 	}
 
-	blockIDs := strings.Split(blockMatchers[0].Value, "|")
-	blocks := make([]*parquetBlock, 0, len(blockIDs))
+	blockIDStrs := strings.Split(blockMatchers[0].Value, "|")
 	bucketOpener := parquet_storage.NewParquetBucketOpener(p.bucket)
 	noopQuota := search.NewQuota(search.NoopQuotaLimitFunc(ctx))
-	for _, blockID := range blockIDs {
-		block, err := p.newParquetBlock(ctx, blockID, bucketOpener, bucketOpener, p.chunksDecoder, noopQuota, noopQuota, noopQuota)
+
+	blocks := make([]*parquetBlock, 0, len(blockIDStrs))
+	for _, blockIDStr := range blockIDStrs {
+		// For now, we only open shard 0 for each block
+		// In the future, we can read the number of shards from bucket index
+		block, err := p.newParquetBlock(ctx, blockIDStr, 0, bucketOpener, bucketOpener, p.chunksDecoder, noopQuota, noopQuota, noopQuota)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "failed to open parquet block %s shard 0", blockIDStr)
 		}
 		blocks = append(blocks, block)
 	}

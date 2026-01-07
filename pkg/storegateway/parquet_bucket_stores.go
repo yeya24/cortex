@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/oklog/ulid/v2"
 	"github.com/parquet-go/parquet-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/parquet-common/convert"
@@ -30,6 +31,7 @@ import (
 	"github.com/cortexproject/cortex/pkg/querysharding"
 	"github.com/cortexproject/cortex/pkg/storage/bucket"
 	"github.com/cortexproject/cortex/pkg/storage/tsdb"
+	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	cortex_util "github.com/cortexproject/cortex/pkg/util"
 	cortex_errors "github.com/cortexproject/cortex/pkg/util/errors"
 	"github.com/cortexproject/cortex/pkg/util/parquetutil"
@@ -198,11 +200,67 @@ func (u *ParquetBucketStores) LabelValues(ctx context.Context, req *storepb.Labe
 
 // SyncBlocks implements BucketStores
 func (u *ParquetBucketStores) SyncBlocks(ctx context.Context) error {
-	return nil
+	return u.syncBlocks(ctx)
 }
 
 // InitialSync implements BucketStores
 func (u *ParquetBucketStores) InitialSync(ctx context.Context) error {
+	return u.syncBlocks(ctx)
+}
+
+// syncBlocks syncs bucket index for all tenants
+func (u *ParquetBucketStores) syncBlocks(ctx context.Context) error {
+	u.storesMu.RLock()
+	userIDs := make([]string, 0, len(u.stores))
+	for userID := range u.stores {
+		userIDs = append(userIDs, userID)
+	}
+	u.storesMu.RUnlock()
+
+	// Sync bucket index for each tenant
+	for _, userID := range userIDs {
+		if err := u.syncUserBlocks(ctx, userID); err != nil {
+			// Log error but continue with other tenants
+			level.Warn(u.logger).Log("msg", "failed to sync blocks for user", "user", userID, "err", err)
+		}
+	}
+
+	return nil
+}
+
+// syncUserBlocks syncs the bucket index for a single user
+func (u *ParquetBucketStores) syncUserBlocks(ctx context.Context, userID string) error {
+	// Get the bucket index for this user
+	idx, err := bucketindex.ReadIndex(ctx, u.bucket, userID, u.limits, u.logger)
+	if errors.Is(err, bucketindex.ErrIndexNotFound) {
+		// This is a legit case - new tenant with no blocks yet
+		level.Debug(u.logger).Log("msg", "bucket index not found", "user", userID)
+		return nil
+	}
+	if errors.Is(err, bucketindex.ErrIndexCorrupted) {
+		level.Error(u.logger).Log("msg", "corrupted bucket index found", "user", userID, "err", err)
+		return nil
+	}
+	if errors.Is(err, bucket.ErrCustomerManagedKeyAccessDenied) {
+		level.Error(u.logger).Log("msg", "bucket index key permission revoked", "user", userID, "err", err)
+		u.storesErrorsMu.Lock()
+		u.storesErrors[userID] = err
+		u.storesErrorsMu.Unlock()
+		return err
+	}
+	if err != nil {
+		return errors.Wrapf(err, "read bucket index for user %s", userID)
+	}
+
+	// Update the store's block index
+	u.storesMu.RLock()
+	store, exists := u.stores[userID]
+	u.storesMu.RUnlock()
+
+	if exists {
+		store.updateBlocks(idx)
+	}
+
 	return nil
 }
 
@@ -262,6 +320,7 @@ func (u *ParquetBucketStores) createParquetBucketStore(userID string, userLogger
 		chunksDecoder:     u.chunksDecoder,
 		matcherCache:      u.matcherCache,
 		parquetShardCache: u.parquetShardCache,
+		blocks:            make(map[ulid.ULID]*bucketindex.Block),
 	}
 
 	return store, nil
@@ -274,13 +333,13 @@ type parquetBlock struct {
 	concurrency int
 }
 
-func (p *parquetBucketStore) newParquetBlock(ctx context.Context, name string, labelsFileOpener, chunksFileOpener parquet_storage.ParquetOpener, d *schema.PrometheusParquetChunksDecoder, rowCountQuota *search.Quota, chunkBytesQuota *search.Quota, dataBytesQuota *search.Quota) (*parquetBlock, error) {
+func (p *parquetBucketStore) newParquetBlock(ctx context.Context, name string, shardID int, labelsFileOpener, chunksFileOpener parquet_storage.ParquetOpener, d *schema.PrometheusParquetChunksDecoder, rowCountQuota *search.Quota, chunkBytesQuota *search.Quota, dataBytesQuota *search.Quota) (*parquetBlock, error) {
 	userID, err := users.TenantID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	cacheKey := fmt.Sprintf("%v-%v", userID, name)
+	cacheKey := fmt.Sprintf("%v-%v-%v", userID, name, shardID)
 	shard := p.parquetShardCache.Get(cacheKey)
 
 	if shard == nil {
@@ -290,7 +349,7 @@ func (p *parquetBucketStore) newParquetBlock(ctx context.Context, name string, l
 			name,
 			labelsFileOpener,
 			chunksFileOpener,
-			0, // we always only have 1 shard - shard 0
+			shardID,
 			parquet_storage.WithFileOptions(
 				parquet.SkipMagicBytes(true),
 				parquet.ReadBufferSize(100*1024),
@@ -299,7 +358,7 @@ func (p *parquetBucketStore) newParquetBlock(ctx context.Context, name string, l
 			),
 		)
 		if err != nil {
-			return nil, errors.Wrapf(err, "failed to open parquet shard. block: %v", name)
+			return nil, errors.Wrapf(err, "failed to open parquet shard. block: %v, shard: %v", name, shardID)
 		}
 
 		// set shard to cache
