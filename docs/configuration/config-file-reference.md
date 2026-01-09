@@ -544,6 +544,12 @@ sharding_ring:
   # CLI flag: -alertmanager.sharding-ring.detailed-metrics-enabled
   [detailed_metrics_enabled: <boolean> | default = true]
 
+  # Disable extending the replica set when instances are unhealthy. This limits
+  # blast radius during config corruption incidents but reduces availability
+  # during normal failures.
+  # CLI flag: -alertmanager.sharding-ring.disable-replica-set-extension
+  [disable_replica_set_extension: <boolean> | default = false]
+
   # The sleep seconds when alertmanager is shutting down. Need to be close to or
   # larger than KV Store information propagation delay
   # CLI flag: -alertmanager.sharding-ring.final-sleep
@@ -3816,6 +3822,12 @@ instance_limits:
 # CLI flag: -ingester.enable-matcher-optimization
 [enable_matcher_optimization: <boolean> | default = false]
 
+# Enable regex matcher limits and metrics collection for unoptimized regex
+# queries. When enabled, the ingester will track pattern length, label
+# cardinality, and total value length for unoptimized regex matchers.
+# CLI flag: -ingester.enable-regex-matcher-limits
+[enable_regex_matcher_limits: <boolean> | default = false]
+
 query_protection:
   rejection:
     threshold:
@@ -4110,6 +4122,24 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 # [EXPERIMENTAL] True to enable native histogram.
 # CLI flag: -blocks-storage.tsdb.enable-native-histograms
 [enable_native_histograms: <boolean> | default = false]
+
+# Maximum length (in bytes) of an unoptimized regex pattern. This is a
+# pre-flight check to reject expensive regex queries. 0 to disable. This is only
+# enforced in Ingester.
+# CLI flag: -validation.max-regex-pattern-length
+[max_regex_pattern_length: <int> | default = 0]
+
+# Maximum cardinality of a label that can be queried with an unoptimized regex
+# matcher. If exceeded, the query will be rejected with a limit error. 0 to
+# disable. This is only enforced in Ingester.
+# CLI flag: -validation.max-label-cardinality-for-unoptimized-regex
+[max_label_cardinality_for_unoptimized_regex: <int> | default = 0]
+
+# Maximum total length (in bytes) of all label values combined for an
+# unoptimized regex matcher. If exceeded, the query will be rejected with a
+# limit error. 0 to disable. This is only enforced in Ingester.
+# CLI flag: -validation.max-total-label-value-length-for-unoptimized-regex
+[max_total_label_value_length_for_unoptimized_regex: <int> | default = 0]
 
 # The maximum number of active metrics with metadata per user, per ingester. 0
 # to disable.
