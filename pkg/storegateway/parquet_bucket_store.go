@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/go-kit/log"
+	"github.com/go-kit/log/level"
 	"github.com/gogo/protobuf/types"
+	"github.com/oklog/ulid/v2"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/parquet-common/convert"
 	"github.com/prometheus-community/parquet-common/schema"
@@ -25,10 +28,20 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/cortexproject/cortex/pkg/storage/tsdb/bucketindex"
 	"github.com/cortexproject/cortex/pkg/util/parquetutil"
 	"github.com/cortexproject/cortex/pkg/util/spanlogger"
+	"github.com/cortexproject/cortex/pkg/util/users"
 	"github.com/cortexproject/cortex/pkg/util/validation"
 )
+
+// parquetBlockMeta stores metadata about a parquet block
+type parquetBlockMeta struct {
+	id     ulid.ULID
+	minT   int64
+	maxT   int64
+	shards int
+}
 
 type parquetBucketStore struct {
 	logger      log.Logger
@@ -40,6 +53,10 @@ type parquetBucketStore struct {
 
 	matcherCache      storecache.MatchersCache
 	parquetShardCache parquetutil.CacheInterface[parquet_storage.ParquetShard]
+
+	// Synced blocks metadata
+	blocksMu sync.RWMutex
+	blocks   map[ulid.ULID]*parquetBlockMeta
 }
 
 func (p *parquetBucketStore) Close() error {
@@ -48,10 +65,63 @@ func (p *parquetBucketStore) Close() error {
 }
 
 func (p *parquetBucketStore) SyncBlocks(ctx context.Context) error {
-	return nil
+	return p.syncBlocks(ctx)
 }
 
 func (p *parquetBucketStore) InitialSync(ctx context.Context) error {
+	return p.syncBlocks(ctx)
+}
+
+func (p *parquetBucketStore) syncBlocks(ctx context.Context) error {
+	spanLog, spanCtx := spanlogger.New(ctx, "parquetBucketStore.syncBlocks")
+	defer spanLog.Finish()
+
+	// Get user ID from context (injected by syncUsersBlocks)
+	userID, err := users.TenantID(spanCtx)
+	if err != nil {
+		level.Warn(p.logger).Log("msg", "cannot get user ID from context for sync", "err", err)
+		return nil
+	}
+
+	// Read bucket index
+	idx, err := bucketindex.ReadIndex(spanCtx, p.bucket, userID, p.limits, p.logger)
+	if err != nil {
+		if errors.Is(err, bucketindex.ErrIndexNotFound) {
+			level.Debug(p.logger).Log("msg", "bucket index not found", "user", userID)
+			return nil
+		}
+		if errors.Is(err, bucketindex.ErrIndexCorrupted) {
+			level.Error(p.logger).Log("msg", "corrupted bucket index", "user", userID, "err", err)
+			return nil
+		}
+		return errors.Wrap(err, "read bucket index")
+	}
+
+	// Extract parquet blocks
+	parquetBlocks := idx.ParquetBlocks()
+	
+	// Update blocks map
+	p.blocksMu.Lock()
+	defer p.blocksMu.Unlock()
+
+	// Clear old blocks and rebuild
+	p.blocks = make(map[ulid.ULID]*parquetBlockMeta, len(parquetBlocks))
+	
+	for _, b := range parquetBlocks {
+		shards := 1 // default to 1 shard for backward compatibility
+		if b.Parquet != nil && b.Parquet.Shards > 0 {
+			shards = b.Parquet.Shards
+		}
+		
+		p.blocks[b.ID] = &parquetBlockMeta{
+			id:     b.ID,
+			minT:   b.MinTime,
+			maxT:   b.MaxTime,
+			shards: shards,
+		}
+	}
+
+	level.Info(p.logger).Log("msg", "synced parquet blocks", "user", userID, "blocks", len(p.blocks))
 	return nil
 }
 
@@ -61,16 +131,40 @@ func (p *parquetBucketStore) findParquetBlocks(ctx context.Context, blockMatcher
 	}
 
 	blockIDs := strings.Split(blockMatchers[0].Value, "|")
-	blocks := make([]*parquetBlock, 0, len(blockIDs))
+	blocks := make([]*parquetBlock, 0, len(blockIDs)*2) // Estimate space for shards
 	bucketOpener := parquet_storage.NewParquetBucketOpener(p.bucket)
 	noopQuota := search.NewQuota(search.NoopQuotaLimitFunc(ctx))
-	for _, blockID := range blockIDs {
-		// TODO: support shard ID > 0 later.
-		block, err := p.newParquetBlock(ctx, blockID, 0, bucketOpener, bucketOpener, p.chunksDecoder, noopQuota, noopQuota, noopQuota)
+	
+	p.blocksMu.RLock()
+	defer p.blocksMu.RUnlock()
+	
+	for _, blockIDStr := range blockIDs {
+		blockID, err := ulid.Parse(blockIDStr)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrapf(err, "parse block ID: %s", blockIDStr)
 		}
-		blocks = append(blocks, block)
+		
+		// Get block metadata from synced blocks
+		meta, exists := p.blocks[blockID]
+		if !exists {
+			level.Warn(p.logger).Log("msg", "block not found in synced metadata", "block", blockIDStr)
+			// For backward compatibility, try opening shard 0
+			block, err := p.newParquetBlock(ctx, blockIDStr, 0, bucketOpener, bucketOpener, p.chunksDecoder, noopQuota, noopQuota, noopQuota)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
+			continue
+		}
+		
+		// Open all shards for this block
+		for shardID := 0; shardID < meta.shards; shardID++ {
+			block, err := p.newParquetBlock(ctx, blockIDStr, shardID, bucketOpener, bucketOpener, p.chunksDecoder, noopQuota, noopQuota, noopQuota)
+			if err != nil {
+				return nil, errors.Wrapf(err, "open block %s shard %d", blockIDStr, shardID)
+			}
+			blocks = append(blocks, block)
+		}
 	}
 
 	return blocks, nil

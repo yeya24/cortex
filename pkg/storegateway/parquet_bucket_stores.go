@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/oklog/ulid/v2"
 	"github.com/parquet-go/parquet-go"
 	"github.com/pkg/errors"
 	"github.com/prometheus-community/parquet-common/convert"
@@ -19,6 +21,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	prom_storage "github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
+	tsdb_errors "github.com/prometheus/prometheus/tsdb/errors"
 	"github.com/thanos-io/objstore"
 	storecache "github.com/thanos-io/thanos/pkg/store/cache"
 	"github.com/thanos-io/thanos/pkg/store/storepb"
@@ -58,6 +61,8 @@ type ParquetBucketStores struct {
 	parquetShardCache parquetutil.CacheInterface[parquet_storage.ParquetShard]
 
 	inflightRequests *cortex_util.InflightRequestTracker
+
+	userScanner users.Scanner
 }
 
 // newParquetBucketStores creates a new multi-tenant parquet bucket stores
@@ -83,6 +88,11 @@ func newParquetBucketStores(cfg tsdb.BlocksStorageConfig, bucketClient objstore.
 		chunksDecoder:     schema.NewPrometheusParquetChunksDecoder(chunkenc.NewPool()),
 		inflightRequests:  cortex_util.NewInflightRequestTracker(),
 		parquetShardCache: parquetShardCache,
+	}
+
+	u.userScanner, err = users.NewScanner(cfg.UsersScanner, bucketClient, logger, reg)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create users scanner")
 	}
 
 	if cfg.BucketStore.MatchersCacheMaxItems > 0 {
@@ -198,12 +208,117 @@ func (u *ParquetBucketStores) LabelValues(ctx context.Context, req *storepb.Labe
 
 // SyncBlocks implements BucketStores
 func (u *ParquetBucketStores) SyncBlocks(ctx context.Context) error {
-	return nil
+	return u.syncUsersBlocks(ctx, func(ctx context.Context, store *parquetBucketStore, userID string) error {
+		return store.SyncBlocks(users.InjectOrgID(ctx, userID))
+	})
 }
 
 // InitialSync implements BucketStores
 func (u *ParquetBucketStores) InitialSync(ctx context.Context) error {
-	return nil
+	return u.syncUsersBlocks(ctx, func(ctx context.Context, store *parquetBucketStore, userID string) error {
+		return store.InitialSync(users.InjectOrgID(ctx, userID))
+	})
+}
+
+func (u *ParquetBucketStores) syncUsersBlocks(ctx context.Context, f func(context.Context, *parquetBucketStore, string) error) (returnErr error) {
+	defer func(start time.Time) {
+		level.Debug(u.logger).Log("msg", "parquet bucket stores sync completed", "duration", time.Since(start))
+	}(time.Now())
+
+	type job struct {
+		userID string
+		store  *parquetBucketStore
+	}
+
+	wg := &errgroup.Group{}
+	jobs := make(chan job)
+	errs := tsdb_errors.NewMulti()
+	errsMx := sync.Mutex{}
+
+	// Scan users in the bucket
+	userIDs, err := u.scanUsers(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Create a pool of workers which will synchronize blocks
+	for i := 0; i < u.cfg.BucketStore.TenantSyncConcurrency; i++ {
+		wg.Go(func() error {
+			for job := range jobs {
+				if err := f(ctx, job.store, job.userID); err != nil {
+					if errors.Is(err, bucket.ErrCustomerManagedKeyAccessDenied) {
+						u.storesErrorsMu.Lock()
+						u.storesErrors[job.userID] = httpgrpc.Errorf(int(codes.PermissionDenied), "store error: %s", err)
+						u.storesErrorsMu.Unlock()
+					} else {
+						errsMx.Lock()
+						errs.Add(errors.Wrapf(err, "failed to synchronize parquet blocks for user %s", job.userID))
+						errsMx.Unlock()
+					}
+				} else {
+					u.storesErrorsMu.Lock()
+					delete(u.storesErrors, job.userID)
+					u.storesErrorsMu.Unlock()
+				}
+			}
+			return nil
+		})
+	}
+
+	// Lazily create a parquet bucket store for each user and submit a sync job
+	go func() {
+		defer close(jobs)
+		for _, userID := range userIDs {
+			store, err := u.getOrCreateStore(userID)
+			if err != nil {
+				errsMx.Lock()
+				errs.Add(errors.Wrapf(err, "failed to create parquet bucket store for user %s", userID))
+				errsMx.Unlock()
+				continue
+			}
+
+			select {
+			case jobs <- job{userID: userID, store: store}:
+				// Job submitted successfully
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	if err := wg.Wait(); err != nil {
+		return err
+	}
+
+	return errs.Err()
+}
+
+// scanUsers in the bucket and return the list of found users
+func (u *ParquetBucketStores) scanUsers(ctx context.Context) ([]string, error) {
+	activeUsers, deletingUsers, _, err := u.userScanner.ScanUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	users := make([]string, 0, len(activeUsers)+len(deletingUsers))
+	users = append(users, activeUsers...)
+	users = append(users, deletingUsers...)
+	users = deduplicateUsers(users)
+
+	return users, nil
+}
+
+func deduplicateUsers(users []string) []string {
+	seen := make(map[string]struct{}, len(users))
+	var uniqueUsers []string
+
+	for _, user := range users {
+		if _, ok := seen[user]; !ok {
+			seen[user] = struct{}{}
+			uniqueUsers = append(uniqueUsers, user)
+		}
+	}
+
+	return uniqueUsers
 }
 
 func (u *ParquetBucketStores) getStoreError(userID string) error {
@@ -262,6 +377,7 @@ func (u *ParquetBucketStores) createParquetBucketStore(userID string, userLogger
 		chunksDecoder:     u.chunksDecoder,
 		matcherCache:      u.matcherCache,
 		parquetShardCache: u.parquetShardCache,
+		blocks:            make(map[ulid.ULID]*parquetBlockMeta),
 	}
 
 	return store, nil
