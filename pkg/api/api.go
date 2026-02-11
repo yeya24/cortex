@@ -236,6 +236,7 @@ func (a *API) RegisterCardinality(c *cardinality.CardinalityExplorer) {
 	a.RegisterRoute("/api/v1/cardinality/range", http.HandlerFunc(c.GetMetricNameRange), false, "GET")
 	a.RegisterRoute("/api/v1/cardinality", http.HandlerFunc(c.GetMetricNameCardinality), false, "GET")
 	a.RegisterRoute("/api/v1/cardinality/label", http.HandlerFunc(c.GetMetricNameLabelCardinality), false, "GET")
+	a.RegisterRoute("/api/v1/cardinality/label/usage", http.HandlerFunc(c.GetLabelUsage), false, "GET")
 }
 
 // RegisterAlertmanager registers endpoints associated with the alertmanager. It will only

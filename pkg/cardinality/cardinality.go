@@ -662,3 +662,76 @@ OUTER:
 	w.Write(out)
 	w.WriteHeader(http.StatusOK)
 }
+
+type LabelUsageResponse struct {
+	LabelName           string             `json:"label_name"`
+	TotalQueryCount     uint64             `json:"total_query_count"`
+	Percentage          string             `json:"percentage"`
+	MetricsUsingLabel   int                `json:"metrics_using_label"`
+	TopMetricsByQueries []CardinalityEntry `json:"top_metrics_by_queries"`
+}
+
+func (c *CardinalityExplorer) GetLabelUsage(w http.ResponseWriter, r *http.Request) {
+	date := r.FormValue("date")
+	label := r.FormValue("label")
+	limitStr := r.FormValue("limit")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		limit = 10
+	}
+
+	c.queryInfoMtx.RLock()
+	defer c.queryInfoMtx.RUnlock()
+
+	queryMap := c.queryInfoEntries[date]
+	if queryMap == nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	totalQueryCount := uint64(0)
+	metricsUsing := 0
+	metricQueryCounts := newTopHeap(limit)
+
+	for metricName, entry := range queryMap {
+		for _, lbl := range entry.Labels {
+			if lbl.Label == label {
+				totalQueryCount += uint64(lbl.Count)
+				metricsUsing++
+				metricQueryCounts.push(metricName, uint64(lbl.Count))
+				break
+			}
+		}
+	}
+
+	res := LabelUsageResponse{
+		LabelName:         label,
+		TotalQueryCount:   totalQueryCount,
+		MetricsUsingLabel: metricsUsing,
+	}
+
+	if totalQueries, ok := c.queryCount[date]; ok && totalQueries > 0 {
+		res.Percentage = fmt.Sprintf("%.2f%%", 100*float64(totalQueryCount)/float64(totalQueries))
+	} else {
+		res.Percentage = "0%"
+	}
+
+	topMetrics := metricQueryCounts.getSortedResult()
+	res.TopMetricsByQueries = make([]CardinalityEntry, len(topMetrics))
+	for i, m := range topMetrics {
+		res.TopMetricsByQueries[i] = CardinalityEntry{
+			Name:       m.Name,
+			Count:      m.Count,
+			Percentage: fmt.Sprintf("%.2f%%", 100*float64(m.Count)/float64(totalQueryCount)),
+		}
+	}
+
+	out, err := json.Marshal(res)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(out)
+	w.WriteHeader(http.StatusOK)
+}
