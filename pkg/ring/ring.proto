@@ -52,5 +52,8 @@ enum InstanceState {
 	// instances that have been removed from the ring. Ring users should not use it directly.
 	LEFT = 4;
 
-	READONLY= 5;
+	READONLY = 5;
+	// STAGING: slot reserved in the ring (e.g. pre-written), not yet claimed by a running process.
+	// Excluded from read and write replication sets. When an ingester finds itself STAGING in initRing, it transitions to PENDING.
+	STAGING = 6;
 }

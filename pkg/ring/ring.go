@@ -112,11 +112,13 @@ var (
 		return s == READONLY
 	})
 
-	// Read operation that extends the replica set if an instance is not ACTIVE, PENDING, LEAVING, JOINING OR READONLY
+	// Read operation that extends the replica set if an instance is not ACTIVE, PENDING, LEAVING, JOINING, READONLY or STAGING.
+	// STAGING is excluded (pre-written slots with no process) so they are not queried.
 	Read = NewOp([]InstanceState{ACTIVE, PENDING, LEAVING, JOINING, READONLY}, func(s InstanceState) bool {
 		// To match Write with extended replica set we have to also increase the
 		// size of the replica set for Read, but we can read from LEAVING ingesters.
-		return s != ACTIVE && s != LEAVING && s != JOINING && s != READONLY
+		// STAGING is excluded so we do not extend replica set for pre-written entries.
+		return s != ACTIVE && s != LEAVING && s != JOINING && s != READONLY && s != STAGING
 	})
 
 	// Reporting is a special value for inquiring about health.
@@ -668,7 +670,7 @@ func (r *Ring) updateRingMetrics(compareResult CompareResult) {
 	oldestTimestampByState := map[string]int64{}
 
 	// Initialized to zero so we emit zero-metrics (instead of not emitting anything)
-	for _, s := range []string{unhealthy, ACTIVE.String(), LEAVING.String(), PENDING.String(), JOINING.String(), READONLY.String()} {
+	for _, s := range []string{unhealthy, ACTIVE.String(), LEAVING.String(), PENDING.String(), JOINING.String(), READONLY.String(), STAGING.String()} {
 		numByStateByZone[s] = map[string]int{}
 		// make sure removed zones got zero value
 		for _, zone := range r.previousRingZones {
@@ -1016,7 +1018,7 @@ func NewOp(healthyStates []InstanceState, shouldExtendReplicaSet func(s Instance
 	}
 
 	if shouldExtendReplicaSet != nil {
-		for _, s := range []InstanceState{ACTIVE, LEAVING, PENDING, JOINING, LEFT, READONLY} {
+		for _, s := range []InstanceState{ACTIVE, LEAVING, PENDING, JOINING, LEFT, READONLY, STAGING} {
 			if shouldExtendReplicaSet(s) {
 				op |= (0x10000 << s)
 			}

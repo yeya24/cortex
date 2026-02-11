@@ -742,6 +742,59 @@ func TestRestartIngester_DisabledHeartbeat_unregister_on_shutdown_false(t *testi
 	require.NoError(t, services.StopAndAwaitTerminated(context.Background(), l2))
 }
 
+func TestLifecycler_InitRingWithSTAGINGResetsAddrAndZone(t *testing.T) {
+	ringStore, closer := consul.NewInMemoryClient(GetCodec(), log.NewNopLogger(), nil)
+	t.Cleanup(func() { assert.NoError(t, closer.Close()) })
+
+	var ringConfig Config
+	flagext.DefaultValues(&ringConfig)
+	ringConfig.KVStore.Mock = ringStore
+
+	// Pre-write a STAGING entry (e.g. from an external program) with placeholder Addr/Zone.
+	ctx := context.Background()
+	err := ringStore.CAS(ctx, ringKey, func(in any) (out any, retry bool, err error) {
+		desc := NewDesc()
+		desc.AddIngester("ing1", "0.0.0.0:1", "zone1", []uint32{12345}, STAGING, time.Now())
+		return desc, true, nil
+	})
+	require.NoError(t, err)
+
+	r, err := New(ringConfig, "ingester", ringKey, log.NewNopLogger(), nil)
+	require.NoError(t, err)
+	require.NoError(t, services.StartAndAwaitRunning(ctx, r))
+	defer services.StopAndAwaitTerminated(ctx, r) // nolint:errcheck
+
+	// Start lifecycler with different Addr and Zone - when it reads STAGING from DDB it must reset both.
+	lifecyclerConfig := testLifecyclerConfigWithAddr(ringConfig, "ing1", "10.20.30.40")
+	lifecyclerConfig.Zone = "zone2"
+	lifecyclerConfig.JoinAfter = 100 * time.Millisecond
+	lifecyclerConfig.UnregisterOnShutdown = false
+
+	l, err := NewLifecycler(lifecyclerConfig, &noopFlushTransferer{}, "ingester", ringKey, false, true, log.NewNopLogger(), nil)
+	require.NoError(t, err)
+	require.NoError(t, services.StartAndAwaitRunning(ctx, l))
+	l.Join()
+	defer services.StopAndAwaitTerminated(ctx, l) // nolint:errcheck
+
+	// initRing should transition STAGING -> PENDING and refresh Addr and Zone from this process.
+	var ingesters map[string]InstanceDesc
+	test.Poll(t, 5*time.Second, true, func() any {
+		d, err := r.KVClient.Get(ctx, ringKey)
+		require.NoError(t, err)
+		desc, ok := d.(*Desc)
+		if !ok || len(desc.Ingesters) != 1 {
+			return false
+		}
+		ingesters = desc.Ingesters
+		inst := desc.Ingesters["ing1"]
+		return inst.Addr == "10.20.30.40:1" && inst.Zone == "zone2" && (inst.State == PENDING || inst.State == ACTIVE)
+	})
+
+	require.Equal(t, "10.20.30.40:1", ingesters["ing1"].Addr)
+	require.Equal(t, "zone2", ingesters["ing1"].Zone)
+	require.Contains(t, []InstanceState{PENDING, ACTIVE}, ingesters["ing1"].State)
+}
+
 func TestRestartIngester_READONLY(t *testing.T) {
 	ringStore, closer := consul.NewInMemoryClient(GetCodec(), log.NewNopLogger(), nil)
 	t.Cleanup(func() { assert.NoError(t, closer.Close()) })

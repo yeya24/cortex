@@ -773,6 +773,20 @@ func (i *Lifecycler) initRing(ctx context.Context) (bool, error) {
 			return ringDesc, true, nil
 		}
 
+		// If the instance is in STAGING (e.g. pre-written by an external program), the process
+		// is now claiming the slot: transition to PENDING and refresh Addr/Zone from this process.
+		if instanceDesc.State == STAGING {
+			level.Info(i.logger).Log("msg", "instance found in ring as STAGING, setting to PENDING and refreshing address and zone",
+				"ring", i.RingName)
+			instanceDesc.State = PENDING
+			instanceDesc.Addr = i.Addr
+			instanceDesc.Zone = i.Zone
+			i.setState(PENDING)
+			tokens, _ := ringDesc.TokensFor(i.ID)
+			i.setTokens(tokens)
+			return ringDesc, true, nil
+		}
+
 		// If the ingester failed to clean its ring entry up in can leave its state in LEAVING
 		// OR unregister_on_shutdown=false
 		// if autoJoinOnStartup, move it into previous state based on token file (default: ACTIVE)
@@ -792,8 +806,10 @@ func (i *Lifecycler) initRing(ctx context.Context) (bool, error) {
 
 		level.Info(i.logger).Log("msg", "existing entry found in ring", "state", i.GetState(), "tokens", len(tokens), "ring", i.RingName)
 
-		// Update the address if it has changed
+		// When reading our state from the ring store (e.g. DDB), refresh Addr and Zone from this process
+		// so that pre-written or stale entries get the current address and availability zone.
 		instanceDesc.Addr = i.Addr
+		instanceDesc.Zone = i.Zone
 
 		// Update the ring if the instance has been changed and the heartbeat is disabled.
 		// We dont need to update KV here when heartbeat is enabled as this info will eventually be update on KV
@@ -1032,6 +1048,7 @@ func (i *Lifecycler) changeState(ctx context.Context, state InstanceState) error
 		(currState == JOINING && state == READONLY) ||
 		(currState == PENDING && state == ACTIVE) || // triggered by autoJoin
 		(currState == PENDING && state == READONLY) || // triggered by autoJoin
+		(currState == STAGING && state == PENDING) || // process claiming pre-written STAGING slot (also done in initRing)
 		(currState == ACTIVE && state == LEAVING) || // triggered by shutdown
 		(currState == ACTIVE && state == READONLY) || // triggered by ingester mode
 		(currState == READONLY && state == ACTIVE) || // triggered by ingester mode

@@ -5,15 +5,16 @@ package ring
 
 import (
 	fmt "fmt"
-	_ "github.com/gogo/protobuf/gogoproto"
-	proto "github.com/gogo/protobuf/proto"
-	github_com_gogo_protobuf_sortkeys "github.com/gogo/protobuf/sortkeys"
 	io "io"
 	math "math"
 	math_bits "math/bits"
 	reflect "reflect"
 	strconv "strconv"
 	strings "strings"
+
+	_ "github.com/gogo/protobuf/gogoproto"
+	proto "github.com/gogo/protobuf/proto"
+	github_com_gogo_protobuf_sortkeys "github.com/gogo/protobuf/sortkeys"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -38,6 +39,8 @@ const (
 	// instances that have been removed from the ring. Ring users should not use it directly.
 	LEFT     InstanceState = 4
 	READONLY InstanceState = 5
+	// STAGING: slot reserved in the ring (e.g. pre-written), not yet claimed by a running process.
+	STAGING InstanceState = 6
 )
 
 var InstanceState_name = map[int32]string{
@@ -47,6 +50,7 @@ var InstanceState_name = map[int32]string{
 	3: "JOINING",
 	4: "LEFT",
 	5: "READONLY",
+	6: "STAGING",
 }
 
 var InstanceState_value = map[string]int32{
@@ -56,6 +60,7 @@ var InstanceState_value = map[string]int32{
 	"JOINING":  3,
 	"LEFT":     4,
 	"READONLY": 5,
+	"STAGING":  6,
 }
 
 func (InstanceState) EnumDescriptor() ([]byte, []int) {
