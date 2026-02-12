@@ -123,7 +123,7 @@ func TestIngester_ShutdownHandler(t *testing.T) {
 // numTokens determines the number of tokens owned by the specified
 // address
 func numTokens(c kv.Client, name, ringKey string) int {
-	ringDesc, err := c.Get(context.Background(), ringKey)
+	ringDesc, err := c.Get(context.Background(), ringKey, nil)
 
 	// The ringDesc may be null if the lifecycler hasn't stored the ring
 	// to the KVStore yet.

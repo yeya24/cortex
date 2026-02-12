@@ -297,8 +297,8 @@ func (c *Client) List(ctx context.Context, prefix string) ([]string, error) {
 	return keys, nil
 }
 
-// Get implements kv.Client.
-func (c *Client) Get(ctx context.Context, key string) (any, error) {
+// Get implements kv.Client. hint is ignored (etcd stores one value per key).
+func (c *Client) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	opsCtx, cancel := c.opsContext(ctx)
 	defer cancel()
 

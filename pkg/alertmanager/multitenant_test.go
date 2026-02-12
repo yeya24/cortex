@@ -1619,7 +1619,7 @@ func TestMultitenantAlertmanager_RingLifecyclerShouldAutoForgetUnhealthyInstance
 	}))
 
 	test.Poll(t, time.Second, false, func() any {
-		d, err := ringStore.Get(ctx, RingKey)
+		d, err := ringStore.Get(ctx, RingKey, nil)
 		if err != nil {
 			return err
 		}

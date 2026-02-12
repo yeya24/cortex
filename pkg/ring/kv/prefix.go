@@ -56,8 +56,8 @@ func (c *prefixedKVClient) WatchPrefix(ctx context.Context, prefix string, f fun
 }
 
 // Get looks up a given object from its key.
-func (c *prefixedKVClient) Get(ctx context.Context, key string) (any, error) {
-	return c.client.Get(ctx, c.prefix+key)
+func (c *prefixedKVClient) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
+	return c.client.Get(ctx, c.prefix+key, hint)
 }
 
 // Delete removes a given object from its key.

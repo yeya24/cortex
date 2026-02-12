@@ -67,7 +67,7 @@ func TestCAS(t *testing.T) {
 		}
 
 		// Make sure the CASes left the right value - "10".
-		value, err := client.Get(ctx, key)
+		value, err := client.Get(ctx, key, nil)
 		require.NoError(t, err)
 		require.EqualValues(t, "10", value)
 	})
@@ -91,7 +91,7 @@ func TestNilCAS(t *testing.T) {
 		require.NoError(t, err)
 
 		// Make sure value is still 0.
-		value, err := client.Get(ctx, key)
+		value, err := client.Get(ctx, key, nil)
 		require.NoError(t, err)
 		require.EqualValues(t, "0", value)
 	})

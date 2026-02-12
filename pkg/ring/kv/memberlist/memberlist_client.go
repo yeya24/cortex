@@ -59,8 +59,8 @@ func (c *Client) List(ctx context.Context, prefix string) ([]string, error) {
 	return c.kv.List(prefix), nil
 }
 
-// Get is part of kv.Client interface.
-func (c *Client) Get(ctx context.Context, key string) (any, error) {
+// Get is part of kv.Client interface. hint is ignored (memberlist stores one value per key).
+func (c *Client) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	err := c.awaitKVRunningOrStopping(ctx)
 	if err != nil {
 		return nil, err

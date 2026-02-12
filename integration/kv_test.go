@@ -60,7 +60,7 @@ func TestKVDelete(t *testing.T) {
 		require.NoError(t, err)
 
 		// Get it back
-		v, err := client.Get(context.Background(), "key-to-delete")
+		v, err := client.Get(context.Background(), "key-to-delete", nil)
 		require.NoError(t, err, "unexpected error")
 		require.Nil(t, v, "object was not deleted")
 

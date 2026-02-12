@@ -23,7 +23,7 @@ func (m mockClient) List(ctx context.Context, prefix string) ([]string, error) {
 	return []string{}, nil
 }
 
-func (m mockClient) Get(ctx context.Context, key string) (any, error) {
+func (m mockClient) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	return "", nil
 }
 

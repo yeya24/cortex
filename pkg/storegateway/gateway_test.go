@@ -910,7 +910,7 @@ func TestStoreGateway_RingLifecyclerShouldAutoForgetUnhealthyInstances(t *testin
 
 	// Ensure the unhealthy instance is removed from the ring.
 	test.Poll(t, time.Second, false, func() any {
-		d, err := ringStore.Get(ctx, RingKey)
+		d, err := ringStore.Get(ctx, RingKey, nil)
 		if err != nil {
 			return err
 		}

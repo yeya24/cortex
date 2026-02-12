@@ -93,9 +93,11 @@ type Client interface {
 	// include the prefix.
 	List(ctx context.Context, prefix string) ([]string, error)
 
-	// Get a specific key.  Will use a codec to deserialise key to appropriate type.
+	// Get a specific key. Will use a codec to deserialise key to appropriate type.
 	// If the key does not exist, Get will return nil and no error.
-	Get(ctx context.Context, key string) (any, error)
+	// hint is optional (e.g. codec.CASHint{SecondaryKey: instanceID}); when set, backends
+	// may return only that sub-key (e.g. DDB: single item by sort key); pass nil for full key.
+	Get(ctx context.Context, key string, hint *codec.CASHint) (any, error)
 
 	// Delete a specific key. Deletions are best-effort and no error will
 	// be returned if the key does not exist.

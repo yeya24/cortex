@@ -292,9 +292,9 @@ func (m *MultiClient) List(ctx context.Context, prefix string) ([]string, error)
 }
 
 // Get is a part of kv.Client interface.
-func (m *MultiClient) Get(ctx context.Context, key string) (any, error) {
+func (m *MultiClient) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	_, kv := m.getPrimaryClient()
-	return kv.client.Get(ctx, key)
+	return kv.client.Get(ctx, key, hint)
 }
 
 // Delete is a part of the kv.Client interface.

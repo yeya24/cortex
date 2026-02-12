@@ -198,7 +198,7 @@ func updateFn(name string) func(*data) (*data, bool, error) {
 }
 
 func get(t *testing.T, kv *Client, key string) any {
-	val, err := kv.Get(context.Background(), key)
+	val, err := kv.Get(context.Background(), key, nil)
 	if err != nil {
 		t.Fatalf("Failed to get value for key %s: %v", key, err)
 	}

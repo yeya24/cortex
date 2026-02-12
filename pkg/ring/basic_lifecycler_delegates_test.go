@@ -294,7 +294,7 @@ func TestAutoForgetDelegate(t *testing.T) {
 			})
 
 			// Read back the ring status from the store.
-			v, err := store.Get(ctx, testRingKey)
+			v, err := store.Get(ctx, testRingKey, nil)
 			require.NoError(t, err)
 			require.NotNil(t, v)
 

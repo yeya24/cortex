@@ -287,9 +287,12 @@ func (i *Lifecycler) checkRingHealthForReadiness(ctx context.Context) error {
 		return fmt.Errorf("this instance owns no tokens")
 	}
 
-	// If ring health checking is enabled we make sure all instances in the ring are ACTIVE and healthy,
-	// otherwise we just check this instance.
-	desc, err := i.KVStore.Get(ctx, i.RingKey)
+	// When only checking this instance, pass hint so backends (e.g. DDB) can read just our item.
+	var getHint *codec.CASHint
+	if !i.cfg.ReadinessCheckRingHealth {
+		getHint = &codec.CASHint{SecondaryKey: i.ID}
+	}
+	desc, err := i.KVStore.Get(ctx, i.RingKey, getHint)
 	if err != nil {
 		level.Error(i.logger).Log("msg", "error talking to the KV store", "ring", i.RingName, "err", err)
 		return fmt.Errorf("error talking to the KV store: %s", err)

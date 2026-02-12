@@ -268,7 +268,7 @@ func (c *HATracker) syncKVStoreToLocalMap(ctx context.Context) error {
 			return ctx.Err()
 		}
 
-		val, err := c.client.Get(ctx, key)
+		val, err := c.client.Get(ctx, key, nil)
 		if err != nil {
 			level.Warn(c.logger).Log("msg", "failed to fetch key during cache warmup", "key", key, "err", err)
 			continue
@@ -430,7 +430,7 @@ func (c *HATracker) cleanupOldReplicas(ctx context.Context, deadline time.Time) 
 			return
 		}
 
-		val, err := c.client.Get(ctx, key)
+		val, err := c.client.Get(ctx, key, nil)
 		if err != nil {
 			level.Warn(c.logger).Log("msg", "cleanup: failed to get replica value", "key", key, "err", err)
 			continue

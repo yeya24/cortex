@@ -934,7 +934,7 @@ func checkReplicaDeletionState(t *testing.T, duration time.Duration, c *HATracke
 		return nil
 	})
 
-	val, err := c.client.Get(context.Background(), key)
+	val, err := c.client.Get(context.Background(), key, nil)
 	require.NoError(t, err)
 
 	existsInKV := val != nil

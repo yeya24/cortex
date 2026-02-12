@@ -3255,7 +3255,7 @@ func TestGetShardSizeForUser(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 
 			// Check the ring state
-			ringDesc, err := kvStore.Get(context.Background(), ringKey)
+			ringDesc, err := kvStore.Get(context.Background(), ringKey, nil)
 			require.NoError(t, err)
 			require.NotNil(t, ringDesc)
 			desc := ringDesc.(*ring.Desc)

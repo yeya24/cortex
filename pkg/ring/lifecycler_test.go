@@ -360,7 +360,7 @@ func TestLifecycler_ShouldHandleInstanceAbruptlyRestarted(t *testing.T) {
 
 	// Check this ingester joined, is active, and has one token.
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 		return checkNormalised(d, "ing1")
 	})
@@ -379,7 +379,7 @@ func TestLifecycler_ShouldHandleInstanceAbruptlyRestarted(t *testing.T) {
 
 	// Check the new ingester picked up the same tokens and registered timestamp.
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		return checkNormalised(d, "ing1") &&
@@ -390,7 +390,7 @@ func TestLifecycler_ShouldHandleInstanceAbruptlyRestarted(t *testing.T) {
 
 type MockClient struct {
 	ListFunc        func(ctx context.Context, prefix string) ([]string, error)
-	GetFunc         func(ctx context.Context, key string) (any, error)
+	GetFunc         func(ctx context.Context, key string, hint *codec.CASHint) (any, error)
 	DeleteFunc      func(ctx context.Context, key string) error
 	CASFunc         func(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error
 	WatchKeyFunc    func(ctx context.Context, key string, f func(any) bool)
@@ -405,9 +405,9 @@ func (m *MockClient) List(ctx context.Context, prefix string) ([]string, error) 
 	return nil, nil
 }
 
-func (m *MockClient) Get(ctx context.Context, key string) (any, error) {
+func (m *MockClient) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	if m.GetFunc != nil {
-		return m.GetFunc(ctx, key)
+		return m.GetFunc(ctx, key, hint)
 	}
 
 	return nil, nil
@@ -637,7 +637,7 @@ func TestRestartIngester_DisabledHeartbeat_unregister_on_shutdown_false(t *testi
 	poll := func(condition func(*Desc) bool) map[string]InstanceDesc {
 		var ingesters map[string]InstanceDesc
 		test.Poll(t, 5*time.Second, true, func() any {
-			d, err := r.KVClient.Get(context.Background(), ringKey)
+			d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 			require.NoError(t, err)
 
 			desc, ok := d.(*Desc)
@@ -780,7 +780,7 @@ func TestLifecycler_InitRingWithSTAGINGResetsAddrAndZone(t *testing.T) {
 	// initRing should transition STAGING -> PENDING and refresh Addr and Zone from this process.
 	var ingesters map[string]InstanceDesc
 	test.Poll(t, 5*time.Second, true, func() any {
-		d, err := r.KVClient.Get(ctx, ringKey)
+		d, err := r.KVClient.Get(ctx, ringKey, nil)
 		require.NoError(t, err)
 		desc, ok := d.(*Desc)
 		if !ok || len(desc.Ingesters) != 1 {
@@ -841,7 +841,7 @@ func TestRestartIngester_READONLY(t *testing.T) {
 	poll := func(condition func(*Desc) bool) map[string]InstanceDesc {
 		var ingesters map[string]InstanceDesc
 		test.Poll(t, 5*time.Second, true, func() any {
-			d, err := r.KVClient.Get(context.Background(), ringKey)
+			d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 			require.NoError(t, err)
 
 			desc, ok := d.(*Desc)
@@ -938,7 +938,7 @@ func TestTokenFileOnDisk(t *testing.T) {
 	// Check this ingester joined, is active, and has 512 token.
 	var expTokens []uint32
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -955,7 +955,7 @@ func TestTokenFileOnDisk(t *testing.T) {
 	err = l1.ChangeState(context.Background(), READONLY)
 	require.NoError(t, err)
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -975,7 +975,7 @@ func TestTokenFileOnDisk(t *testing.T) {
 	// Check this ingester joined, is active, and has 512 token.
 	var actTokens []uint32
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 		desc, ok := d.(*Desc)
 		if ok {
@@ -1021,7 +1021,7 @@ func TestRegisteredAtOnBackToActive(t *testing.T) {
 
 	// Check this ingester joined, is active.
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1031,7 +1031,7 @@ func TestRegisteredAtOnBackToActive(t *testing.T) {
 	})
 
 	//Get original registeredTime
-	d, err := r.KVClient.Get(context.Background(), ringKey)
+	d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 	require.NoError(t, err)
 	desc, ok := d.(*Desc)
 	require.True(t, ok)
@@ -1041,7 +1041,7 @@ func TestRegisteredAtOnBackToActive(t *testing.T) {
 	err = l1.ChangeState(context.Background(), READONLY)
 	require.NoError(t, err)
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1056,7 +1056,7 @@ func TestRegisteredAtOnBackToActive(t *testing.T) {
 	err = l1.ChangeState(context.Background(), ACTIVE)
 	require.NoError(t, err)
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1064,7 +1064,7 @@ func TestRegisteredAtOnBackToActive(t *testing.T) {
 			desc.Ingesters["ing1"].State == ACTIVE
 	})
 
-	d, err = r.KVClient.Get(context.Background(), ringKey)
+	d, err = r.KVClient.Get(context.Background(), ringKey, nil)
 	require.NoError(t, err)
 
 	desc, ok = d.(*Desc)
@@ -1105,7 +1105,7 @@ func TestTokenFileOnDisk_WithoutAutoJoinOnStartup(t *testing.T) {
 	// Check this ingester joined, is active, and has 512 token.
 	var expTokens []uint32
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1122,7 +1122,7 @@ func TestTokenFileOnDisk_WithoutAutoJoinOnStartup(t *testing.T) {
 	err = l1.ChangeState(context.Background(), READONLY)
 	require.NoError(t, err)
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1141,7 +1141,7 @@ func TestTokenFileOnDisk_WithoutAutoJoinOnStartup(t *testing.T) {
 
 	// Check this ingester should not in the ring before calling Join
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 		desc, ok := d.(*Desc)
 		if ok {
@@ -1157,7 +1157,7 @@ func TestTokenFileOnDisk_WithoutAutoJoinOnStartup(t *testing.T) {
 	// Check this ingester joined, is in readonly state, and has 512 token.
 	var actTokens []uint32
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 		desc, ok := d.(*Desc)
 		if ok {
@@ -1219,7 +1219,7 @@ func TestJoinInLeavingState(t *testing.T) {
 
 	// Check that the lifecycler was able to join after coming up in LEAVING
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1272,7 +1272,7 @@ func TestJoinInLeavingStateAndLessTokens(t *testing.T) {
 
 	// Check that the lifecycler was able to join after coming up in LEAVING
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1330,7 +1330,7 @@ func TestJoinInJoiningState(t *testing.T) {
 
 	// Check that the lifecycler was able to join after coming up in JOINING
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 
 		desc, ok := d.(*Desc)
@@ -1389,7 +1389,7 @@ func TestRestoreOfZoneWhenOverwritten(t *testing.T) {
 
 	// Check that the lifecycler was able to reset the zone value to the expected setting
 	test.Poll(t, 1000*time.Millisecond, true, func() any {
-		d, err := r.KVClient.Get(context.Background(), ringKey)
+		d, err := r.KVClient.Get(context.Background(), ringKey, nil)
 		require.NoError(t, err)
 		desc, ok := d.(*Desc)
 		return ok &&
@@ -1402,7 +1402,7 @@ func TestRestoreOfZoneWhenOverwritten(t *testing.T) {
 
 func waitRingInstance(t *testing.T, timeout time.Duration, l *Lifecycler, check func(instance InstanceDesc) error) {
 	test.Poll(t, timeout, nil, func() any {
-		desc, err := l.KVStore.Get(context.Background(), l.RingKey)
+		desc, err := l.KVStore.Get(context.Background(), l.RingKey, nil)
 		if err != nil {
 			return err
 		}

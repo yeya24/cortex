@@ -282,8 +282,8 @@ func Test_WatchKey_AlwaysRetry(t *testing.T) {
 	staleData := &DescMock{}
 	staleData.On("Clone").Return(staleData).Once()
 
-	// Set up some stale data first
-	c.updateStaleData(key, staleData, time.Now())
+	// Set up some stale data first (full key; secondaryKey "")
+	c.updateStaleData(key, "", staleData, time.Now())
 
 	callCount := 0
 	c.WatchKey(context.TODO(), key, func(i any) bool {
@@ -329,8 +329,11 @@ func Test_CAS_UpdateStale(t *testing.T) {
 	}, nil)
 
 	require.NoError(t, err)
-	require.Equal(t, descMockResult, c.staleData[key].data)
-	require.True(t, startTime.Before(c.staleData[key].timestamp))
+	// CAS with hint nil stores under full-key cache (secondaryKey "").
+	cacheKey := staleDataKey{primaryKey: key, secondaryKey: ""}
+	require.NotNil(t, c.staleData[cacheKey], "stale data should be cached for full key")
+	require.Equal(t, descMockResult, c.staleData[cacheKey].data)
+	require.True(t, startTime.Before(c.staleData[cacheKey].timestamp))
 }
 
 func Test_WatchPrefix(t *testing.T) {
@@ -365,11 +368,13 @@ func Test_UpdateStaleData(t *testing.T) {
 	staleData := &DescMock{}
 	timestamp := time.Date(2000, 10, 10, 10, 10, 10, 10, time.UTC)
 
-	c.updateStaleData(key, staleData, timestamp)
+	c.updateStaleData(key, "", staleData, timestamp)
 
-	require.NotNil(t, c.staleData[key])
-	require.EqualValues(t, c.staleData[key].data, staleData)
-	require.EqualValues(t, c.staleData[key].timestamp, timestamp)
+	// Full-key cache uses secondaryKey "".
+	cacheKey := staleDataKey{primaryKey: key, secondaryKey: ""}
+	require.NotNil(t, c.staleData[cacheKey])
+	require.EqualValues(t, c.staleData[cacheKey].data, staleData)
+	require.EqualValues(t, c.staleData[cacheKey].timestamp, timestamp)
 
 }
 
@@ -403,7 +408,7 @@ func NewClientMock(ddbClient dynamoDbClient, cc codec.Codec, logger log.Logger, 
 		ddbMetrics:     newDynamoDbMetrics(registerer),
 		codec:          cc,
 		logger:         logger,
-		staleData:      make(map[string]staleData),
+		staleData:      make(map[staleDataKey]staleData),
 		pullerSyncTime: time,
 		backoffConfig:  config,
 	}

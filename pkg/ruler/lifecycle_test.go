@@ -85,7 +85,7 @@ func TestRuler_RingLifecyclerShouldAutoForgetUnhealthyInstances(t *testing.T) {
 
 	// Ensure the unhealthy instance is removed from the ring.
 	test.Poll(t, time.Second*5, false, func() any {
-		d, err := ringStore.Get(ctx, ringKey)
+		d, err := ringStore.Get(ctx, ringKey, nil)
 		if err != nil {
 			return err
 		}
@@ -98,7 +98,7 @@ func TestRuler_RingLifecyclerShouldAutoForgetUnhealthyInstances(t *testing.T) {
 // numTokens determines the number of tokens owned by the specified
 // address
 func numTokens(c kv.Client, name, ringKey string) int {
-	ringDesc, err := c.Get(context.Background(), ringKey)
+	ringDesc, err := c.Get(context.Background(), ringKey, nil)
 
 	// The ringDesc may be null if the lifecycler hasn't stored the ring
 	// to the KVStore yet.

@@ -493,7 +493,7 @@ func (m *mockDelegate) OnRingInstanceHeartbeat(lifecycler *BasicLifecycler, ring
 }
 
 func getInstanceFromStore(t *testing.T, store kv.Client, instanceID string) (InstanceDesc, bool) {
-	out, err := store.Get(context.Background(), testRingKey)
+	out, err := store.Get(context.Background(), testRingKey, nil)
 	require.NoError(t, err)
 
 	if out == nil {

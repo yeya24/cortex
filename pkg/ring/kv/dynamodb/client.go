@@ -38,7 +38,12 @@ type Client struct {
 	backoffConfig  backoff.Config
 
 	staleDataLock sync.RWMutex
-	staleData     map[string]staleData
+	staleData     map[staleDataKey]staleData
+}
+
+type staleDataKey struct {
+	primaryKey   string
+	secondaryKey string
 }
 
 type staleData struct {
@@ -82,7 +87,7 @@ func NewClient(cfg Config, cc codec.Codec, logger log.Logger, registerer prometh
 		logger:         ddbLog(logger),
 		ddbMetrics:     ddbMetrics,
 		pullerSyncTime: cfg.PullerSyncTime,
-		staleData:      make(map[string]staleData),
+		staleData:      make(map[staleDataKey]staleData),
 		backoffConfig:  backoffConfig,
 	}
 	level.Info(c.logger).Log("msg", "dynamodb kv initialized")
@@ -98,8 +103,14 @@ func (c *Client) List(ctx context.Context, key string) ([]string, error) {
 	return resp, err
 }
 
-func (c *Client) Get(ctx context.Context, key string) (any, error) {
-	resp, _, err := c.kv.Query(ctx, dynamodbKey{primaryKey: key}, false)
+// Get reads the key. When hint.SecondaryKey is set, only that item (sort key) is read; otherwise
+// the full key (all items under the partition key) is read.
+func (c *Client) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
+	ddbKey := dynamodbKey{primaryKey: key}
+	if hint != nil && hint.SecondaryKey != "" {
+		ddbKey.sortKey = hint.SecondaryKey
+	}
+	resp, _, err := c.kv.Query(ctx, ddbKey, false)
 	if err != nil {
 		level.Warn(c.logger).Log("msg", "error Get", "key", key, "err", err)
 		return nil, err
@@ -108,7 +119,11 @@ func (c *Client) Get(ctx context.Context, key string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.updateStaleData(key, res, time.Now().UTC())
+	secondaryKey := ""
+	if hint != nil && hint.SecondaryKey != "" {
+		secondaryKey = hint.SecondaryKey
+	}
+	c.updateStaleData(key, secondaryKey, res, time.Now().UTC())
 
 	return res, nil
 }
@@ -243,9 +258,11 @@ func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, r
 				bo.Wait()
 				continue
 			}
-			if !usedHint {
-				c.updateStaleData(key, r, time.Now().UTC())
+			secondaryKey := ""
+			if usedHint && hint != nil {
+				secondaryKey = hint.SecondaryKey
 			}
+			c.updateStaleData(key, secondaryKey, r, time.Now().UTC())
 			return nil
 		}
 
@@ -267,6 +284,8 @@ func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, r
 	return err
 }
 
+// WatchKey polls the full key every pullerSyncTime. Each poll is a full Query (all items under the
+// partition key), so total read capacity is dominated by (number of Ring clients × full ring size / pullerSyncTime).
 func (c *Client) WatchKey(ctx context.Context, key string, f func(any) bool) {
 	watchBackoffConfig := c.backoffConfig
 	watchBackoffConfig.MaxRetries = 0
@@ -281,8 +300,9 @@ func (c *Client) WatchKey(ctx context.Context, key string, f func(any) bool) {
 
 			if bo.NumRetries() >= 10 {
 				level.Error(c.logger).Log("msg", "failed to WatchKey after retries", "key", key, "err", err)
-				if staleData := c.getStaleData(key); staleData != nil {
-					if !f(staleData) {
+				// WatchKey is always full-key; use secondaryKey "" for stale fallback.
+				if stale := c.getStaleData(key, ""); stale != nil {
+					if !f(stale) {
 						return
 					}
 				}
@@ -296,7 +316,8 @@ func (c *Client) WatchKey(ctx context.Context, key string, f func(any) bool) {
 			level.Error(c.logger).Log("msg", "error decoding key", "key", key, "err", err)
 			continue
 		}
-		c.updateStaleData(key, decoded, time.Now().UTC())
+		// WatchKey always reads full key; cache under secondaryKey "".
+		c.updateStaleData(key, "", decoded, time.Now().UTC())
 
 		if !f(decoded) {
 			return
@@ -364,10 +385,15 @@ func (c *Client) decodeMultikey(data map[string]dynamodbItem) (codec.MultiKey, e
 }
 
 func (c *Client) LastUpdateTime(key string) time.Time {
+	// Ring uses this for the full key; look up full-key cache entry (secondaryKey "").
+	return c.lastUpdateTime(key, "")
+}
+
+func (c *Client) lastUpdateTime(primaryKey, secondaryKey string) time.Time {
 	c.staleDataLock.RLock()
 	defer c.staleDataLock.RUnlock()
 
-	data, ok := c.staleData[key]
+	data, ok := c.staleData[staleDataKey{primaryKey: primaryKey, secondaryKey: secondaryKey}]
 	if !ok {
 		return time.Time{}
 	}
@@ -375,21 +401,21 @@ func (c *Client) LastUpdateTime(key string) time.Time {
 	return data.timestamp
 }
 
-func (c *Client) updateStaleData(key string, data codec.MultiKey, timestamp time.Time) {
+func (c *Client) updateStaleData(primaryKey, secondaryKey string, data codec.MultiKey, timestamp time.Time) {
 	c.staleDataLock.Lock()
 	defer c.staleDataLock.Unlock()
 
-	c.staleData[key] = staleData{
+	c.staleData[staleDataKey{primaryKey: primaryKey, secondaryKey: secondaryKey}] = staleData{
 		data:      data,
 		timestamp: timestamp,
 	}
 }
 
-func (c *Client) getStaleData(key string) codec.MultiKey {
+func (c *Client) getStaleData(primaryKey, secondaryKey string) codec.MultiKey {
 	c.staleDataLock.RLock()
 	defer c.staleDataLock.RUnlock()
 
-	data, ok := c.staleData[key]
+	data, ok := c.staleData[staleDataKey{primaryKey: primaryKey, secondaryKey: secondaryKey}]
 	if !ok {
 		return nil
 	}
@@ -399,11 +425,16 @@ func (c *Client) getStaleData(key string) codec.MultiKey {
 	return newD
 }
 
-func (c *Client) deleteStaleData(key string) {
+// deleteStaleData removes all cached stale data for the given primary key (full and any secondaryKey).
+func (c *Client) deleteStaleData(primaryKey string) {
 	c.staleDataLock.Lock()
 	defer c.staleDataLock.Unlock()
 
-	delete(c.staleData, key)
+	for k := range c.staleData {
+		if k.primaryKey == primaryKey {
+			delete(c.staleData, k)
+		}
+	}
 }
 
 func ddbLog(logger log.Logger) log.Logger {

@@ -386,8 +386,8 @@ func (c *Client) List(ctx context.Context, prefix string) ([]string, error) {
 	return keys, nil
 }
 
-// Get implements kv.Get.
-func (c *Client) Get(ctx context.Context, key string) (any, error) {
+// Get implements kv.Get. hint is ignored (Consul stores one value per key).
+func (c *Client) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	options := &consul.QueryOptions{
 		AllowStale:        !c.cfg.ConsistentReads,
 		RequireConsistent: c.cfg.ConsistentReads,

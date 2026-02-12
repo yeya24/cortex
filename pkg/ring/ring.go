@@ -291,7 +291,7 @@ func (r *Ring) starting(ctx context.Context) error {
 	// Get the initial ring state so that, as soon as the service will be running, the in-memory
 	// ring would be already populated and there's no race condition between when the service is
 	// running and the WatchKey() callback is called for the first time.
-	value, err := r.KVClient.Get(ctx, r.key)
+	value, err := r.KVClient.Get(ctx, r.key, nil)
 	if err != nil {
 		return errors.Wrap(err, "unable to initialise ring state")
 	}

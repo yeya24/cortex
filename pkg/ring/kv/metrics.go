@@ -73,11 +73,11 @@ func (m metrics) List(ctx context.Context, prefix string) ([]string, error) {
 	return result, err
 }
 
-func (m metrics) Get(ctx context.Context, key string) (any, error) {
+func (m metrics) Get(ctx context.Context, key string, hint *codec.CASHint) (any, error) {
 	var result any
 	err := instrument.CollectedRequest(ctx, "GET", m.requestDuration, instrument.ErrorCode, func(ctx context.Context) error {
 		var err error
-		result, err = m.c.Get(ctx, key)
+		result, err = m.c.Get(ctx, key, hint)
 		return err
 	})
 	return result, err
