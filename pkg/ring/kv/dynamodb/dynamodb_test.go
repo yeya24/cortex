@@ -155,6 +155,7 @@ func Test_EmptyBatch(t *testing.T) {
 func Test_Batch_Error(t *testing.T) {
 	tableName := "TEST"
 
+	condCheckCode := "ConditionalCheckFailed"
 	testCases := []struct {
 		name          string
 		mockError     error
@@ -168,6 +169,30 @@ func Test_Batch_Error(t *testing.T) {
 		{
 			name:          "conditional_check_failed_should_retry",
 			mockError:     &types.ConditionalCheckFailedException{},
+			expectedRetry: true,
+		},
+		{
+			name: "transaction_canceled_conditional_check_failed_should_retry",
+			mockError: &types.TransactionCanceledException{
+				CancellationReasons: []types.CancellationReason{
+					{Code: &condCheckCode},
+				},
+			},
+			expectedRetry: true,
+		},
+		{
+			name:          "throttling_should_retry",
+			mockError:     &types.ThrottlingException{},
+			expectedRetry: true,
+		},
+		{
+			name:          "provisioned_throughput_exceeded_should_retry",
+			mockError:     &types.ProvisionedThroughputExceededException{},
+			expectedRetry: true,
+		},
+		{
+			name:          "transaction_conflict_should_retry",
+			mockError:     &types.TransactionConflictException{},
 			expectedRetry: true,
 		},
 	}

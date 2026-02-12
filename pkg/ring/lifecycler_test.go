@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 	"github.com/cortexproject/cortex/pkg/ring/kv/consul"
 	"github.com/cortexproject/cortex/pkg/util/flagext"
 	"github.com/cortexproject/cortex/pkg/util/services"
@@ -391,7 +392,7 @@ type MockClient struct {
 	ListFunc        func(ctx context.Context, prefix string) ([]string, error)
 	GetFunc         func(ctx context.Context, key string) (any, error)
 	DeleteFunc      func(ctx context.Context, key string) error
-	CASFunc         func(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error
+	CASFunc         func(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error
 	WatchKeyFunc    func(ctx context.Context, key string, f func(any) bool)
 	WatchPrefixFunc func(ctx context.Context, prefix string, f func(string, any) bool)
 }
@@ -420,9 +421,9 @@ func (m *MockClient) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m *MockClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (m *MockClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
 	if m.CASFunc != nil {
-		return m.CASFunc(ctx, key, f)
+		return m.CASFunc(ctx, key, f, hint)
 	}
 
 	return nil
@@ -702,7 +703,7 @@ func TestRestartIngester_DisabledHeartbeat_unregister_on_shutdown_false(t *testi
 		ingester2Desc.State = JOINING
 		desc.Ingesters["ing2"] = ingester2Desc
 		return desc, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	l2 = startIngesterAndWaitActive("ing2", "0.0.0.0")
@@ -716,7 +717,7 @@ func TestRestartIngester_DisabledHeartbeat_unregister_on_shutdown_false(t *testi
 		ingester2Desc.State = PENDING
 		desc.Ingesters["ing2"] = ingester2Desc
 		return desc, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	l2 = startIngesterAndWaitActive("ing2", "0.0.0.0")
@@ -756,7 +757,7 @@ func TestLifecycler_InitRingWithSTAGINGResetsAddrAndZone(t *testing.T) {
 		desc := NewDesc()
 		desc.AddIngester("ing1", "0.0.0.0:1", "zone1", []uint32{12345}, STAGING, time.Now())
 		return desc, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	r, err := New(ringConfig, "ingester", ringKey, log.NewNopLogger(), nil)
@@ -793,6 +794,35 @@ func TestLifecycler_InitRingWithSTAGINGResetsAddrAndZone(t *testing.T) {
 	require.Equal(t, "10.20.30.40:1", ingesters["ing1"].Addr)
 	require.Equal(t, "zone2", ingesters["ing1"].Zone)
 	require.Contains(t, []InstanceState{PENDING, ACTIVE}, ingesters["ing1"].State)
+}
+
+// TestRingDesc_ModifyingInstanceDescCopyRequiresWriteBack verifies that when we get an InstanceDesc
+// from ringDesc.Ingesters[id] we receive a copy; modifying that copy does not change the map until
+// we assign back with ringDesc.Ingesters[id] = instanceDesc. This documents why the STAGING and
+// JOINING branches in initRing must write back to the map.
+func TestRingDesc_ModifyingInstanceDescCopyRequiresWriteBack(t *testing.T) {
+	ringDesc := NewDesc()
+	ringDesc.AddIngester("ing1", "0.0.0.0:1", "zone1", []uint32{12345}, STAGING, time.Now())
+
+	// Simulate what happens if we modify the copy but do NOT write back (buggy behavior).
+	instanceDesc, ok := ringDesc.Ingesters["ing1"]
+	require.True(t, ok)
+	instanceDesc.State = PENDING
+	instanceDesc.Addr = "10.20.30.40:1"
+	instanceDesc.Zone = "zone2"
+	instanceDesc.Timestamp = time.Now().Unix()
+	// Intentionally do NOT do: ringDesc.Ingesters["ing1"] = instanceDesc
+
+	// The map still holds the original values: modifying the copy did not change the ring Desc.
+	assert.Equal(t, STAGING, ringDesc.Ingesters["ing1"].State, "map unchanged when we don't write back")
+	assert.Equal(t, "0.0.0.0:1", ringDesc.Ingesters["ing1"].Addr)
+	assert.Equal(t, "zone1", ringDesc.Ingesters["ing1"].Zone)
+
+	// Now write back and verify the map is updated.
+	ringDesc.Ingesters["ing1"] = instanceDesc
+	assert.Equal(t, PENDING, ringDesc.Ingesters["ing1"].State)
+	assert.Equal(t, "10.20.30.40:1", ringDesc.Ingesters["ing1"].Addr)
+	assert.Equal(t, "zone2", ringDesc.Ingesters["ing1"].Zone)
 }
 
 func TestRestartIngester_READONLY(t *testing.T) {
@@ -1180,7 +1210,7 @@ func TestJoinInLeavingState(t *testing.T) {
 		}
 
 		return r, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	l1, err := NewLifecycler(cfg, &nopFlushTransferer{}, "ingester", ringKey, true, true, log.NewNopLogger(), nil)
@@ -1233,7 +1263,7 @@ func TestJoinInLeavingStateAndLessTokens(t *testing.T) {
 		}
 
 		return r, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	l1, err := NewLifecycler(cfg, &nopFlushTransferer{}, "ingester", ringKey, true, true, log.NewNopLogger(), nil)
@@ -1291,7 +1321,7 @@ func TestJoinInJoiningState(t *testing.T) {
 		}
 
 		return r, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	l1, err := NewLifecycler(cfg, &nopFlushTransferer{}, "ingester", ringKey, true, true, log.NewNopLogger(), nil)
@@ -1350,7 +1380,7 @@ func TestRestoreOfZoneWhenOverwritten(t *testing.T) {
 		}
 
 		return r, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	l1, err := NewLifecycler(cfg, &nopFlushTransferer{}, "ingester", ringKey, true, true, log.NewNopLogger(), nil)

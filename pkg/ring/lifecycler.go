@@ -19,6 +19,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/cortexproject/cortex/pkg/ring/kv"
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 	"github.com/cortexproject/cortex/pkg/util/flagext"
 	"github.com/cortexproject/cortex/pkg/util/services"
 )
@@ -466,7 +467,7 @@ func (i *Lifecycler) ClaimTokensFor(ctx context.Context, ingesterID string) erro
 			return ringDesc, true, nil
 		}
 
-		if err := i.KVStore.CAS(ctx, i.RingKey, claimTokens); err != nil {
+		if err := i.KVStore.CAS(ctx, i.RingKey, claimTokens, &codec.CASHint{SecondaryKey: i.ID}); err != nil {
 			level.Error(i.logger).Log("msg", "Failed to write to the KV store", "ring", i.RingName, "err", err)
 		}
 
@@ -770,6 +771,7 @@ func (i *Lifecycler) initRing(ctx context.Context) (bool, error) {
 			level.Warn(i.logger).Log("msg", "instance found in ring as JOINING, setting to PENDING",
 				"ring", i.RingName)
 			instanceDesc.State = PENDING
+			ringDesc.Ingesters[i.ID] = instanceDesc
 			return ringDesc, true, nil
 		}
 
@@ -781,6 +783,8 @@ func (i *Lifecycler) initRing(ctx context.Context) (bool, error) {
 			instanceDesc.State = PENDING
 			instanceDesc.Addr = i.Addr
 			instanceDesc.Zone = i.Zone
+			instanceDesc.Timestamp = time.Now().Unix()
+			ringDesc.Ingesters[i.ID] = instanceDesc
 			i.setState(PENDING)
 			tokens, _ := ringDesc.TokensFor(i.ID)
 			i.setTokens(tokens)
@@ -823,7 +827,7 @@ func (i *Lifecycler) initRing(ctx context.Context) (bool, error) {
 
 		// we haven't modified the ring, don't try to store it.
 		return nil, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: i.ID})
 
 	// Update counters
 	if err == nil {
@@ -872,7 +876,7 @@ func (i *Lifecycler) RenewTokens(ratio float64, ctx context.Context) {
 		ringDesc.AddIngester(i.ID, i.Addr, i.Zone, ringTokens, i.GetState(), i.getRegisteredAt())
 		i.setTokens(ringTokens)
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: i.ID})
 
 	if err != nil {
 		level.Error(i.logger).Log("msg", "failed to regenerate tokens", "ring", i.RingName, "err", err)
@@ -916,7 +920,7 @@ func (i *Lifecycler) verifyTokens(ctx context.Context) bool {
 		// all is good, this ingester owns its tokens
 		result = true
 		return nil, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: i.ID})
 
 	if err != nil {
 		level.Error(i.logger).Log("msg", "failed to verify tokens", "ring", i.RingName, "err", err)
@@ -988,7 +992,7 @@ func (i *Lifecycler) autoJoin(ctx context.Context, targetState InstanceState, al
 		level.Info(i.logger).Log("msg", "auto joined with new tokens", "ring", i.RingName, "state", state)
 
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: i.ID})
 
 	// Update counters
 	if err == nil {
@@ -1026,7 +1030,7 @@ func (i *Lifecycler) updateConsul(ctx context.Context) error {
 		i.delegate.OnRingInstanceHeartbeat(i, ringDesc)
 
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: i.ID})
 
 	// Update counters
 	if err == nil {
@@ -1146,5 +1150,5 @@ func (i *Lifecycler) unregister(ctx context.Context) error {
 		ringDesc := in.(*Desc)
 		ringDesc.RemoveIngester(i.ID)
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: i.ID})
 }

@@ -8,6 +8,14 @@ import (
 	"github.com/pkg/errors"
 )
 
+// CASHint carries optional hints for CAS operations. Implementations may use them
+// to optimize (e.g. read only a sub-key) or ignore them. For DynamoDB ring KV,
+// SecondaryKey can be the instance ID (sort key); other backends may interpret
+// or ignore it.
+type CASHint struct {
+	SecondaryKey string
+}
+
 // Codec allows KV clients to serialise and deserialise values.
 type Codec interface {
 	Decode([]byte) (any, error)

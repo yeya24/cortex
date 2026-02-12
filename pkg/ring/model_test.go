@@ -734,6 +734,12 @@ func TestDesc_FindDifference(t *testing.T) {
 			toUpdate: NewDesc(),
 			toDelete: []string{},
 		},
+		"same timestamp but structural change (e.g. STAGING->PENDING, addr/zone refresh) is included in toUpdate": {
+			r1:       &Desc{Ingesters: map[string]InstanceDesc{"ing1": {Addr: "0.0.0.0:1", Zone: "zone1", State: STAGING, Timestamp: 1000}}},
+			r2:       &Desc{Ingesters: map[string]InstanceDesc{"ing1": {Addr: "10.20.30.40:1", Zone: "zone2", State: PENDING, Timestamp: 1000}}},
+			toUpdate: &Desc{Ingesters: map[string]InstanceDesc{"ing1": {Addr: "10.20.30.40:1", Zone: "zone2", State: PENDING, Timestamp: 1000}}},
+			toDelete: []string{},
+		},
 	}
 
 	for testName, testData := range tests {

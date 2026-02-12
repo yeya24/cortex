@@ -242,7 +242,7 @@ func casWithErr(ctx context.Context, t *testing.T, kv *Client, key string, updat
 		return d, rt, e
 	}
 
-	return kv.CAS(ctx, key, fn)
+	return kv.CAS(ctx, key, fn, nil)
 }
 
 func TestBasicGetAndCas(t *testing.T) {
@@ -1021,7 +1021,7 @@ func TestMultipleCodecs(t *testing.T) {
 			State:     ACTIVE,
 		}
 		return d, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	err = kv2.CAS(context.Background(), "counter", func(in any) (out any, retry bool, err error) {
@@ -1034,7 +1034,7 @@ func TestMultipleCodecs(t *testing.T) {
 		}
 		dc["test"] = 5
 		return dc, true, err
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	// We will read values from second KV, which will join the first one
@@ -1160,7 +1160,7 @@ func TestNotifyMsgResendsOnlyChanges(t *testing.T) {
 		d.Members["a"] = member{Timestamp: now.Unix(), State: JOINING}
 		d.Members["b"] = member{Timestamp: now.Unix(), State: JOINING}
 		return d, true, nil
-	}))
+	}, nil))
 
 	// Check that new instance is broadcasted about just once.
 	assert.Equal(t, 1, len(kv.GetBroadcasts(0, math.MaxInt32)))

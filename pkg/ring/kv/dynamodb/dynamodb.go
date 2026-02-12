@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -146,17 +147,28 @@ func (kv dynamodbKV) Query(ctx context.Context, key dynamodbKey, isPrefix bool) 
 		co = types.ComparisonOperatorBeginsWith
 	}
 
+	keyConditions := map[string]types.Condition{
+		primaryKey: {
+			ComparisonOperator: co,
+			AttributeValueList: []types.AttributeValue{
+				&types.AttributeValueMemberS{Value: key.primaryKey},
+			},
+		},
+	}
+	// When sortKey is set, scope the query to that single item (e.g. one instance in the ring).
+	if key.sortKey != "" {
+		keyConditions[sortKey] = types.Condition{
+			ComparisonOperator: types.ComparisonOperatorEq,
+			AttributeValueList: []types.AttributeValue{
+				&types.AttributeValueMemberS{Value: key.sortKey},
+			},
+		}
+	}
+
 	input := &dynamodb.QueryInput{
 		TableName:              kv.tableName,
 		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal,
-		KeyConditions: map[string]types.Condition{
-			primaryKey: {
-				ComparisonOperator: co,
-				AttributeValueList: []types.AttributeValue{
-					&types.AttributeValueMemberS{Value: key.primaryKey},
-				},
-			},
-		},
+		KeyConditions:          keyConditions,
 	}
 
 	paginator := dynamodb.NewQueryPaginator(kv.ddbClient, input)
@@ -265,12 +277,11 @@ func (kv dynamodbKV) Batch(ctx context.Context, put map[dynamodbKey]dynamodbItem
 			TransactItems: slice,
 		})
 		if err != nil {
-			var checkFailed *types.ConditionalCheckFailedException
-			isCheckFailed := errors.As(err, &checkFailed)
-			if isCheckFailed {
-				kv.logger.Log("msg", "conditional check failed on DynamoDB Batch", "err", err)
+			shouldRetry := batchShouldRetry(err)
+			if shouldRetry {
+				kv.logger.Log("msg", "DynamoDB Batch failed, will retry", "err", err)
 			}
-			return totalCapacity, isCheckFailed, err
+			return totalCapacity, shouldRetry, err
 		}
 		for _, consumedCapacity := range resp.ConsumedCapacity {
 			totalCapacity += getCapacityUnits(&consumedCapacity)
@@ -278,6 +289,51 @@ func (kv dynamodbKV) Batch(ctx context.Context, put map[dynamodbKey]dynamodbItem
 	}
 
 	return totalCapacity, false, nil
+}
+
+// batchShouldRetry returns true for errors that are safe to retry (backoff and re-read/write).
+// - ConditionalCheckFailedException: version mismatch (our read was stale).
+// - TransactionCanceledException with ConditionalCheckFailed in CancellationReasons: same for TransactWriteItems.
+// - Throttling / capacity errors: scale-up or burst can cause these; retry with backoff.
+// - TransactionConflictException: another transaction touched the same item; retry may succeed.
+func batchShouldRetry(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Version / condition conflict: retry so we re-read and try again.
+	var condCheck *types.ConditionalCheckFailedException
+	if errors.As(err, &condCheck) {
+		return true
+	}
+	var txnCanceled *types.TransactionCanceledException
+	if errors.As(err, &txnCanceled) {
+		for _, r := range txnCanceled.CancellationReasons {
+			if r.Code != nil && strings.EqualFold(*r.Code, "ConditionalCheckFailed") {
+				return true
+			}
+		}
+		// TransactionConflict or other cancel reason: still retry.
+		return true
+	}
+	// Throttling / capacity: retry with backoff (common during scale-up when many ingesters CAS at once).
+	var throttle *types.ThrottlingException
+	if errors.As(err, &throttle) {
+		return true
+	}
+	var throughput *types.ProvisionedThroughputExceededException
+	if errors.As(err, &throughput) {
+		return true
+	}
+	var limitExceeded *types.RequestLimitExceeded
+	if errors.As(err, &limitExceeded) {
+		return true
+	}
+	// Concurrent transaction on same item.
+	var conflict *types.TransactionConflictException
+	if errors.As(err, &conflict) {
+		return true
+	}
+	return false
 }
 
 func (kv dynamodbKV) generatePutItemRequest(key dynamodbKey, ddbItem dynamodbItem) map[string]types.AttributeValue {

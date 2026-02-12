@@ -54,7 +54,7 @@ func TestCAS(t *testing.T) {
 		// Blindly set key to "0".
 		err := client.CAS(ctx, key, func(in any) (any, bool, error) {
 			return "0", true, nil
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		// Swap key to i+1 iff its i.
@@ -62,7 +62,7 @@ func TestCAS(t *testing.T) {
 			err = client.CAS(ctx, key, func(in any) (any, bool, error) {
 				require.EqualValues(t, strconv.Itoa(i), in)
 				return strconv.Itoa(i + 1), true, nil
-			})
+			}, nil)
 			require.NoError(t, err)
 		}
 
@@ -80,14 +80,14 @@ func TestNilCAS(t *testing.T) {
 		// Blindly set key to "0".
 		err := client.CAS(ctx, key, func(in any) (any, bool, error) {
 			return "0", true, nil
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		// Ensure key is "0" and don't set it.
 		err = client.CAS(ctx, key, func(in any) (any, bool, error) {
 			require.EqualValues(t, "0", in)
 			return nil, false, nil
-		})
+		}, nil)
 		require.NoError(t, err)
 
 		// Make sure value is still 0.
@@ -127,7 +127,7 @@ func TestWatchKey(t *testing.T) {
 
 				err := client.CAS(ctx, key, func(in any) (out any, retry bool, err error) {
 					return fmt.Sprintf("%d", i), true, nil
-				})
+				}, nil)
 
 				if ctx.Err() != nil {
 					break
@@ -208,7 +208,7 @@ func TestWatchPrefix(t *testing.T) {
 				key := fmt.Sprintf("%s%d", p, i)
 				err := client.CAS(ctx, key, func(in any) (out any, retry bool, err error) {
 					return key, true, nil
-				})
+				}, nil)
 
 				if ctx.Err() != nil {
 					break
@@ -268,7 +268,7 @@ func TestList(t *testing.T) {
 		for _, key := range keysToCreate {
 			err := client.CAS(context.Background(), key, func(in any) (out any, retry bool, err error) {
 				return key, false, nil
-			})
+			}, nil)
 			require.NoError(t, err)
 		}
 

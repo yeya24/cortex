@@ -135,21 +135,47 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
+	// When hint.SecondaryKey is set, the caller indicates they are fine with a partial value: we
+	// query only that instance's item (sort key) and pass it to the callback. No cache is used.
+	// Whether to pass a hint is the caller's choice; the storage layer may return only that sub-key.
 	bo := backoff.New(ctx, c.backoffConfig)
 	for bo.Ongoing() {
 		c.ddbMetrics.dynamodbCasAttempts.Inc()
-		resp, _, err := c.kv.Query(ctx, dynamodbKey{primaryKey: key}, false)
-		if err != nil {
-			level.Error(c.logger).Log("msg", "error cas query", "key", key, "err", err)
-			bo.Wait()
-			continue
-		}
 
-		current, err := c.decodeMultikey(resp)
-		if err != nil {
-			level.Error(c.logger).Log("msg", "error decoding key", "key", key, "err", err)
-			continue
+		var resp map[string]dynamodbItem
+		var current codec.MultiKey
+		usedHint := false
+
+		if hint != nil && hint.SecondaryKey != "" {
+			// Query only this instance's item (sort key); callback receives partial (0 or 1 instance).
+			var err error
+			resp, _, err = c.kv.Query(ctx, dynamodbKey{primaryKey: key, sortKey: hint.SecondaryKey}, false)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "error cas query (hint)", "key", key, "sortKey", hint.SecondaryKey, "err", err)
+				bo.Wait()
+				continue
+			}
+			current, err = c.decodeMultikey(resp)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "error decoding key (hint)", "key", key, "err", err)
+				continue
+			}
+			usedHint = true
+		} else {
+			// Full ring query.
+			var err error
+			resp, _, err = c.kv.Query(ctx, dynamodbKey{primaryKey: key}, false)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "error cas query", "key", key, "err", err)
+				bo.Wait()
+				continue
+			}
+			current, err = c.decodeMultikey(resp)
+			if err != nil {
+				level.Error(c.logger).Log("msg", "error decoding key", "key", key, "err", err)
+				continue
+			}
 		}
 
 		out, retry, err := f(current.Clone())
@@ -187,6 +213,9 @@ func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, r
 
 		putRequests := map[dynamodbKey]dynamodbItem{}
 		for childKey, bytes := range buf {
+			if usedHint && childKey != hint.SecondaryKey {
+				continue
+			}
 			version := int64(0)
 			if ddbItem, ok := resp[childKey]; ok {
 				version = ddbItem.version
@@ -199,6 +228,9 @@ func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, r
 
 		deleteRequests := make([]dynamodbKey, 0, len(toDelete))
 		for _, childKey := range toDelete {
+			if usedHint && childKey != hint.SecondaryKey {
+				continue
+			}
 			deleteRequests = append(deleteRequests, dynamodbKey{primaryKey: key, sortKey: childKey})
 		}
 
@@ -211,13 +243,19 @@ func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, r
 				bo.Wait()
 				continue
 			}
-			c.updateStaleData(key, r, time.Now().UTC())
+			if !usedHint {
+				c.updateStaleData(key, r, time.Now().UTC())
+			}
 			return nil
 		}
 
 		if len(putRequests) == 0 && len(deleteRequests) == 0 {
-			// no change detected, retry
-			level.Warn(c.logger).Log("msg", "no change detected in ring, retry CAS")
+			// no change detected, retry. FindDifference only adds an instance to toUpdate when the
+			// desired timestamp is greater than stored, or same timestamp with LEFT/structural change.
+			// So this can happen if: (1) desired timestamp <= stored (e.g. clock skew, or pre-write
+			// used a timestamp that is not older than ingester's time.Now()), or (2) descriptors are equal.
+			level.Warn(c.logger).Log("msg", "no change detected in ring, retry CAS",
+				"hint", "If scaling from STAGING: ensure pre-written entry timestamp is strictly older than ingester startup (e.g. use past epoch or synced clocks).")
 			bo.Wait()
 			continue
 		}

@@ -40,7 +40,7 @@ func Test_CAS_ErrorNoRetry(t *testing.T) {
 
 	err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 		return nil, false, expectedErr
-	})
+	}, nil)
 
 	require.Equal(t, err, expectedErr)
 }
@@ -93,7 +93,7 @@ func Test_CAS_Backoff(t *testing.T) {
 
 			err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 				return descMock, true, nil
-			})
+			}, nil)
 
 			require.NoError(t, err)
 			ddbMock.AssertNumberOfCalls(t, "Query", tc.expectedQueryCalls)
@@ -117,7 +117,7 @@ func Test_CAS_Failed(t *testing.T) {
 
 	err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 		return descMock, true, nil
-	})
+	}, nil)
 
 	ddbMock.AssertNumberOfCalls(t, "Query", 10)
 	require.Error(t, err, "failed to CAS")
@@ -147,7 +147,7 @@ func Test_CAS_Update(t *testing.T) {
 
 	err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 		return descMock, true, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	ddbMock.AssertNumberOfCalls(t, "Batch", 1)
@@ -174,7 +174,7 @@ func Test_CAS_Delete(t *testing.T) {
 
 	err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 		return descMock, true, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	ddbMock.AssertNumberOfCalls(t, "Batch", 1)
@@ -210,7 +210,7 @@ func Test_CAS_Update_Delete(t *testing.T) {
 
 	err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 		return descMock, true, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	ddbMock.AssertNumberOfCalls(t, "Batch", 1)
@@ -326,7 +326,7 @@ func Test_CAS_UpdateStale(t *testing.T) {
 
 	err := c.CAS(context.TODO(), key, func(in any) (out any, retry bool, err error) {
 		return descMockResult, true, nil
-	})
+	}, nil)
 
 	require.NoError(t, err)
 	require.Equal(t, descMockResult, c.staleData[key].data)

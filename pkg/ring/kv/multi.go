@@ -12,6 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/atomic"
+
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 )
 
 // MultiConfig is a configuration for MultiClient.
@@ -302,7 +304,7 @@ func (m *MultiClient) Delete(ctx context.Context, key string) error {
 }
 
 // CAS is a part of kv.Client interface.
-func (m *MultiClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (m *MultiClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
 	_, kv := m.getPrimaryClient()
 
 	updatedValue := any(nil)
@@ -310,7 +312,7 @@ func (m *MultiClient) CAS(ctx context.Context, key string, f func(in any) (out a
 		out, retry, err := f(in)
 		updatedValue = out
 		return out, retry, err
-	})
+	}, hint)
 
 	if err == nil && updatedValue != nil && m.mirroringEnabled.Load() {
 		m.writeToSecondary(ctx, kv, key, updatedValue)
@@ -357,7 +359,7 @@ func (m *MultiClient) writeToSecondary(ctx context.Context, primary kvclient, ke
 		err := kvc.client.CAS(ctx, key, func(in any) (out any, retry bool, err error) {
 			// try once
 			return newValue, false, nil
-		})
+		}, nil)
 
 		if err != nil {
 			m.mirrorFailuresCounter.Inc()

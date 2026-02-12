@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 )
 
 type prefixedKVClient struct {
@@ -37,8 +39,8 @@ func (c *prefixedKVClient) List(ctx context.Context, prefix string) ([]string, e
 
 // CAS atomically modifies a value in a callback. If the value doesn't exist,
 // you'll get 'nil' as an argument to your callback.
-func (c *prefixedKVClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
-	return c.client.CAS(ctx, c.prefix+key, f)
+func (c *prefixedKVClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
+	return c.client.CAS(ctx, c.prefix+key, f, hint)
 }
 
 // WatchKey watches a key.

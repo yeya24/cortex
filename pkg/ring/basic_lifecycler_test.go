@@ -95,7 +95,7 @@ func TestBasicLifecycler_RegisterOnStart(t *testing.T) {
 					ringDesc := GetOrCreateRingDesc(in)
 					ringDesc.AddIngester(testData.initialInstanceID, desc.Addr, desc.Zone, desc.Tokens, desc.State, desc.GetRegisteredAt())
 					return ringDesc, true, nil
-				}))
+				}, nil))
 			}
 
 			// Assert on the lifecycler state once the instance register delegate function will be called.
@@ -275,7 +275,7 @@ func TestBasicLifecycler_HeartbeatWhileStopping(t *testing.T) {
 			instanceDesc.Timestamp = 0
 			ringDesc.Ingesters[testInstanceID] = instanceDesc
 			return ringDesc, true, nil
-		}))
+		}, nil))
 
 		// Wait until the timestamp has been updated.
 		test.Poll(t, time.Second, true, func() any {
@@ -315,7 +315,7 @@ func TestBasicLifecycler_HeartbeatAfterBackendRest(t *testing.T) {
 	// will restore it.
 	require.NoError(t, store.CAS(ctx, testRingKey, func(in any) (out any, retry bool, err error) {
 		return NewDesc(), true, nil
-	}))
+	}, nil))
 
 	test.Poll(t, time.Second, true, func() any {
 		desc, ok := getInstanceFromStore(t, store, testInstanceID)
@@ -383,7 +383,7 @@ func TestBasicLifecycler_TokensObservePeriod(t *testing.T) {
 			ringDesc := GetOrCreateRingDesc(in)
 			ringDesc.AddIngester(testInstanceID, desc.Addr, desc.Zone, Tokens{4, 5}, desc.State, time.Now())
 			return ringDesc, true, nil
-		}) == nil
+		}, nil) == nil
 	})
 
 	require.NoError(t, lifecycler.AwaitRunning(ctx))
@@ -415,7 +415,7 @@ func TestBasicLifecycler_updateInstance_ShouldAddInstanceToTheRingIfDoesNotExist
 	// Now we delete it from the ring to simulate a ring storage reset.
 	require.NoError(t, store.CAS(ctx, testRingKey, func(in any) (out any, retry bool, err error) {
 		return NewDesc(), true, nil
-	}))
+	}, nil))
 
 	// Run a noop update instance, but since the instance is not in the ring we do expect
 	// it will added back anyway.

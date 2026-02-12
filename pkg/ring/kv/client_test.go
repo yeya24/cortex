@@ -68,7 +68,7 @@ func Test_createClient_singleBackend_mustContainRoleAndTypeLabels(t *testing.T) 
 		out = &mockMessage{id: "inCAS"}
 		retry = false
 		return
-	}))
+	}, nil))
 
 	actual := typeToRoleMapHistogramLabels(t, reg, "kv_request_duration_seconds")
 	require.Len(t, actual, 1)
@@ -86,7 +86,7 @@ func Test_createClient_multiBackend_mustContainRoleAndTypeLabels(t *testing.T) {
 		out = &mockMessage{id: "inCAS"}
 		retry = false
 		return
-	}))
+	}, nil))
 
 	actual := typeToRoleMapHistogramLabels(t, reg, "kv_request_duration_seconds")
 	// expected multi-primary, inmemory-primary and mock-secondary

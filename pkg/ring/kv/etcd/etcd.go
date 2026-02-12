@@ -122,7 +122,7 @@ func New(cfg Config, codec codec.Codec, logger log.Logger) (*Client, error) {
 }
 
 // CAS implements kv.Client.
-func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
 	var revision int64
 	var lastErr error
 

@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/cortexproject/cortex/pkg/ring/kv"
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 	"github.com/cortexproject/cortex/pkg/util/services"
 )
 
@@ -308,12 +309,13 @@ func (l *BasicLifecycler) registerInstance(ctx context.Context) error {
 		// least did.
 		instanceDesc = ringDesc.AddIngester(l.cfg.ID, l.cfg.Addr, l.cfg.Zone, tokens, state, registeredAt)
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: l.cfg.ID})
 
 	if err != nil {
 		return err
 	}
 
+	// Cache the instance descriptor we read/updated in the CAS callback for later use.
 	l.currState.Lock()
 	l.currInstanceDesc = &instanceDesc
 	l.currState.Unlock()
@@ -400,7 +402,7 @@ func (l *BasicLifecycler) unregisterInstance(ctx context.Context) error {
 		ringDesc := in.(*Desc)
 		ringDesc.RemoveIngester(l.cfg.ID)
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: l.cfg.ID})
 
 	if err != nil {
 		return err
@@ -445,7 +447,7 @@ func (l *BasicLifecycler) updateInstance(ctx context.Context, update func(*Desc,
 
 		ringDesc.Ingesters[l.cfg.ID] = instanceDesc
 		return ringDesc, true, nil
-	})
+	}, &codec.CASHint{SecondaryKey: l.cfg.ID})
 
 	if err != nil {
 		return err

@@ -75,7 +75,7 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 }
 
 // CAS is part of kv.Client interface
-func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (c *Client) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
 	err := c.awaitKVRunningOrStopping(ctx)
 	if err != nil {
 		return err

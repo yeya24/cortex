@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-kit/log/level"
+
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 )
 
 const pageContent = `
@@ -103,7 +105,7 @@ func (r *Ring) forget(ctx context.Context, id string) error {
 		ringDesc.RemoveIngester(id)
 		return ringDesc, true, nil
 	}
-	return r.KVClient.CAS(ctx, r.key, unregister)
+	return r.KVClient.CAS(ctx, r.key, unregister, &codec.CASHint{SecondaryKey: id})
 }
 
 type ingesterDesc struct {

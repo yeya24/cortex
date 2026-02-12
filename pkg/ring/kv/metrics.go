@@ -9,6 +9,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/weaveworks/common/httpgrpc"
 	"github.com/weaveworks/common/instrument"
+
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 )
 
 // RegistererWithKVName wraps the provided Registerer with the KV name label. If a nil reg
@@ -88,9 +90,9 @@ func (m metrics) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (m metrics) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (m metrics) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
 	return instrument.CollectedRequest(ctx, "CAS", m.requestDuration, getCasErrorCode, func(ctx context.Context) error {
-		return m.c.CAS(ctx, key, f)
+		return m.c.CAS(ctx, key, f, hint)
 	})
 }
 

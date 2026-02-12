@@ -108,7 +108,15 @@ type Client interface {
 	// with new value etc.  Guarantees that only a single concurrent CAS
 	// succeeds.  Callback can return nil to indicate it is happy with existing
 	// value.
-	CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error
+	//
+	// The interface always passes the full value for the key. So even when the
+	// storage uses sub-keys (e.g. DynamoDB: one item per instance under the ring
+	// key), the implementation must fetch the entire key to pass to the callback.
+	// Only the write side can be optimized (e.g. write only changed sub-keys);
+	// the read is always full-key. hint is optional: pass nil or use codec.CASHint
+	// (e.g. SecondaryKey for instance ID) so backends can optionally optimize
+	// (e.g. DDB may scope read to that sub-key); backends may ignore it.
+	CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error
 
 	// WatchKey calls f whenever the value stored under key changes.
 	WatchKey(ctx context.Context, key string, f func(any) bool)

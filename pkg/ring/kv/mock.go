@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+
+	"github.com/cortexproject/cortex/pkg/ring/kv/codec"
 )
 
 // The mockClient does not anything.
@@ -29,7 +31,7 @@ func (m mockClient) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m mockClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error)) error {
+func (m mockClient) CAS(ctx context.Context, key string, f func(in any) (out any, retry bool, err error), hint *codec.CASHint) error {
 	return nil
 }
 

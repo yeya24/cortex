@@ -176,7 +176,7 @@ func TestTokensPersistencyDelegate_ShouldHandleTheCaseTheInstanceIsAlreadyInTheR
 				ringDesc := NewDesc()
 				ringDesc.AddIngester(cfg.ID, cfg.Addr, cfg.Zone, testData.initialTokens, testData.initialState, registeredAt)
 				return ringDesc, true, nil
-			}))
+			}, nil))
 
 			require.NoError(t, services.StartAndAwaitRunning(ctx, lifecycler))
 			assert.Equal(t, testData.expectedState, lifecycler.GetState())
@@ -282,7 +282,7 @@ func TestAutoForgetDelegate(t *testing.T) {
 				ringDesc := NewDesc()
 				testData.setup(ringDesc)
 				return ringDesc, true, nil
-			}))
+			}, nil))
 
 			// Start the lifecycler.
 			require.NoError(t, services.StartAndAwaitRunning(ctx, lifecycler))

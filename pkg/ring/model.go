@@ -784,6 +784,14 @@ func (d *Desc) FindDifference(o codec.MultiKey) (any, []string, error) {
 				if !tokensEqual(ing.Tokens, oing.Tokens) {
 					tokensChanged = true
 				}
+			} else if oing.Timestamp == ing.Timestamp && (ing.State != oing.State || ing.Addr != oing.Addr || ing.Zone != oing.Zone || !tokensEqual(ing.Tokens, oing.Tokens)) {
+				// Structural change (state/addr/zone/tokens) with same timestamp: include so the update is persisted.
+				// Otherwise CAS callers (e.g. lifecycler STAGING->PENDING with timestamp=now) see "no change" when
+				// the pre-written entry already had timestamp equal to now (same second).
+				toUpdated.Ingesters[name] = oing
+				if !tokensEqual(ing.Tokens, oing.Tokens) {
+					tokensChanged = true
+				}
 			}
 		}
 	}
