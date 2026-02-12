@@ -476,7 +476,7 @@ func (c *HATracker) cleanupOldReplicas(ctx context.Context, deadline time.Time) 
 
 				d.DeletedAt = timestamp.FromTime(time.Now())
 				return d, true, nil
-			})
+			}, nil)
 
 			if err != nil {
 				c.markingForDeletionsFailed.Inc()
@@ -560,7 +560,7 @@ func (c *HATracker) checkKVStore(ctx context.Context, key, replica string, now t
 			ReceivedAt: timestamp.FromTime(now),
 			DeletedAt:  0,
 		}, true, nil
-	})
+	}, nil)
 }
 
 func (c *HATracker) Cfg() HATrackerConfig {

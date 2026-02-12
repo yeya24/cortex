@@ -779,7 +779,7 @@ func BenchmarkHATracker_syncKVStoreToLocalMap(b *testing.B) {
 				}
 				err := mockKV.CAS(ctx, key, func(_ any) (any, bool, error) {
 					return desc, true, nil
-				})
+				}, nil)
 				require.NoError(b, err)
 			}
 
@@ -823,7 +823,7 @@ func TestHATracker_CacheWarmupOnStart(t *testing.T) {
 
 	err := mockKV.CAS(ctx, key1, func(_ any) (any, bool, error) {
 		return desc1, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	user2 := "user2"
@@ -835,7 +835,7 @@ func TestHATracker_CacheWarmupOnStart(t *testing.T) {
 	}
 	err = mockKV.CAS(ctx, key2, func(_ any) (any, bool, error) {
 		return desc2, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	// CAS deleted entry
@@ -848,7 +848,7 @@ func TestHATracker_CacheWarmupOnStart(t *testing.T) {
 	}
 	err = mockKV.CAS(ctx, keyDeleted, func(_ any) (any, bool, error) {
 		return descDeleted, true, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 
 	cfg := HATrackerConfig{
