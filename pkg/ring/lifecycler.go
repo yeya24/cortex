@@ -995,7 +995,7 @@ func (i *Lifecycler) autoJoin(ctx context.Context, targetState InstanceState, al
 		level.Info(i.logger).Log("msg", "auto joined with new tokens", "ring", i.RingName, "state", state)
 
 		return ringDesc, true, nil
-	}, &codec.CASHint{SecondaryKey: i.ID})
+	}, nil) // no hint: GenerateTokens needs full ring (all instances' tokens) to avoid clashes
 
 	// Update counters
 	if err == nil {
