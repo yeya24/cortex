@@ -9,6 +9,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/storage"
 	prom_tsdb "github.com/prometheus/prometheus/tsdb"
+	"github.com/prometheus/prometheus/tsdb/index"
 	tsdb_errors "github.com/prometheus/prometheus/tsdb/errors"
 	"github.com/prometheus/prometheus/tsdb/tombstones"
 	"github.com/prometheus/prometheus/util/annotations"
@@ -18,6 +19,37 @@ import (
 	This file is basically a copy from https://github.com/prometheus/prometheus/blob/e2e01c1cffbfc4f26f5e9fe6138af87d7ff16122/tsdb/querier.go
 	with the difference that the PostingsForMatchers function is called from the Postings Cache
 */
+
+// headPostingsRefsContextKey is the context key for passing a pointer to a slice that will be
+// filled with head block series refs (a copy of postings) when selectChunkSeriesSet runs for the head.
+// Used by the ingester for ingestion-delay metrics. The value must be *[]storage.SeriesRef.
+type headPostingsRefsContextKeyType struct{}
+
+// HeadPostingsRefsContextKey is the context key for head postings refs output.
+// Attach context.WithValue(ctx, HeadPostingsRefsContextKey, &refs) before ChunkQuerier.Select;
+// if the query includes the head block, refs will be filled with a copy of the head postings refs.
+var HeadPostingsRefsContextKey = &headPostingsRefsContextKeyType{}
+
+// noopExpandedPostingsCache implements ExpandedPostingsCache by calling PostingsForMatchers on the index.
+// Use when the expanded postings cache is disabled so the head block still goes through selectChunkSeriesSet
+// and ingestion-delay tracking can capture head refs via context.
+type noopExpandedPostingsCache struct{}
+
+func (noopExpandedPostingsCache) PostingsForMatchers(ctx context.Context, _ ulid.ULID, ix prom_tsdb.IndexReader, ms ...*labels.Matcher) (index.Postings, error) {
+	return prom_tsdb.PostingsForMatchers(ctx, ix, ms...)
+}
+
+func (noopExpandedPostingsCache) ExpireSeries(_ labels.Labels) {}
+
+func (noopExpandedPostingsCache) PurgeExpiredItems() {}
+
+func (noopExpandedPostingsCache) Clear() {}
+
+func (noopExpandedPostingsCache) Size() int { return 0 }
+
+// NoopExpandedPostingsCache is a cache that does not cache; it fetches postings from the index each time.
+// Use with NewCachedBlockChunkQuerier when ExpandedPostingsCache is nil so ingestion-delay tracking still works.
+var NoopExpandedPostingsCache ExpandedPostingsCache = noopExpandedPostingsCache{}
 
 type blockBaseQuerier struct {
 	blockID    ulid.ULID
@@ -103,7 +135,7 @@ func (q *cachedBlockChunkQuerier) Select(ctx context.Context, sortSeries bool, h
 }
 
 func selectChunkSeriesSet(ctx context.Context, sortSeries bool, hints *storage.SelectHints, ms []*labels.Matcher,
-	blockID ulid.ULID, index prom_tsdb.IndexReader, chunks prom_tsdb.ChunkReader, tombstones tombstones.Reader, mint, maxt int64,
+	blockID ulid.ULID, indexReader prom_tsdb.IndexReader, chunks prom_tsdb.ChunkReader, tombstones tombstones.Reader, mint, maxt int64,
 	cache ExpandedPostingsCache,
 ) storage.ChunkSeriesSet {
 	disableTrimming := false
@@ -114,15 +146,35 @@ func selectChunkSeriesSet(ctx context.Context, sortSeries bool, hints *storage.S
 		maxt = hints.End
 		disableTrimming = hints.DisableTrimming
 	}
-	p, err := cache.PostingsForMatchers(ctx, blockID, index, ms...)
+	p, err := cache.PostingsForMatchers(ctx, blockID, indexReader, ms...)
 	if err != nil {
 		return storage.ErrChunkSeriesSet(err)
 	}
 	if sharded {
-		p = index.ShardedPostings(p, hints.ShardIndex, hints.ShardCount)
+		p = indexReader.ShardedPostings(p, hints.ShardIndex, hints.ShardCount)
 	}
 	if sortSeries {
-		p = index.SortedPostings(p)
+		p = indexReader.SortedPostings(p)
 	}
-	return prom_tsdb.NewBlockChunkSeriesSet(blockID, index, chunks, tombstones, p, mint, maxt, disableTrimming)
+
+	// When this is the head block and the caller wants a copy of postings refs (for ingestion-delay metrics),
+	// copy refs into the context-held slice and use list postings from that same slice for the series set.
+	// ListPostings mutates only its slice header (list = list[1:]), so the slice in *out keeps all refs.
+	if blockID == rangeHeadULID {
+		if v := ctx.Value(HeadPostingsRefsContextKey); v != nil {
+			if out, ok := v.(*[]storage.SeriesRef); ok && out != nil {
+				refsCopy := make([]storage.SeriesRef, 0)
+				for p.Next() {
+					refsCopy = append(refsCopy, p.At())
+				}
+				if err := p.Err(); err != nil {
+					return storage.ErrChunkSeriesSet(err)
+				}
+				*out = refsCopy
+				p = index.NewListPostings(refsCopy)
+			}
+		}
+	}
+
+	return prom_tsdb.NewBlockChunkSeriesSet(blockID, indexReader, chunks, tombstones, p, mint, maxt, disableTrimming)
 }

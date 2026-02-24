@@ -126,11 +126,12 @@ type Config struct {
 	ActiveSeriesMetricsUpdatePeriod time.Duration `yaml:"active_series_metrics_update_period"`
 	ActiveSeriesMetricsIdleTimeout  time.Duration `yaml:"active_series_metrics_idle_timeout"`
 
-	ActiveQueriedSeriesMetricsEnabled        bool                     `yaml:"active_queried_series_metrics_enabled"`
-	ActiveQueriedSeriesMetricsUpdatePeriod   time.Duration            `yaml:"active_queried_series_metrics_update_period"`
-	ActiveQueriedSeriesMetricsWindowDuration time.Duration            `yaml:"active_queried_series_metrics_window_duration"`
-	ActiveQueriedSeriesMetricsSampleRate     float64                  `yaml:"active_queried_series_metrics_sample_rate"`
-	ActiveQueriedSeriesMetricsWindows        cortex_tsdb.DurationList `yaml:"active_queried_series_metrics_windows"`
+	ActiveQueriedSeriesMetricsEnabled          bool                     `yaml:"active_queried_series_metrics_enabled"`
+	ActiveQueriedSeriesMetricsUpdatePeriod     time.Duration            `yaml:"active_queried_series_metrics_update_period"`
+	ActiveQueriedSeriesMetricsWindowDuration   time.Duration            `yaml:"active_queried_series_metrics_window_duration"`
+	ActiveQueriedSeriesMetricsSampleRate       float64                  `yaml:"active_queried_series_metrics_sample_rate"`
+	ActiveQueriedSeriesMetricsWindows          cortex_tsdb.DurationList `yaml:"active_queried_series_metrics_windows"`
+	ActiveQueriedSeriesIngestionDelayRetention time.Duration            `yaml:"active_queried_series_ingestion_delay_retention"`
 
 	// Use blocks storage.
 	BlocksStorageConfig cortex_tsdb.BlocksStorageConfig `yaml:"-"`
@@ -200,6 +201,7 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	f.Float64Var(&cfg.ActiveQueriedSeriesMetricsSampleRate, "ingester.active-queried-series-metrics-sample-rate", 1.0, "Sampling rate for active queried series tracking (1.0 = 100% sampling, 0.1 = 10% sampling). By default, all queries are sampled.")
 	cfg.ActiveQueriedSeriesMetricsWindows = cortex_tsdb.DurationList{2 * time.Hour}
 	f.Var(&cfg.ActiveQueriedSeriesMetricsWindows, "ingester.active-queried-series-metrics-windows", "Time windows to expose queried series metric. Each window tracks queried series within that time period.")
+	f.DurationVar(&cfg.ActiveQueriedSeriesIngestionDelayRetention, "ingester.active-queried-series-ingestion-delay-retention", 2*time.Hour, "Retention for ingestion time and first-queried tracking used by the query-to-ingestion delay metric. Series first seen or first queried longer than this ago are evicted.")
 
 	f.BoolVar(&cfg.UploadCompactedBlocksEnabled, "ingester.upload-compacted-blocks-enabled", true, "Enable uploading compacted blocks.")
 	f.StringVar(&cfg.IgnoreSeriesLimitForMetricNames, "ingester.ignore-series-limit-for-metric-names", "", "Comma-separated list of metric names, for which -ingester.max-series-per-metric and -ingester.max-global-series-per-metric limits will be ignored. Does not affect max-series-per-user or max-global-series-per-metric limits.")
@@ -362,13 +364,15 @@ func (r tsdbCloseCheckResult) shouldClose() bool {
 }
 
 type userTSDB struct {
-	db                  *tsdb.DB
-	userID              string
-	activeSeries        *ActiveSeries
-	activeQueriedSeries *ActiveQueriedSeries
-	seriesInMetric      *metricCounter
-	labelSetCounter     *labelSetCounter
-	limiter             *Limiter
+	db                   *tsdb.DB
+	userID               string
+	activeSeries         *ActiveSeries
+	activeQueriedSeries  *ActiveQueriedSeries
+	ingestionTimeTracker *IngestionTimeTracker
+	firstQueriedTracker  *FirstQueriedTracker
+	seriesInMetric       *metricCounter
+	labelSetCounter      *labelSetCounter
+	limiter              *Limiter
 
 	instanceSeriesCount *atomic.Int64 // Shared across all userTSDB instances created by ingester.
 	instanceLimitsFn    func() *InstanceLimits
@@ -557,6 +561,17 @@ func (u *userTSDB) PostCreation(metric labels.Labels) {
 // PostDeletion implements SeriesLifecycleCallback interface.
 func (u *userTSDB) PostDeletion(metrics map[chunks.HeadSeriesRef]labels.Labels) {
 	u.instanceSeriesCount.Sub(int64(len(metrics)))
+
+	refs := make([]uint64, 0, len(metrics))
+	for ref := range metrics {
+		refs = append(refs, uint64(ref))
+	}
+	if u.ingestionTimeTracker != nil && len(refs) > 0 {
+		u.ingestionTimeTracker.OnSeriesDeleted(refs)
+	}
+	if u.firstQueriedTracker != nil && len(refs) > 0 {
+		u.firstQueriedTracker.OnSeriesDeleted(refs)
+	}
 
 	for _, metric := range metrics {
 		metricName, err := extract.MetricNameFromLabels(metric)
@@ -1167,6 +1182,12 @@ func (i *Ingester) updateActiveQueriedSeries(ctx context.Context) {
 
 		// Purge expired windows for all trackers
 		userDB.activeQueriedSeries.Purge(now)
+		if userDB.ingestionTimeTracker != nil {
+			userDB.ingestionTimeTracker.Evict(now)
+		}
+		if userDB.firstQueriedTracker != nil {
+			userDB.firstQueriedTracker.Evict(now)
+		}
 
 		// Get estimated cardinality for each configured window
 		for _, windowDuration := range i.cfg.ActiveQueriedSeriesMetricsWindows {
@@ -1544,6 +1565,9 @@ func (i *Ingester) Push(ctx context.Context, req *cortexpb.WriteRequest) (*corte
 				// we must already have copied the labels if succeededSamplesCount or succeededHistogramsCount has been incremented.
 				return copiedLabels
 			})
+		}
+		if db.ingestionTimeTracker != nil && shouldUpdateSeries && ref != 0 {
+			db.ingestionTimeTracker.RecordIfNew(uint64(ref), startAppend)
 		}
 
 		maxExemplarsForUser := i.getMaxExemplars(userID)
@@ -2594,6 +2618,12 @@ func (i *Ingester) queryStreamChunks(ctx context.Context, userID string, db *use
 	if i.cfg.EnableMatcherOptimization {
 		matchers, lazyMatchers = optimizeMatchers(matchers)
 	}
+	// Optional: capture head postings refs from the same query for ingestion-delay metrics.
+	var headRefs []storage.SeriesRef
+	if db.ingestionTimeTracker != nil && db.firstQueriedTracker != nil && i.metrics.queriedSeriesIngestionDelaySeconds != nil &&
+		from <= db.Head().MaxTime() && through >= db.Head().MinTime() {
+		ctx = context.WithValue(ctx, cortex_tsdb.HeadPostingsRefsContextKey, &headRefs)
+	}
 	// It's not required to return sorted series because series are sorted by the Cortex querier.
 	ss := q.Select(ctx, false, hints, matchers...)
 	c()
@@ -2607,6 +2637,21 @@ func (i *Ingester) queryStreamChunks(ctx context.Context, userID string, db *use
 	var it chunks.Iterator
 
 	now := time.Now()
+	// Query-to-ingestion delay: headRefs were filled by selectChunkSeriesSet via context (copy of head postings).
+	if db.ingestionTimeTracker != nil && db.firstQueriedTracker != nil && i.metrics.queriedSeriesIngestionDelaySeconds != nil {
+		for _, ref := range headRefs {
+			if ingestionTime, ok := db.ingestionTimeTracker.GetIngestionTime(uint64(ref)); ok {
+				if db.firstQueriedTracker.RecordIfNew(uint64(ref), now) {
+					delaySec := now.Sub(ingestionTime).Seconds()
+					if delaySec < 0 {
+						delaySec = 0
+					}
+					i.metrics.queriedSeriesIngestionDelaySeconds.WithLabelValues(userID).Observe(delaySec)
+				}
+			}
+		}
+	}
+
 	// Check sampling decision early to avoid calculating hashes if batch will be skipped
 	var queriedSeriesHashes []uint64
 	sampled := false
@@ -2629,7 +2674,7 @@ func (i *Ingester) queryStreamChunks(ctx context.Context, userID string, db *use
 			continue
 		}
 
-		// Collect hash for batched tracking (only if sampling decision allows)
+		// Hash for active-queried-series (sampled) only
 		if sampled {
 			hash := lbls.Hash()
 			queriedSeriesHashes = append(queriedSeriesHashes, hash)
@@ -2803,11 +2848,16 @@ func (i *Ingester) blockChunkQuerierFunc(userId string) tsdb.BlockChunkQuerierFu
 		// This occurs because the tsdb.PostingsForMatchers function can return invalid data in such scenarios.
 		// For more details, see: https://github.com/cortexproject/cortex/issues/6556
 		// TODO: alanprot: Consider removing this logic when prometheus is updated as this logic is "fixed" upstream.
-		if postingCache == nil || mint > db.Head().MaxTime() {
+		if db != nil && mint > db.Head().MaxTime() {
 			return tsdb.NewBlockChunkQuerier(b, mint, maxt)
 		}
-
-		return cortex_tsdb.NewCachedBlockChunkQuerier(postingCache, b, mint, maxt)
+		// Use our querier even when cache is disabled (with no-op cache) so head postings refs
+		// are still captured via context for ingestion-delay metrics.
+		cache := postingCache
+		if cache == nil {
+			cache = cortex_tsdb.NoopExpandedPostingsCache
+		}
+		return cortex_tsdb.NewCachedBlockChunkQuerier(cache, b, mint, maxt)
 	}
 }
 
@@ -2825,6 +2875,8 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 	}
 
 	var activeQueriedSeries *ActiveQueriedSeries
+	var ingestionTimeTracker *IngestionTimeTracker
+	var firstQueriedTracker *FirstQueriedTracker
 	if i.cfg.ActiveQueriedSeriesMetricsEnabled {
 		activeQueriedSeries = NewActiveQueriedSeries(
 			i.cfg.ActiveQueriedSeriesMetricsWindows,
@@ -2832,16 +2884,24 @@ func (i *Ingester) createTSDB(userID string) (*userTSDB, error) {
 			i.cfg.ActiveQueriedSeriesMetricsSampleRate,
 			i.logger,
 		)
+		retention := i.cfg.ActiveQueriedSeriesIngestionDelayRetention
+		if retention <= 0 {
+			retention = 2 * time.Hour
+		}
+		ingestionTimeTracker = NewIngestionTimeTracker(retention)
+		firstQueriedTracker = NewFirstQueriedTracker(retention)
 	}
 
 	userDB := &userTSDB{
-		userID:              userID,
-		activeSeries:        NewActiveSeries(),
-		activeQueriedSeries: activeQueriedSeries,
-		seriesInMetric:      newMetricCounter(i.limiter, i.cfg.getIgnoreSeriesLimitForMetricNamesMap()),
-		labelSetCounter:     newLabelSetCounter(i.limiter),
-		ingestedAPISamples:  util_math.NewEWMARate(0.2, i.cfg.RateUpdatePeriod),
-		ingestedRuleSamples: util_math.NewEWMARate(0.2, i.cfg.RateUpdatePeriod),
+		userID:               userID,
+		activeSeries:         NewActiveSeries(),
+		activeQueriedSeries:  activeQueriedSeries,
+		ingestionTimeTracker: ingestionTimeTracker,
+		firstQueriedTracker:  firstQueriedTracker,
+		seriesInMetric:       newMetricCounter(i.limiter, i.cfg.getIgnoreSeriesLimitForMetricNamesMap()),
+		labelSetCounter:      newLabelSetCounter(i.limiter),
+		ingestedAPISamples:   util_math.NewEWMARate(0.2, i.cfg.RateUpdatePeriod),
+		ingestedRuleSamples:  util_math.NewEWMARate(0.2, i.cfg.RateUpdatePeriod),
 
 		instanceLimitsFn:             i.getInstanceLimits,
 		instanceSeriesCount:          &i.TSDBState.seriesCount,
