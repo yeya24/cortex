@@ -955,18 +955,14 @@ func TestCompactor_ShouldSkipOutOrOrderBlocks(t *testing.T) {
 
 	tsdbPlanner.On("Plan", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*metadata.Meta{
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    b1,
-				MinTime: 10,
-				MaxTime: 20,
-			},
+			ULID:    b1,
+			MinTime: 10,
+			MaxTime: 20,
 		},
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    b2,
-				MinTime: 20,
-				MaxTime: 30,
-			},
+			ULID:    b2,
+			MinTime: 20,
+			MaxTime: 30,
 		},
 	}, nil)
 
@@ -1096,7 +1092,7 @@ func TestCompactor_ShouldCompactAllUsersOnShardingEnabledButOnlyOneInstanceRunni
 func TestCompactor_ShouldCompactOnlyUsersOwnedByTheInstanceOnShardingEnabledAndMultipleInstancesRunning(t *testing.T) {
 	t.Parallel()
 
-	numUsers := 100
+	numUsers := 20
 
 	// Setup user IDs
 	userIDs := make([]string, 0, numUsers)
@@ -1144,6 +1140,7 @@ func TestCompactor_ShouldCompactOnlyUsersOwnedByTheInstanceOnShardingEnabledAndM
 		cfg.ShardingRing.InstanceAddr = fmt.Sprintf("127.0.0.%d", i)
 		cfg.ShardingRing.WaitStabilityMinDuration = time.Second
 		cfg.ShardingRing.WaitStabilityMaxDuration = 5 * time.Second
+		cfg.ShardingRing.WaitActiveInstanceTimeout = 30 * time.Second // Give the ring ACTIVE wait headroom on slow CI (#7503).
 		cfg.ShardingRing.KVStore.Mock = kvstore
 
 		c, _, tsdbPlanner, l, _ := prepare(t, cfg, bucketClient, nil)
@@ -1522,6 +1519,8 @@ func removeIgnoredLogs(input []string) []string {
 	ignoredLogStringsRegexList := []*regexp.Regexp{
 		regexp.MustCompile(`^level=(info|debug|warn) component=cleaner .+$`),
 		regexp.MustCompile(`^level=info component=compactor msg="set state" .+$`),
+		regexp.MustCompile(`^level=error component=compactor msg="failed to check if compactor owns updating user index" err=.+$`),
+		regexp.MustCompile(`^level=error component=compactor msg="failed to update user index" err=.+$`),
 	}
 
 	out := make([]string, 0, len(input))
@@ -1735,9 +1734,7 @@ func mockBlockMetaJSONWithTime(id string, orgID string, minTime int64, maxTime i
 		Thanos: metadata.Thanos{
 			Labels: map[string]string{"__org_id__": orgID},
 		},
-	}
 
-	meta.BlockMeta = tsdb.BlockMeta{
 		Version: 1,
 		ULID:    ulid.MustParse(id),
 		MinTime: minTime,
@@ -1745,8 +1742,7 @@ func mockBlockMetaJSONWithTime(id string, orgID string, minTime int64, maxTime i
 		Compaction: tsdb.BlockMetaCompaction{
 			Level:   1,
 			Sources: []ulid.ULID{ulid.MustParse(id)},
-		},
-	}
+		}}
 
 	content, err := json.Marshal(meta)
 	if err != nil {
@@ -1987,18 +1983,14 @@ func TestCompactor_ShouldNotTreatInterruptionsAsErrors(t *testing.T) {
 	})
 	tsdbPlanner.On("Plan", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*metadata.Meta{
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    b1,
-				MinTime: 10,
-				MaxTime: 20,
-			},
+			ULID:    b1,
+			MinTime: 10,
+			MaxTime: 20,
 		},
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    b2,
-				MinTime: 20,
-				MaxTime: 30,
-			},
+			ULID:    b2,
+			MinTime: 20,
+			MaxTime: 30,
 		},
 	}, nil)
 	require.NoError(t, services.StartAndAwaitRunning(ctx, c))

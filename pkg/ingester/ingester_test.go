@@ -1144,9 +1144,8 @@ func TestIngester_Push(t *testing.T) {
 						{MetricFamilyName: "metric_name_2", Help: "a help for metric_name_2", Unit: "", Type: cortexpb.GAUGE},
 					},
 					[]cortexpb.WrappedHistogram{
-						{Histogram: cortexpb.Histogram{
-							TimestampMs: 10,
-						}},
+						{
+							TimestampMs: 10},
 					},
 					cortexpb.API),
 			},
@@ -1413,6 +1412,159 @@ func TestIngester_Push(t *testing.T) {
 				# HELP cortex_ingester_memory_series_removed_total The total number of series that were removed per user.
 				# TYPE cortex_ingester_memory_series_removed_total counter
 				cortex_ingester_memory_series_removed_total{user="test"} 0
+			`,
+		},
+		"ooo disabled, rule staleness marker out of order is not counted as a discarded sample": {
+			// A staleness marker appended by the ruler is internal bookkeeping, so it is not reported as a discarded tenant sample. The TSDB counter still records the rejection and the request still fails with 400.
+			reqs: []*cortexpb.WriteRequest{
+				cortexpb.ToWriteRequest(
+					[]labels.Labels{metricLabels},
+					[]cortexpb.Sample{{Value: 2, TimestampMs: 10}},
+					nil,
+					nil,
+					cortexpb.API),
+				cortexpb.ToWriteRequest(
+					[]labels.Labels{metricLabels},
+					[]cortexpb.Sample{{Value: math.Float64frombits(value.StaleNaN), TimestampMs: 9}},
+					nil,
+					nil,
+					cortexpb.RULE),
+			},
+			expectedErr: httpgrpc.Errorf(http.StatusBadRequest, "%s", wrapWithUser(wrappedTSDBIngestErr(storage.ErrOutOfOrderSample, model.Time(9), cortexpb.FromLabelsToLabelAdapters(metricLabels)), userID).Error()),
+			expectedIngested: []cortexpb.TimeSeries{
+				{Labels: metricLabelAdapters, Samples: []cortexpb.Sample{{Value: 2, TimestampMs: 10}}},
+			},
+			additionalMetrics: []string{
+				"cortex_discarded_samples_total",
+				"cortex_ingester_tsdb_out_of_order_samples_total",
+			},
+			expectedMetrics: `
+				# HELP cortex_ingester_ingested_samples_total The total number of samples ingested.
+				# TYPE cortex_ingester_ingested_samples_total counter
+				cortex_ingester_ingested_samples_total 1
+				# HELP cortex_ingester_ingested_samples_failures_total The total number of samples that errored on ingestion.
+				# TYPE cortex_ingester_ingested_samples_failures_total counter
+				cortex_ingester_ingested_samples_failures_total 1
+				# HELP cortex_ingester_memory_users The current number of users in memory.
+				# TYPE cortex_ingester_memory_users gauge
+				cortex_ingester_memory_users 1
+				# HELP cortex_ingester_memory_series The current number of series in memory.
+				# TYPE cortex_ingester_memory_series gauge
+				cortex_ingester_memory_series 1
+				# HELP cortex_ingester_memory_series_created_total The total number of series that were created per user.
+				# TYPE cortex_ingester_memory_series_created_total counter
+				cortex_ingester_memory_series_created_total{user="test"} 1
+				# HELP cortex_ingester_memory_series_removed_total The total number of series that were removed per user.
+				# TYPE cortex_ingester_memory_series_removed_total counter
+				cortex_ingester_memory_series_removed_total{user="test"} 0
+				# HELP cortex_ingester_tsdb_out_of_order_samples_total Total number of out of order samples ingestion failed attempts due to out of order being disabled.
+				# TYPE cortex_ingester_tsdb_out_of_order_samples_total counter
+				cortex_ingester_tsdb_out_of_order_samples_total{type="float",user="test"} 1
+				cortex_ingester_tsdb_out_of_order_samples_total{type="histogram",user="test"} 0
+			`,
+		},
+		"ooo disabled, rule result out of order is counted as a discarded sample": {
+			// Rule evaluation results are tenant data even though Source is RULE, so they must still be reported as discarded.
+			reqs: []*cortexpb.WriteRequest{
+				cortexpb.ToWriteRequest(
+					[]labels.Labels{metricLabels},
+					[]cortexpb.Sample{{Value: 2, TimestampMs: 10}},
+					nil,
+					nil,
+					cortexpb.API),
+				cortexpb.ToWriteRequest(
+					[]labels.Labels{metricLabels},
+					[]cortexpb.Sample{{Value: 1, TimestampMs: 9}},
+					nil,
+					nil,
+					cortexpb.RULE),
+			},
+			expectedErr: httpgrpc.Errorf(http.StatusBadRequest, "%s", wrapWithUser(wrappedTSDBIngestErr(storage.ErrOutOfOrderSample, model.Time(9), cortexpb.FromLabelsToLabelAdapters(metricLabels)), userID).Error()),
+			expectedIngested: []cortexpb.TimeSeries{
+				{Labels: metricLabelAdapters, Samples: []cortexpb.Sample{{Value: 2, TimestampMs: 10}}},
+			},
+			additionalMetrics: []string{
+				"cortex_discarded_samples_total",
+				"cortex_ingester_tsdb_out_of_order_samples_total",
+			},
+			expectedMetrics: `
+				# HELP cortex_ingester_ingested_samples_total The total number of samples ingested.
+				# TYPE cortex_ingester_ingested_samples_total counter
+				cortex_ingester_ingested_samples_total 1
+				# HELP cortex_ingester_ingested_samples_failures_total The total number of samples that errored on ingestion.
+				# TYPE cortex_ingester_ingested_samples_failures_total counter
+				cortex_ingester_ingested_samples_failures_total 1
+				# HELP cortex_ingester_memory_users The current number of users in memory.
+				# TYPE cortex_ingester_memory_users gauge
+				cortex_ingester_memory_users 1
+				# HELP cortex_ingester_memory_series The current number of series in memory.
+				# TYPE cortex_ingester_memory_series gauge
+				cortex_ingester_memory_series 1
+				# HELP cortex_ingester_memory_series_created_total The total number of series that were created per user.
+				# TYPE cortex_ingester_memory_series_created_total counter
+				cortex_ingester_memory_series_created_total{user="test"} 1
+				# HELP cortex_ingester_memory_series_removed_total The total number of series that were removed per user.
+				# TYPE cortex_ingester_memory_series_removed_total counter
+				cortex_ingester_memory_series_removed_total{user="test"} 0
+				# HELP cortex_ingester_tsdb_out_of_order_samples_total Total number of out of order samples ingestion failed attempts due to out of order being disabled.
+				# TYPE cortex_ingester_tsdb_out_of_order_samples_total counter
+				cortex_ingester_tsdb_out_of_order_samples_total{type="float",user="test"} 1
+				cortex_ingester_tsdb_out_of_order_samples_total{type="histogram",user="test"} 0
+				# HELP cortex_discarded_samples_total The total number of samples that were discarded.
+				# TYPE cortex_discarded_samples_total counter
+				cortex_discarded_samples_total{reason="sample-out-of-order",user="test"} 1
+			`,
+		},
+		"ooo disabled, tenant staleness marker out of order is counted as a discarded sample": {
+			// Tenants legitimately send staleness markers over remote write, so a stale NaN from a non-ruler source must still be reported as discarded.
+			reqs: []*cortexpb.WriteRequest{
+				cortexpb.ToWriteRequest(
+					[]labels.Labels{metricLabels},
+					[]cortexpb.Sample{{Value: 2, TimestampMs: 10}},
+					nil,
+					nil,
+					cortexpb.API),
+				cortexpb.ToWriteRequest(
+					[]labels.Labels{metricLabels},
+					[]cortexpb.Sample{{Value: math.Float64frombits(value.StaleNaN), TimestampMs: 9}},
+					nil,
+					nil,
+					cortexpb.API),
+			},
+			expectedErr: httpgrpc.Errorf(http.StatusBadRequest, "%s", wrapWithUser(wrappedTSDBIngestErr(storage.ErrOutOfOrderSample, model.Time(9), cortexpb.FromLabelsToLabelAdapters(metricLabels)), userID).Error()),
+			expectedIngested: []cortexpb.TimeSeries{
+				{Labels: metricLabelAdapters, Samples: []cortexpb.Sample{{Value: 2, TimestampMs: 10}}},
+			},
+			additionalMetrics: []string{
+				"cortex_discarded_samples_total",
+				"cortex_ingester_tsdb_out_of_order_samples_total",
+			},
+			expectedMetrics: `
+				# HELP cortex_ingester_ingested_samples_total The total number of samples ingested.
+				# TYPE cortex_ingester_ingested_samples_total counter
+				cortex_ingester_ingested_samples_total 1
+				# HELP cortex_ingester_ingested_samples_failures_total The total number of samples that errored on ingestion.
+				# TYPE cortex_ingester_ingested_samples_failures_total counter
+				cortex_ingester_ingested_samples_failures_total 1
+				# HELP cortex_ingester_memory_users The current number of users in memory.
+				# TYPE cortex_ingester_memory_users gauge
+				cortex_ingester_memory_users 1
+				# HELP cortex_ingester_memory_series The current number of series in memory.
+				# TYPE cortex_ingester_memory_series gauge
+				cortex_ingester_memory_series 1
+				# HELP cortex_ingester_memory_series_created_total The total number of series that were created per user.
+				# TYPE cortex_ingester_memory_series_created_total counter
+				cortex_ingester_memory_series_created_total{user="test"} 1
+				# HELP cortex_ingester_memory_series_removed_total The total number of series that were removed per user.
+				# TYPE cortex_ingester_memory_series_removed_total counter
+				cortex_ingester_memory_series_removed_total{user="test"} 0
+				# HELP cortex_ingester_tsdb_out_of_order_samples_total Total number of out of order samples ingestion failed attempts due to out of order being disabled.
+				# TYPE cortex_ingester_tsdb_out_of_order_samples_total counter
+				cortex_ingester_tsdb_out_of_order_samples_total{type="float",user="test"} 1
+				cortex_ingester_tsdb_out_of_order_samples_total{type="histogram",user="test"} 0
+				# HELP cortex_discarded_samples_total The total number of samples that were discarded.
+				# TYPE cortex_discarded_samples_total counter
+				cortex_discarded_samples_total{reason="sample-out-of-order",user="test"} 1
 			`,
 		},
 		"ooo disabled, should soft fail on sample out of order": {
@@ -4463,9 +4615,9 @@ func writeRequestSingleSeries(lbls labels.Labels, samples []cortexpb.Sample) *co
 		Source: cortexpb.API,
 	}
 
-	ts := cortexpb.TimeSeries{}
-	ts.Labels = cortexpb.FromLabelsToLabelAdapters(lbls)
-	ts.Samples = samples
+	ts := cortexpb.TimeSeries{
+		Labels:  cortexpb.FromLabelsToLabelAdapters(lbls),
+		Samples: samples}
 	req.Timeseries = append(req.Timeseries, cortexpb.PreallocTimeseries{TimeSeries: &ts})
 
 	return req
@@ -5389,8 +5541,8 @@ func TestIngester_ReadNotFailWhenTSDBIsBeingDeleted(t *testing.T) {
 			err = db.Close()
 			require.NoError(t, err)
 
-			b := db.casState(active, c.state)
-			require.True(t, b)
+			casSuccess, _ := db.casState(active, c.state)
+			require.True(t, casSuccess)
 
 			// Mock request
 			ctx = user.InjectOrgID(context.Background(), userID)
@@ -5920,26 +6072,22 @@ func Test_Ingester_AllUserStatsHandler(t *testing.T) {
 
 	expect := UserStatsByTimeseries{
 		{
-			UserID: "user-1",
-			UserStats: UserStats{
-				IngestionRate:     0.2,
-				NumSeries:         0,
-				APIIngestionRate:  0.2,
-				RuleIngestionRate: 0,
-				ActiveSeries:      3,
-				LoadedBlocks:      1,
-			},
+			UserID:            "user-1",
+			IngestionRate:     0.2,
+			NumSeries:         0,
+			APIIngestionRate:  0.2,
+			RuleIngestionRate: 0,
+			ActiveSeries:      3,
+			LoadedBlocks:      1,
 		},
 		{
-			UserID: "user-2",
-			UserStats: UserStats{
-				IngestionRate:     0.13333333333333333,
-				NumSeries:         0,
-				APIIngestionRate:  0.13333333333333333,
-				RuleIngestionRate: 0,
-				ActiveSeries:      2,
-				LoadedBlocks:      1,
-			},
+			UserID:            "user-2",
+			IngestionRate:     0.13333333333333333,
+			NumSeries:         0,
+			APIIngestionRate:  0.13333333333333333,
+			RuleIngestionRate: 0,
+			ActiveSeries:      2,
+			LoadedBlocks:      1,
 		},
 	}
 	assert.ElementsMatch(t, expect, resp)
@@ -6400,7 +6548,8 @@ func TestIngesterPushErrorDuringForcedCompaction(t *testing.T) {
 	db, err := i.getTSDB(userID)
 	require.NoError(t, err)
 	require.NotNil(t, db)
-	require.True(t, db.casState(active, forceCompacting))
+	casSuccess, _ := db.casState(active, forceCompacting)
+	require.True(t, casSuccess)
 
 	// Ingestion should fail with a 503.
 	req, _ := mockWriteRequest(t, labels.FromStrings(labels.MetricName, "test"), 0, util.TimeToMillis(time.Now()))
@@ -6409,8 +6558,87 @@ func TestIngesterPushErrorDuringForcedCompaction(t *testing.T) {
 	require.Equal(t, httpgrpc.Errorf(http.StatusServiceUnavailable, "%s", wrapWithUser(errors.New("forced compaction in progress"), userID).Error()), err)
 
 	// Ingestion is successful after a flush.
-	require.True(t, db.casState(forceCompacting, active))
+	casSuccess, _ = db.casState(forceCompacting, active)
+	require.True(t, casSuccess)
 	pushSingleSampleWithMetadata(t, i)
+}
+
+func TestUserTSDB_compactHead_returnsShippingError(t *testing.T) {
+	i, err := prepareIngesterWithBlocksStorage(t, defaultIngesterTestConfig(t), prometheus.NewRegistry())
+	require.NoError(t, err)
+
+	require.NoError(t, services.StartAndAwaitRunning(context.Background(), i))
+	t.Cleanup(func() {
+		_ = services.StopAndAwaitTerminated(context.Background(), i)
+	})
+
+	// Wait until it's ACTIVE
+	test.Poll(t, 1*time.Second, ring.ACTIVE, func() any {
+		return i.lifecycler.GetState()
+	})
+
+	pushSingleSampleWithMetadata(t, i)
+
+	db, err := i.getTSDB(userID)
+	require.NoError(t, err)
+	require.NotNil(t, db)
+
+	blockDuration := i.cfg.BlocksStorageConfig.TSDB.BlockRanges[0].Milliseconds()
+
+	// When the TSDB is shipping blocks, compactHead should return the sentinel errTsdbShipping
+	// so callers can distinguish it from a genuine compaction failure.
+	casSuccess, _ := db.casState(active, activeShipping)
+	require.True(t, casSuccess)
+	err = db.compactHead(context.Background(), blockDuration)
+	require.ErrorIs(t, err, errTsdbShipping)
+	casSuccess, _ = db.casState(activeShipping, active)
+	require.True(t, casSuccess)
+
+	// For any other non-active state, compactHead returns a generic error (not errTsdbShipping)
+	// reporting the current state.
+	casSuccess, _ = db.casState(active, closing)
+	require.True(t, casSuccess)
+	err = db.compactHead(context.Background(), blockDuration)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, errTsdbShipping)
+	require.Contains(t, err.Error(), "not in active state")
+	casSuccess, _ = db.casState(closing, active)
+	require.True(t, casSuccess)
+}
+
+func TestIngester_compactBlocks_shippingIsNotCountedAsFailure(t *testing.T) {
+	i, err := prepareIngesterWithBlocksStorage(t, defaultIngesterTestConfig(t), prometheus.NewRegistry())
+	require.NoError(t, err)
+
+	require.NoError(t, services.StartAndAwaitRunning(context.Background(), i))
+	t.Cleanup(func() {
+		_ = services.StopAndAwaitTerminated(context.Background(), i)
+	})
+
+	// Wait until it's ACTIVE
+	test.Poll(t, 1*time.Second, ring.ACTIVE, func() any {
+		return i.lifecycler.GetState()
+	})
+
+	pushSingleSampleWithMetadata(t, i)
+
+	db, err := i.getTSDB(userID)
+	require.NoError(t, err)
+	require.NotNil(t, db)
+
+	// Simulate blocks shipping being in progress. Forced compaction will fail the CAS to
+	// forceCompacting, but this must not be counted as a compaction failure.
+	casSuccess, _ := db.casState(active, activeShipping)
+	require.True(t, casSuccess)
+	t.Cleanup(func() { db.casState(activeShipping, active) })
+
+	require.Equal(t, float64(0), testutil.ToFloat64(i.TSDBState.compactionsFailed))
+
+	i.compactBlocks(context.Background(), true, nil)
+
+	// Compaction was triggered but the shipping skip must not increment the failure counter.
+	require.Equal(t, float64(1), testutil.ToFloat64(i.TSDBState.compactionsTriggered))
+	require.Equal(t, float64(0), testutil.ToFloat64(i.TSDBState.compactionsFailed))
 }
 
 func TestIngesterNoFlushWithInFlightRequest(t *testing.T) {

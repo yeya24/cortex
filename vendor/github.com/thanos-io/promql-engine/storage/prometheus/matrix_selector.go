@@ -14,7 +14,6 @@ import (
 	"github.com/thanos-io/promql-engine/execution/model"
 	"github.com/thanos-io/promql-engine/execution/parse"
 	"github.com/thanos-io/promql-engine/execution/telemetry"
-	"github.com/thanos-io/promql-engine/extlabels"
 	"github.com/thanos-io/promql-engine/query"
 	"github.com/thanos-io/promql-engine/ringbuffer"
 	"github.com/thanos-io/promql-engine/warnings"
@@ -23,6 +22,7 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/promql/parser/posrange"
+	"github.com/prometheus/prometheus/schema"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/util/annotations"
 )
@@ -32,10 +32,27 @@ type matrixScanner struct {
 	metricName string
 	signature  uint64
 
-	buffer     ringbuffer.Buffer
-	iterator   chunkenc.Iterator
-	rawSeries  SignedSeries
-	lastSample ringbuffer.Sample
+	buffer          ringbuffer.Buffer
+	iterator        chunkenc.Iterator
+	rawSeries       SignedSeries
+	lastSample      ringbuffer.Sample
+	iteratorDrained bool
+	exhausted       bool
+}
+
+// release drops the per-series state, which must not be read or rebuilt after.
+func (m *matrixScanner) release() {
+	m.buffer = nil
+	m.iterator = nil
+}
+
+// releaseDrained drops the iterator now and the buffer once its window empties.
+func (m *matrixScanner) releaseDrained() {
+	m.iterator = nil
+	if m.buffer.Empty() {
+		m.exhausted = true
+		m.buffer = nil
+	}
 }
 
 type matrixSelector struct {
@@ -67,11 +84,13 @@ type matrixSelector struct {
 	shard     int
 	numShards int
 
+	reusableIter chunkenc.Iterator
+
 	nonCounterMetric string
 	hasFloats        bool
 }
 
-const sampleLimitCheckInterval = 500
+const sampleLimitCheckInterval = 1
 
 // NewMatrixSelector creates operator which selects vector of series over time.
 func NewMatrixSelector(
@@ -173,25 +192,32 @@ func (o *matrixSelector) Next(ctx context.Context, buf []model.StepVector) (int,
 	firstSeries := o.currentSeries
 	batchSamplesDelta := 0
 
-	lastInBatch := min(firstSeries+o.seriesBatchSize, int64(len(o.scanners)))
-	// Initialize iterators lazily per-batch.
-	// TODO: reuse the iterator created for the previous scanner.
-	for i := firstSeries; i < lastInBatch; i++ {
-		if o.scanners[i].iterator == nil {
-			o.scanners[i].iterator = o.scanners[i].rawSeries.Iterator(nil)
-			o.scanners[i].buffer = o.newBuffer(ctx)
-		}
-	}
-
 	for ; o.currentSeries-firstSeries < o.seriesBatchSize && o.currentSeries < int64(len(o.scanners)); o.currentSeries++ {
 		var (
 			scanner  = &o.scanners[o.currentSeries]
 			seriesTs = ts
 		)
 
-		sampleCountBefore := scanner.buffer.SampleCount()
+		// Initialize iterators lazily per series. An instant query visits each
+		// series once, so its iterator can be handed to the next one; a range
+		// query revisits every series and each keeps its own chunk position.
+		// TODO: reuse the buffer created for the previous scanner.
+		if scanner.buffer == nil && !scanner.exhausted {
+			if o.opts.IsInstantQuery() {
+				o.reusableIter = scanner.rawSeries.Iterator(o.reusableIter)
+				scanner.iterator = o.reusableIter
+			} else {
+				scanner.iterator = scanner.rawSeries.Iterator(nil)
+			}
+			scanner.buffer = o.newBuffer(ctx)
+		}
 
-		for currStep := 0; currStep < n && seriesTs <= o.maxt; currStep++ {
+		var sampleCountBefore int
+		if !scanner.exhausted {
+			sampleCountBefore = scanner.buffer.SampleCount()
+		}
+
+		for currStep := 0; !scanner.exhausted && currStep < n && seriesTs <= o.maxt; currStep++ {
 			maxt := seriesTs - o.offset
 			mint := maxt - o.selectRange
 
@@ -224,13 +250,13 @@ func (o *matrixSelector) Next(ctx context.Context, buf []model.StepVector) (int,
 			seriesTs += o.step
 		}
 
-		sampleCountAfter := scanner.buffer.SampleCount()
-		batchSamplesDelta += sampleCountAfter - sampleCountBefore
-
 		if o.opts.IsInstantQuery() {
-			scanner.buffer.Reset(math.MaxInt64, 0)
-			scanner.iterator = nil
-			batchSamplesDelta -= sampleCountAfter
+			scanner.release()
+		} else if !scanner.exhausted {
+			batchSamplesDelta += scanner.buffer.SampleCount() - sampleCountBefore
+			if scanner.iteratorDrained {
+				scanner.releaseDrained()
+			}
 		}
 
 		if o.shouldCheckSampleLimit(firstSeries) {
@@ -269,13 +295,12 @@ func (o *matrixSelector) loadSeries(ctx context.Context) error {
 
 		o.scanners = make([]matrixScanner, len(series))
 		o.series = make([]labels.Labels, len(series))
-		var b labels.ScratchBuilder
 
 		for i, s := range series {
 			origLbls := s.Labels()
 			lbls := origLbls
 			if o.functionName != "last_over_time" && o.functionName != "first_over_time" {
-				lbls = extlabels.DropReserved(lbls, b)
+				lbls = lbls.DropReserved(schema.IsMetadataLabel)
 			}
 			o.scanners[i] = matrixScanner{
 				labels:     lbls,
@@ -380,6 +405,9 @@ func (m *matrixScanner) selectPoints(
 	fh *histogram.FloatHistogram,
 ) error {
 	m.buffer.Reset(mint, evalt)
+	if m.iteratorDrained {
+		return nil
+	}
 	if m.lastSample.T > maxt {
 		return nil
 	}
@@ -420,7 +448,12 @@ func (m *matrixScanner) selectPoints(
 			m.buffer.Push(t, ringbuffer.Value{F: v})
 		}
 	}
-	return m.iterator.Err()
+	// Next returns ValNone on error as well as at the end of the series.
+	if err := m.iterator.Err(); err != nil {
+		return err
+	}
+	m.iteratorDrained = true
+	return nil
 }
 
 // emitRingbufferWarnings converts warnings.Warnings flags to proper annotations with metric names.

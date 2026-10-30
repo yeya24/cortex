@@ -38,6 +38,7 @@ Currently experimental features are:
 - Ruler
   - Evaluate rules to query frontend instead of ingesters (enabled via `-ruler.frontend-address`).
   - When `-ruler.frontend-address` is specified, the response format can be specified (via `-ruler.query-response-format`).
+  - Federated rule groups (`-ruler.enable-federated-rules`, `-ruler.allowed-federated-tenants`, `-ruler.disallowed-federated-tenants`).
 - S3 Server Side Encryption (SSE) using KMS (including per-tenant KMS config overrides).
 - Alertmanager:
   - Receiver integrations firewall (configured via `-alertmanager.receivers-firewall.*`)
@@ -52,6 +53,7 @@ Currently experimental features are:
   - Do not extend writes on unhealthy ingesters (`-distributor.extend-writes=false`)
   - Accept multiple HA pairs in the same request (enabled via `-experimental.distributor.ha-tracker.mixed-ha-samples=true`)
   - Accept Prometheus remote write 2.0 request (`-distributor.remote-writev2-enabled=true`)
+  - Use a goroutine worker pool for query fan-out calls to ingesters (`-distributor.num-query-workers`)
 - Tenant Deletion in Purger, for blocks storage.
 - Blocks storage user index
 - Store Gateway max concurrent fetched data bytes limit
@@ -101,10 +103,9 @@ Currently experimental features are:
   - `alertmanager-sharding-ring.final-sleep` (duration) CLI flag
 - OTLP Receiver
   - Ingest delta temporality OTLP metrics (`-distributor.otlp.allow-delta-temporality=true`)
+  - Ingest OTLP metrics over gRPC (`-distributor.otlp.grpc-enabled=true`)
 - Persistent tokens in the Ruler Ring:
   - `-ruler.ring.tokens-file-path` (path) CLI flag
-- Native Histograms
-  - Ingestion can be enabled by setting `-blocks-storage.tsdb.enable-native-histograms=true` on Ingester.
 - String interning for metrics labels
   - Enable string interning for metrics labels by setting `-ingester.labels-string-interning-enabled` on Ingester.
 - Query-frontend: query rejection (`-frontend.query-rejection.enabled`)
@@ -113,9 +114,10 @@ Currently experimental features are:
 - Query-frontend: dynamic query splits
   - `querier.max-shards-per-query` (int) CLI flag
   - `querier.max-fetched-data-duration-per-query` (duration) CLI flag
-- Ingester/Store-Gateway: Query rejection
+- Ingester/Store-Gateway/Querier: Query rejection
   - `-ingester.query-protection.rejection`
   - `-store-gateway.query-protection.rejection`
+  - `-querier.query-protection.rejection`
 - Distributor/Ingester: Stream push connection
   - Enable stream push connection between distributor and ingester by setting `-distributor.use-stream-push=true` on Distributor.
   - Enable stream push authentication on Distributor/Ingester. (`-distributor.sign-write-requests-keys`)
@@ -141,6 +143,7 @@ Currently experimental features are:
   - `-querier.query-protection.eviction.cooldown-period` (int)
   - `-querier.query-protection.eviction.eviction-metric` (string)
   - `-querier.query-protection.eviction.min-query-age` (duration)
+  - `-querier.query-protection.eviction.max-evictions-per-cycle` (int)
 - Ingester: Active Series Tracker
   - Per-tenant `active_series_trackers` configuration in runtime config overrides
   - Counts active series matching PromQL label matchers and exposes `cortex_ingester_active_series_per_tracker` metric
@@ -154,6 +157,21 @@ Currently experimental features are:
   - `-ingester.head-queried-series-metrics-windows` time windows to report (default: 2h)
   - `-ingester.head-queried-series-metrics-window-duration` HLL sub-window size
   - `-ingester.head-queried-series-metrics-sample-rate` query sampling rate
-- Parquet Converter: Maximum number of columns per file
-  - `-parquet-converter.max-num-columns` (int) CLI flag
-  - Automatically shards parquet files when the number of columns exceeds the configured limit
+- Parquet storage
+  - Parquet Converter: the `-parquet-converter.*` CLI flags, including `-parquet-converter.enabled`,
+    `-parquet-converter.max-num-columns` (automatically shards parquet files when the number of columns
+    exceeds the configured limit), `-parquet-converter.max-block-label-names` (if enabled, adds a
+    no-convert mark and skips blocks with too many label names) and the `-parquet-converter.ring.*`
+    ring configuration
+  - Querier: `-querier.parquet-queryable-default-block-store`, `-querier.parquet-queryable-fallback-disabled`,
+    the `-querier.parquet-queryable.max-fetched-*` limits and `-querier.parquet-shard-cache-*`
+  - Store Gateway: `-blocks-storage.bucket-store.parquet-query-concurrency`,
+    `-blocks-storage.bucket-store.parquet-shard-cache-*` and the
+    `-blocks-storage.bucket-store.parquet-labels-cache.*` /
+    `-blocks-storage.bucket-store.parquet-row-ranges-cache.*` cache configuration
+- Querier/Ruler: Thanos PromQL engine
+  - `-querier.thanos-engine` / `-ruler.thanos-engine` (boolean) CLI flags
+  - `-querier.enable-x-functions` / `-ruler.enable-x-functions` (boolean) CLI flags
+  - `-querier.optimizers` / `-ruler.optimizers` (string) CLI flags
+  - `-querier.decoding-concurrency` / `-ruler.decoding-concurrency` (int) CLI flags
+  - `-querier.selector-batch-size` / `-ruler.selector-batch-size` (int) CLI flags
