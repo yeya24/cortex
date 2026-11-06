@@ -104,11 +104,6 @@ querier:
   # CLI flag: -querier.timeout
   [timeout: <duration> | default = 2m]
 
-  # Deprecated (This feature will be always on after v1.18): Use streaming RPCs
-  # for metadata APIs from ingester.
-  # CLI flag: -querier.ingester-metadata-streaming
-  [ingester_metadata_streaming: <boolean> | default = true]
-
   # Use LabelNames ingester RPCs with match params.
   # CLI flag: -querier.ingester-label-names-with-matchers
   [ingester_label_names_with_matchers: <boolean> | default = false]
@@ -377,6 +372,11 @@ querier:
       # when resource thresholds are breached.
       # CLI flag: -querier.query-protection.eviction.max-evictions-per-cycle
       [max_evictions_per_cycle: <int> | default = 1]
+
+  # Pool the merge iterator scratch buffer (batchesBuf) via sync.Pool instead of
+  # allocating one per iterator.
+  # CLI flag: -querier.pool-iterator-batches-buf
+  [pool_iterator_batches_buf: <boolean> | default = false]
 ```
 
 ### `blocks_storage_config`
@@ -386,7 +386,7 @@ The `blocks_storage_config` configures the blocks storage.
 ```yaml
 blocks_storage:
   # Backend storage to use. Supported backends are: s3, gcs, azure, swift, oci,
-  # filesystem.
+  # oss, filesystem.
   # CLI flag: -blocks-storage.backend
   [backend: <string> | default = "s3"]
 
@@ -717,6 +717,24 @@ blocks_storage:
     # The fixed interval in seconds to wait between request retry attempts.
     # CLI flag: -blocks-storage.oci.request-retry-interval
     [request_retry_interval: <int> | default = 10]
+
+  oss:
+    # The Alibaba Cloud OSS endpoint to connect to, e.g.
+    # oss-cn-hangzhou.aliyuncs.com.
+    # CLI flag: -blocks-storage.oss.endpoint
+    [endpoint: <string> | default = ""]
+
+    # The Alibaba Cloud OSS bucket name.
+    # CLI flag: -blocks-storage.oss.bucket
+    [bucket: <string> | default = ""]
+
+    # The Alibaba Cloud OSS access key ID.
+    # CLI flag: -blocks-storage.oss.access-key-id
+    [access_key_id: <string> | default = ""]
+
+    # The Alibaba Cloud OSS access key secret.
+    # CLI flag: -blocks-storage.oss.access-key-secret
+    [access_key_secret: <string> | default = ""]
 
   filesystem:
     # Local filesystem storage directory.
