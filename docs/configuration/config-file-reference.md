@@ -324,8 +324,8 @@ tenant_federation:
   [user_sync_interval: <duration> | default = 5m]
 
   # [Experimental] Cache size of regex match results used by regex resolver.
-  # Each cache entry includes both regex patterns (e.g. `user-.+`) and resolved
-  # tenant IDs (e.g. `user-1`). Set to 0 or less to disable caching.
+  # Each cache entry maps a regex (e.g. `user-.+`) to the tenant IDs it matches.
+  # Set to 0 or less to disable caching.
   # CLI flag: -tenant-federation.regex-cache-size
   [regex_cache_size: <int> | default = 1000]
 
@@ -725,7 +725,7 @@ The `alertmanager_storage_config` configures the Cortex alertmanager storage bac
 
 ```yaml
 # Backend storage to use. Supported backends are: s3, gcs, azure, swift, oci,
-# filesystem, configdb, local.
+# oss, filesystem, configdb, local.
 # CLI flag: -alertmanager-storage.backend
 [backend: <string> | default = "s3"]
 
@@ -1055,6 +1055,24 @@ oci:
   # CLI flag: -alertmanager-storage.oci.request-retry-interval
   [request_retry_interval: <int> | default = 10]
 
+oss:
+  # The Alibaba Cloud OSS endpoint to connect to, e.g.
+  # oss-cn-hangzhou.aliyuncs.com.
+  # CLI flag: -alertmanager-storage.oss.endpoint
+  [endpoint: <string> | default = ""]
+
+  # The Alibaba Cloud OSS bucket name.
+  # CLI flag: -alertmanager-storage.oss.bucket
+  [bucket: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key ID.
+  # CLI flag: -alertmanager-storage.oss.access-key-id
+  [access_key_id: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key secret.
+  # CLI flag: -alertmanager-storage.oss.access-key-secret
+  [access_key_secret: <string> | default = ""]
+
 filesystem:
   # Local filesystem storage directory.
   # CLI flag: -alertmanager-storage.filesystem.dir
@@ -1097,7 +1115,7 @@ The `blocks_storage_config` configures the blocks storage.
 
 ```yaml
 # Backend storage to use. Supported backends are: s3, gcs, azure, swift, oci,
-# filesystem.
+# oss, filesystem.
 # CLI flag: -blocks-storage.backend
 [backend: <string> | default = "s3"]
 
@@ -1426,6 +1444,24 @@ oci:
   # The fixed interval in seconds to wait between request retry attempts.
   # CLI flag: -blocks-storage.oci.request-retry-interval
   [request_retry_interval: <int> | default = 10]
+
+oss:
+  # The Alibaba Cloud OSS endpoint to connect to, e.g.
+  # oss-cn-hangzhou.aliyuncs.com.
+  # CLI flag: -blocks-storage.oss.endpoint
+  [endpoint: <string> | default = ""]
+
+  # The Alibaba Cloud OSS bucket name.
+  # CLI flag: -blocks-storage.oss.bucket
+  [bucket: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key ID.
+  # CLI flag: -blocks-storage.oss.access-key-id
+  [access_key_id: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key secret.
+  # CLI flag: -blocks-storage.oss.access-key-secret
+  [access_key_secret: <string> | default = ""]
 
 filesystem:
   # Local filesystem storage directory.
@@ -3067,6 +3103,17 @@ The `compactor_config` configures the compactor for the blocks storage.
 # CLI flag: -compactor.block-ranges
 [block_ranges: <list of duration> | default = 2h0m0s,12h0m0s,24h0m0s]
 
+# Per compaction time range, the minimum age the end of a compaction group's
+# time range must reach before the group becomes eligible for compaction.
+# Positionally matched against -compactor.block-ranges: it must either be empty
+# or have the same number of entries, and no entry may be negative. When empty,
+# every range defaults to twice -compactor.cleanup-interval. This is a lower
+# bound: a group only becomes eligible on a compaction run, so the effective
+# wait can be up to -compactor.compaction-interval longer. Only used by the
+# partitioning compaction strategy.
+# CLI flag: -compactor.block-ranges-compaction-delay
+[block_ranges_compaction_delay: <list of duration> | default = ]
+
 # Number of Go routines to use when syncing block index and chunks files from
 # the long term storage.
 # CLI flag: -compactor.block-sync-concurrency
@@ -3076,6 +3123,15 @@ The `compactor_config` configures the compactor for the blocks storage.
 # storage.
 # CLI flag: -compactor.meta-sync-concurrency
 [meta_sync_concurrency: <int> | default = 20]
+
+# Number of per-block series sets merged per subtree during compaction. Each
+# subtree advances in its own goroutine, so a group of blocks larger than this
+# value no longer issues every index read from a single goroutine. Only affects
+# partitioning compaction. 0 disables it and keeps one flat merge over all
+# blocks. Useful range is 32 to 128; lower values create more goroutines without
+# adding disk concurrency.
+# CLI flag: -compactor.block-merge-fan-in
+[block_merge_fan_in: <int> | default = 0]
 
 # Minimum age of fresh (non-compacted) blocks before they are being processed.
 # Malformed blocks older than the maximum of consistency-delay and 48h0m0s will
@@ -3757,6 +3813,14 @@ otlp:
   # If true, suffixes will be added to the metrics for name normalization.
   # CLI flag: -distributor.otlp.add-metric-suffixes
   [add_metric_suffixes: <boolean> | default = true]
+
+  # EXPERIMENTAL: If true, the distributor accepts OTLP metrics over gRPC
+  # (opentelemetry.proto.collector.metrics.v1.MetricsService/Export) on the gRPC
+  # server port. The tenant is read from the X-Scope-OrgID gRPC metadata. The
+  # maximum request size is set by -server.grpc-max-recv-msg-size-bytes, not by
+  # -distributor.otlp-max-recv-msg-size.
+  # CLI flag: -distributor.otlp.grpc-enabled
+  [grpc_enabled: <boolean> | default = false]
 ```
 
 ### `etcd_config`
@@ -3844,11 +3908,6 @@ The `fifo_cache_config` configures the local in-memory cache.
 # The expiry duration for the cache.
 # CLI flag: -frontend.fifocache.duration
 [validity: <duration> | default = 0s]
-
-# Deprecated (use max-size-items or max-size-bytes instead): The number of
-# entries to cache.
-# CLI flag: -frontend.fifocache.size
-[size: <int> | default = 0]
 ```
 
 ### `flusher_config`
@@ -4623,7 +4682,7 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 # series matching its matchers and exposes the count as a metric.
 [active_series_trackers: <list of ActiveSeriesTrackerConfig> | default = []]
 
-# [EXPERIMENTAL] True to enable native histogram.
+# True to enable native histogram.
 # CLI flag: -blocks-storage.tsdb.enable-native-histograms
 [enable_native_histograms: <boolean> | default = false]
 
@@ -4766,8 +4825,8 @@ The `limits_config` configures default and per-tenant limits imposed by Cortex s
 
 # Maximum lookback duration for querying data from ingesters. Queries for data
 # older than this will only query the long-term storage. This is a per-tenant
-# limit that can be overridden in the runtime configuration. Should be less than
-# or equal to close-idle-tsdb-timeout.
+# limit that can be overridden in the runtime configuration. Must be less than
+# -blocks-storage.tsdb.close-idle-tsdb-timeout when both are positive.
 # CLI flag: -limits.query-ingesters-within
 [query_ingesters_within: <duration> | default = 0s]
 
@@ -4831,12 +4890,6 @@ query_rejection:
   # the specified properties are checked, and an AND operator is applied to
   # them.
   [query_attributes: <list of QueryAttribute> | default = []]
-
-# Deprecated(use ruler.query-offset instead) and will be removed in v1.19.0:
-# Duration to delay the evaluation of rules to ensure the underlying metrics
-# have been pushed to Cortex.
-# CLI flag: -ruler.evaluation-delay-duration
-[ruler_evaluation_delay_duration: <duration> | default = 0s]
 
 # The default tenant's shard size when the shuffle-sharding strategy is used by
 # ruler. When this setting is specified in the per-tenant overrides, a value of
@@ -4924,6 +4977,12 @@ query_rejection:
 # order of precedence. These are applied during Parquet file generation.
 # CLI flag: -parquet-converter.sort-columns
 [parquet_converter_sort_columns: <list of string> | default = []]
+
+# [Experimental] Maximum number of distinct label names allowed in a TSDB block
+# for parquet conversion. If exceeded, the converter writes a no-convert marker.
+# 0 to disable.
+# CLI flag: -parquet-converter.max-block-label-names
+[parquet_converter_max_block_label_names: <int> | default = 0]
 
 # S3 server-side encryption type. Required to enable server-side encryption
 # overrides for a specific tenant. If not set, the default S3 client settings
@@ -5276,11 +5335,6 @@ The `querier_config` configures the Cortex querier.
 # CLI flag: -querier.timeout
 [timeout: <duration> | default = 2m]
 
-# Deprecated (This feature will be always on after v1.18): Use streaming RPCs
-# for metadata APIs from ingester.
-# CLI flag: -querier.ingester-metadata-streaming
-[ingester_metadata_streaming: <boolean> | default = true]
-
 # Use LabelNames ingester RPCs with match params.
 # CLI flag: -querier.ingester-label-names-with-matchers
 [ingester_label_names_with_matchers: <boolean> | default = false]
@@ -5548,6 +5602,11 @@ query_protection:
     # when resource thresholds are breached.
     # CLI flag: -querier.query-protection.eviction.max-evictions-per-cycle
     [max_evictions_per_cycle: <int> | default = 1]
+
+# Pool the merge iterator scratch buffer (batchesBuf) via sync.Pool instead of
+# allocating one per iterator.
+# CLI flag: -querier.pool-iterator-batches-buf
+[pool_iterator_batches_buf: <boolean> | default = false]
 ```
 
 ### `query_frontend_config`
@@ -6040,6 +6099,26 @@ ruler_client:
 # CLI flag: -ruler.notification-timeout
 [notification_timeout: <duration> | default = 10s]
 
+notification_backoff:
+  # Minimum delay between notification retries. Only applies when
+  # -ruler.notification.backoff-retries is greater than 0.
+  # CLI flag: -ruler.notification.backoff-min-period
+  [min_period: <duration> | default = 100ms]
+
+  # Maximum delay between notification retries. Only applies when
+  # -ruler.notification.backoff-retries is greater than 0.
+  # CLI flag: -ruler.notification.backoff-max-period
+  [max_period: <duration> | default = 1s]
+
+  # Maximum number of times to retry a notification that the Alertmanager failed
+  # to accept with a retriable error, which is a transport error or a 5xx
+  # response. A notification that is not retried is dropped and the alert is not
+  # delivered until the next evaluation of its rule group. Retries happen within
+  # -ruler.notification-timeout and delay the other notifications of the same
+  # tenant, so keep this number small. Set to 0 to disable the retries.
+  # CLI flag: -ruler.notification.backoff-retries
+  [max_retries: <int> | default = 0]
+
 alertmanager_client:
   # Path to the client certificate file, which will be used for authenticating
   # with the server. Also requires the key path to be configured.
@@ -6243,8 +6322,38 @@ ring:
 # CLI flag: -ruler.disabled-tenants
 [disabled_tenants: <string> | default = ""]
 
+# Maximum number of rules returned by the Prometheus ListRules API. If there are
+# more rulegroups, the response will include a pagination token which can be
+# used to fetch the next set. The API will always return at least one rulegroup,
+# even if it contains more rules than the limit. Defaults to 0, which is
+# unlimited
+# CLI flag: -ruler.list-rules-max-rules
+[list_rules_max_rules: <int> | default = 0]
+
+# [Experimental] Enable federated rule groups. A federated rule group lists the
+# tenants to query in its `source_tenants` field, while the resulting series and
+# alerts always belong to the tenant owning the rule group. Requires
+# -tenant-federation.enabled=true.
+# CLI flag: -ruler.enable-federated-rules
+[enable_federated_rules: <boolean> | default = false]
+
+# [Experimental] Comma separated list of tenants allowed to create federated
+# rule groups. If specified, only these tenants can create federated rule
+# groups, otherwise all tenants can.
+# CLI flag: -ruler.allowed-federated-tenants
+[allowed_federated_tenants: <string> | default = ""]
+
+# [Experimental] Comma separated list of tenants that cannot create federated
+# rule groups. If specified, a tenant that would normally be allowed to create
+# federated rule groups is denied instead.
+# CLI flag: -ruler.disallowed-federated-tenants
+[disallowed_federated_tenants: <string> | default = ""]
+
 # Report query statistics for ruler queries to complete as a per user metric and
-# as an info level log message.
+# as an info level log message. When -ruler.frontend-address is configured,
+# fetched series/chunks/samples statistics are not available in the Ruler.
+# Enable -frontend.enabled-ruler-query-stats to get the statistics from the
+# Query Frontend.
 # CLI flag: -ruler.query-stats-enabled
 [query_stats_enabled: <boolean> | default = false]
 
@@ -6296,7 +6405,7 @@ The `ruler_storage_config` configures the Cortex ruler storage backend.
 
 ```yaml
 # Backend storage to use. Supported backends are: s3, gcs, azure, swift, oci,
-# filesystem, configdb, local.
+# oss, filesystem, configdb, local.
 # CLI flag: -ruler-storage.backend
 [backend: <string> | default = "s3"]
 
@@ -6626,6 +6735,24 @@ oci:
   # CLI flag: -ruler-storage.oci.request-retry-interval
   [request_retry_interval: <int> | default = 10]
 
+oss:
+  # The Alibaba Cloud OSS endpoint to connect to, e.g.
+  # oss-cn-hangzhou.aliyuncs.com.
+  # CLI flag: -ruler-storage.oss.endpoint
+  [endpoint: <string> | default = ""]
+
+  # The Alibaba Cloud OSS bucket name.
+  # CLI flag: -ruler-storage.oss.bucket
+  [bucket: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key ID.
+  # CLI flag: -ruler-storage.oss.access-key-id
+  [access_key_id: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key secret.
+  # CLI flag: -ruler-storage.oss.access-key-secret
+  [access_key_secret: <string> | default = ""]
+
 filesystem:
   # Local filesystem storage directory.
   # CLI flag: -ruler-storage.filesystem.dir
@@ -6676,7 +6803,7 @@ The `runtime_configuration_storage_config` configures the storage backend for th
 [file: <string> | default = ""]
 
 # Backend storage to use. Supported backends are: s3, gcs, azure, swift, oci,
-# filesystem.
+# oss, filesystem.
 # CLI flag: -runtime-config.backend
 [backend: <string> | default = "filesystem"]
 
@@ -7005,6 +7132,24 @@ oci:
   # The fixed interval in seconds to wait between request retry attempts.
   # CLI flag: -runtime-config.oci.request-retry-interval
   [request_retry_interval: <int> | default = 10]
+
+oss:
+  # The Alibaba Cloud OSS endpoint to connect to, e.g.
+  # oss-cn-hangzhou.aliyuncs.com.
+  # CLI flag: -runtime-config.oss.endpoint
+  [endpoint: <string> | default = ""]
+
+  # The Alibaba Cloud OSS bucket name.
+  # CLI flag: -runtime-config.oss.bucket
+  [bucket: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key ID.
+  # CLI flag: -runtime-config.oss.access-key-id
+  [access_key_id: <string> | default = ""]
+
+  # The Alibaba Cloud OSS access key secret.
+  # CLI flag: -runtime-config.oss.access-key-secret
+  [access_key_secret: <string> | default = ""]
 
 filesystem:
   # Local filesystem storage directory.

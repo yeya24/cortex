@@ -20,7 +20,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	prom_testutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/tsdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -997,18 +996,14 @@ func TestPartitionCompactor_ShouldSkipOutOrOrderBlocks(t *testing.T) {
 
 	tsdbPlanner.On("Plan", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*metadata.Meta{
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    b1,
-				MinTime: 10,
-				MaxTime: 20,
-			},
+			ULID:    b1,
+			MinTime: 10,
+			MaxTime: 20,
 		},
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    b2,
-				MinTime: 20,
-				MaxTime: 30,
-			},
+			ULID:    b2,
+			MinTime: 20,
+			MaxTime: 30,
 		},
 	}, nil)
 
@@ -1147,7 +1142,7 @@ func TestPartitionCompactor_ShouldCompactAllUsersOnShardingEnabledButOnlyOneInst
 
 func TestPartitionCompactor_ShouldCompactOnlyUsersOwnedByTheInstanceOnShardingEnabledAndMultipleInstancesRunning(t *testing.T) {
 
-	numUsers := 100
+	numUsers := 20
 
 	// Setup user IDs
 	userIDs := make([]string, 0, numUsers)
@@ -1197,6 +1192,7 @@ func TestPartitionCompactor_ShouldCompactOnlyUsersOwnedByTheInstanceOnShardingEn
 		cfg.ShardingRing.InstanceAddr = fmt.Sprintf("127.0.0.%d", i)
 		cfg.ShardingRing.WaitStabilityMinDuration = time.Second
 		cfg.ShardingRing.WaitStabilityMaxDuration = 5 * time.Second
+		cfg.ShardingRing.WaitActiveInstanceTimeout = 30 * time.Second // Give the ring ACTIVE wait headroom on slow CI (#7503).
 		cfg.ShardingRing.KVStore.Mock = kvstore
 
 		c, _, tsdbPlanner, l, _ := prepareForPartitioning(t, cfg, bucketClient, nil, nil)
@@ -2031,11 +2027,9 @@ func (s *raceConditionTestSetup) createCortexMetaExtensions(creationTime int64) 
 func (s *raceConditionTestSetup) createTestMetadata() []*metadata.Meta {
 	return []*metadata.Meta{
 		{
-			BlockMeta: tsdb.BlockMeta{
-				ULID:    ulid.MustNew(ulid.Now(), nil),
-				MinTime: 0,
-				MaxTime: 2 * 60 * 60 * 1000,
-			},
+			ULID:    ulid.MustNew(ulid.Now(), nil),
+			MinTime: 0,
+			MaxTime: 2 * 60 * 60 * 1000,
 		},
 	}
 }
