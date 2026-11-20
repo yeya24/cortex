@@ -206,6 +206,7 @@ type Limits struct {
 	// "now - queryStoreAfter" so that most recent blocks are not queried.
 	QueryStoreAfter                        model.Duration `yaml:"query_store_after" json:"query_store_after"`
 	ShuffleShardingIngestersLookbackPeriod model.Duration `yaml:"shuffle_sharding_ingesters_lookback_period" json:"shuffle_sharding_ingesters_lookback_period"`
+	CloseIdleTSDBTimeout                   model.Duration `yaml:"close_idle_tsdb_timeout" json:"close_idle_tsdb_timeout"`
 
 	// Parquet Queryable enforced limits.
 	ParquetMaxFetchedRowCount   int `yaml:"parquet_max_fetched_row_count" json:"parquet_max_fetched_row_count"`
@@ -220,7 +221,6 @@ type Limits struct {
 	QueryRejection              QueryRejection `yaml:"query_rejection" json:"query_rejection" doc:"nocli|description=Configuration for query rejection."`
 
 	// Ruler defaults and limits.
-	RulerEvaluationDelay           model.Duration `yaml:"ruler_evaluation_delay_duration" json:"ruler_evaluation_delay_duration"`
 	RulerTenantShardSize           float64        `yaml:"ruler_tenant_shard_size" json:"ruler_tenant_shard_size"`
 	RulerMaxRulesPerRuleGroup      int            `yaml:"ruler_max_rules_per_rule_group" json:"ruler_max_rules_per_rule_group"`
 	RulerMaxRuleGroupsPerTenant    int            `yaml:"ruler_max_rule_groups_per_tenant" json:"ruler_max_rule_groups_per_tenant"`
@@ -241,9 +241,10 @@ type Limits struct {
 	CompactorPartitionSeriesCount    int64          `yaml:"compactor_partition_series_count" json:"compactor_partition_series_count"`
 
 	// Parquet converter
-	ParquetConverterEnabled         bool     `yaml:"parquet_converter_enabled" json:"parquet_converter_enabled"`
-	ParquetConverterTenantShardSize float64  `yaml:"parquet_converter_tenant_shard_size" json:"parquet_converter_tenant_shard_size"`
-	ParquetConverterSortColumns     []string `yaml:"parquet_converter_sort_columns" json:"parquet_converter_sort_columns"`
+	ParquetConverterEnabled            bool     `yaml:"parquet_converter_enabled" json:"parquet_converter_enabled"`
+	ParquetConverterTenantShardSize    float64  `yaml:"parquet_converter_tenant_shard_size" json:"parquet_converter_tenant_shard_size"`
+	ParquetConverterSortColumns        []string `yaml:"parquet_converter_sort_columns" json:"parquet_converter_sort_columns"`
+	ParquetConverterMaxBlockLabelNames int      `yaml:"parquet_converter_max_block_label_names" json:"parquet_converter_max_block_label_names"`
 	// This config doesn't have a CLI flag registered here because they're registered in
 	// their own original config struct.
 	S3SSEType                 string `yaml:"s3_sse_type" json:"s3_sse_type" doc:"nocli|description=S3 server-side encryption type. Required to enable server-side encryption overrides for a specific tenant. If not set, the default S3 client settings are used."`
@@ -313,7 +314,7 @@ func (l *Limits) RegisterFlags(f *flag.FlagSet) {
 	f.IntVar(&l.MaxGlobalSeriesPerMetric, "ingester.max-global-series-per-metric", 0, "The maximum number of active series per metric name, across the cluster before replication. 0 to disable.")
 	f.IntVar(&l.MaxLocalNativeHistogramSeriesPerUser, "ingester.max-native-histogram-series-per-user", 0, "The maximum number of active native histogram series per user, per ingester. 0 to disable. Supported only if ingester.active-series-metrics-enabled is true.")
 	f.IntVar(&l.MaxGlobalNativeHistogramSeriesPerUser, "ingester.max-global-native-histogram-series-per-user", 0, "The maximum number of active native histogram series per user, across the cluster before replication. 0 to disable. Supported only if -distributor.shard-by-all-labels and ingester.active-series-metrics-enabled is true.")
-	f.BoolVar(&l.EnableNativeHistograms, "blocks-storage.tsdb.enable-native-histograms", false, "[EXPERIMENTAL] True to enable native histogram.")
+	f.BoolVar(&l.EnableNativeHistograms, "blocks-storage.tsdb.enable-native-histograms", false, "True to enable native histogram.")
 	f.IntVar(&l.MaxExemplars, "ingester.max-exemplars", 0, "Enables support for exemplars in TSDB and sets the maximum number that will be stored. less than zero means disabled. If the value is set to zero, cortex will fallback to the deprecated blocks-storage.tsdb.max-exemplars value; that fallback is removed in v1.24.0.")
 	f.Var(&l.OutOfOrderTimeWindow, "ingester.out-of-order-time-window", "[Experimental] Configures the allowed time window for ingestion of out-of-order samples. Disabled (0s) by default.")
 
@@ -327,13 +328,16 @@ func (l *Limits) RegisterFlags(f *flag.FlagSet) {
 	f.IntVar(&l.MaxFetchedDataBytesPerQuery, "querier.max-fetched-data-bytes-per-query", 0, "The maximum combined size of all data that a query can fetch from each ingester and storage. This limit is enforced in the querier and ruler for `query`, `query_range` and `series` APIs. 0 to disable.")
 
 	_ = l.QueryIngestersWithin.Set("0")
-	f.Var(&l.QueryIngestersWithin, "limits.query-ingesters-within", "Maximum lookback duration for querying data from ingesters. Queries for data older than this will only query the long-term storage. This is a per-tenant limit that can be overridden in the runtime configuration. Should be less than or equal to close-idle-tsdb-timeout.")
+	f.Var(&l.QueryIngestersWithin, "limits.query-ingesters-within", "Maximum lookback duration for querying data from ingesters. Queries for data older than this will only query the long-term storage. This is a per-tenant limit that can be overridden in the runtime configuration. Must be less than or equal to -limits.close-idle-tsdb-timeout when both are positive.")
 
 	_ = l.QueryStoreAfter.Set("0")
 	f.Var(&l.QueryStoreAfter, "limits.query-store-after", "Minimum age of data before querying the long-term storage. Queries for data younger than this will only query ingesters. This is a per-tenant limit that can be overridden in the runtime configuration.")
 
 	_ = l.ShuffleShardingIngestersLookbackPeriod.Set("0")
 	f.Var(&l.ShuffleShardingIngestersLookbackPeriod, "limits.shuffle-sharding-ingesters-lookback-period", "Lookback period for shuffle sharding of ingesters. This is a per-tenant limit that can be overridden in the runtime configuration. Should be greater than or equal to query-ingesters-within.")
+
+	_ = l.CloseIdleTSDBTimeout.Set("0")
+	f.Var(&l.CloseIdleTSDBTimeout, "limits.close-idle-tsdb-timeout", "If TSDB has not received any data for this duration, and all blocks from TSDB have been shipped, TSDB is closed and deleted from local disk. This is a per-tenant limit that can be overridden in the runtime configuration. When positive, it must be greater than or equal to -limits.query-ingesters-within and -limits.query-store-after, so that a TSDB is not closed while queriers still read its data only from ingesters. 0 to disable.")
 
 	f.Var(&l.MaxQueryLength, "store.max-query-length", "Limit the query time range (end - start time of range query parameter and max - min of data fetched time range). This limit is enforced in the query-frontend and ruler (on the received query). 0 to disable.")
 	f.Var(&l.MaxQueryLookback, "querier.max-query-lookback", "Limit how long back data (series and metadata) can be queried, up until <lookback> duration ago. This limit is enforced in the query-frontend, querier and ruler. If the requested time range is outside the allowed range, the request will not fail but will be manipulated to only query data within the allowed time range. 0 to disable.")
@@ -353,7 +357,6 @@ func (l *Limits) RegisterFlags(f *flag.FlagSet) {
 
 	f.IntVar(&l.MaxOutstandingPerTenant, "frontend.max-outstanding-requests-per-tenant", 100, "Maximum number of outstanding requests per tenant per request queue (either query frontend or query scheduler); requests beyond this error with HTTP 429.")
 
-	f.Var(&l.RulerEvaluationDelay, "ruler.evaluation-delay-duration", "Deprecated(use ruler.query-offset instead) and will be removed in v1.19.0: Duration to delay the evaluation of rules to ensure the underlying metrics have been pushed to Cortex.")
 	f.Float64Var(&l.RulerTenantShardSize, "ruler.tenant-shard-size", 0, "The default tenant's shard size when the shuffle-sharding strategy is used by ruler. When this setting is specified in the per-tenant overrides, a value of 0 disables shuffle sharding for the tenant. If the value is < 1 the shard size will be a percentage of the total rulers.")
 	f.IntVar(&l.RulerMaxRulesPerRuleGroup, "ruler.max-rules-per-rule-group", 0, "Maximum number of rules per rule group per-tenant. 0 to disable.")
 	f.IntVar(&l.RulerMaxRuleGroupsPerTenant, "ruler.max-rule-groups-per-tenant", 0, "Maximum number of rule groups per-tenant. 0 to disable.")
@@ -368,6 +371,7 @@ func (l *Limits) RegisterFlags(f *flag.FlagSet) {
 	f.Float64Var(&l.ParquetConverterTenantShardSize, "parquet-converter.tenant-shard-size", 0, "The default tenant's shard size when the shuffle-sharding strategy is used by the parquet converter. When this setting is specified in the per-tenant overrides, a value of 0 disables shuffle sharding for the tenant. If the value is < 1 and > 0 the shard size will be a percentage of the total parquet converters.")
 	f.BoolVar(&l.ParquetConverterEnabled, "parquet-converter.enabled", false, "If set, enables the Parquet converter to create the parquet files.")
 	f.Var((*flagext.StringSlice)(&l.ParquetConverterSortColumns), "parquet-converter.sort-columns", "Additional label names for specific tenants to sort by after metric name, in order of precedence. These are applied during Parquet file generation.")
+	f.IntVar(&l.ParquetConverterMaxBlockLabelNames, "parquet-converter.max-block-label-names", 0, "[Experimental] Maximum number of distinct label names allowed in a TSDB block for parquet conversion. If exceeded, the converter writes a no-convert marker. 0 to disable.")
 
 	// Parquet Queryable enforced limits.
 	f.IntVar(&l.ParquetMaxFetchedRowCount, "querier.parquet-queryable.max-fetched-row-count", 0, "The maximum number of rows that can be fetched when querying parquet storage. Each row maps to a series in a parquet file. This limit applies before materializing chunks. 0 to disable.")
@@ -462,13 +466,14 @@ func (l *Limits) Validate(nameValidationScheme model.ValidationScheme, shardByAl
 
 	return nil
 }
-func (l *Limits) ValidateQueryLimits(userID string, closeIdleTSDBTimeout time.Duration) error {
+func (l *Limits) ValidateQueryLimits(userID string) error {
 	queryIngestersWithin := time.Duration(l.QueryIngestersWithin)
 	queryStoreAfter := time.Duration(l.QueryStoreAfter)
 	shuffleShardingLookback := time.Duration(l.ShuffleShardingIngestersLookbackPeriod)
+	closeIdleTSDBTimeout := time.Duration(l.CloseIdleTSDBTimeout)
 
-	if queryIngestersWithin > 0 && closeIdleTSDBTimeout > 0 && queryIngestersWithin >= closeIdleTSDBTimeout {
-		return fmt.Errorf("tenant %s: query_ingesters_within (%s) must be less than close_idle_tsdb_timeout (%s)",
+	if queryIngestersWithin > 0 && closeIdleTSDBTimeout > 0 && queryIngestersWithin > closeIdleTSDBTimeout {
+		return fmt.Errorf("tenant %s: query_ingesters_within (%s) must be less than or equal to close_idle_tsdb_timeout (%s)",
 			userID, queryIngestersWithin, closeIdleTSDBTimeout)
 	}
 
@@ -480,6 +485,13 @@ func (l *Limits) ValidateQueryLimits(userID string, closeIdleTSDBTimeout time.Du
 	if queryStoreAfter > 0 && shuffleShardingLookback > 0 && shuffleShardingLookback < queryStoreAfter {
 		return fmt.Errorf("tenant %s: shuffle_sharding_ingesters_lookback_period (%s) is less than query_store_after (%s)",
 			userID, shuffleShardingLookback, queryStoreAfter)
+	}
+
+	// With query_ingesters_within at 0 the checks above don't bound close_idle_tsdb_timeout, but
+	// queriers still read data younger than query_store_after only from ingesters.
+	if closeIdleTSDBTimeout > 0 && queryStoreAfter > 0 && closeIdleTSDBTimeout < queryStoreAfter {
+		return fmt.Errorf("tenant %s: close_idle_tsdb_timeout (%s) must be greater than or equal to query_store_after (%s)",
+			userID, closeIdleTSDBTimeout, queryStoreAfter)
 	}
 
 	return nil
@@ -1028,6 +1040,11 @@ func (o *Overrides) ParquetConverterSortColumns(userID string) []string {
 	return o.GetOverridesForUser(userID).ParquetConverterSortColumns
 }
 
+// ParquetConverterMaxBlockLabelNames returns the maximum number of distinct label names allowed in a TSDB block for parquet conversion.
+func (o *Overrides) ParquetConverterMaxBlockLabelNames(userID string) int {
+	return o.GetOverridesForUser(userID).ParquetConverterMaxBlockLabelNames
+}
+
 // ParquetMaxFetchedRowCount returns the maximum number of rows that can be fetched when querying parquet storage.
 func (o *Overrides) ParquetMaxFetchedRowCount(userID string) int {
 	return o.GetOverridesForUser(userID).ParquetMaxFetchedRowCount
@@ -1075,13 +1092,7 @@ func (o *Overrides) RulerMaxRuleGroupsPerTenant(userID string) int {
 
 // RulerQueryOffset returns the rule query offset for a given user.
 func (o *Overrides) RulerQueryOffset(userID string) time.Duration {
-	ruleOffset := time.Duration(o.GetOverridesForUser(userID).RulerQueryOffset)
-	evaluationDelay := time.Duration(o.GetOverridesForUser(userID).RulerEvaluationDelay)
-	if evaluationDelay > ruleOffset {
-		level.Warn(util_log.Logger).Log("msg", "ruler.query-offset was overridden by highest value in [Deprecated]ruler.evaluation-delay-duration", "ruler.query-offset", ruleOffset, "ruler.evaluation-delay-duration", evaluationDelay)
-		return evaluationDelay
-	}
-	return ruleOffset
+	return time.Duration(o.GetOverridesForUser(userID).RulerQueryOffset)
 }
 
 // RulesPartialData returns whether rule may be evaluated with data from a single zone, if other zones are not available.
@@ -1284,6 +1295,10 @@ func (o *Overrides) QueryStoreAfter(userID string) time.Duration {
 
 func (o *Overrides) ShuffleShardingIngestersLookbackPeriod(userID string) time.Duration {
 	return time.Duration(o.GetOverridesForUser(userID).ShuffleShardingIngestersLookbackPeriod)
+}
+
+func (o *Overrides) CloseIdleTSDBTimeout(userID string) time.Duration {
+	return time.Duration(o.GetOverridesForUser(userID).CloseIdleTSDBTimeout)
 }
 
 // GetOverridesForUser returns the per-tenant limits with overrides.

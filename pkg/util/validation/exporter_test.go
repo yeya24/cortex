@@ -48,6 +48,7 @@ func TestOverridesExporter_withConfig(t *testing.T) {
 		cortex_overrides{limit_name="alertmanager_max_templates_count",user="tenant-a"} 0
 		cortex_overrides{limit_name="alertmanager_notification_rate_limit",user="tenant-a"} 0
 		cortex_overrides{limit_name="alertmanager_receivers_firewall_block_private_addresses",user="tenant-a"} 0
+		cortex_overrides{limit_name="close_idle_tsdb_timeout",user="tenant-a"} 0
 		cortex_overrides{limit_name="compactor_blocks_retention_period",user="tenant-a"} 0
 		cortex_overrides{limit_name="compactor_partition_index_size_bytes",user="tenant-a"} 6.8719476736e+10
 		cortex_overrides{limit_name="compactor_partition_series_count",user="tenant-a"} 0
@@ -101,6 +102,7 @@ func TestOverridesExporter_withConfig(t *testing.T) {
 		cortex_overrides{limit_name="out_of_order_results_cache_ttl",user="tenant-a"} 0
 		cortex_overrides{limit_name="out_of_order_time_window",user="tenant-a"} 0
 		cortex_overrides{limit_name="parquet_converter_enabled",user="tenant-a"} 0
+		cortex_overrides{limit_name="parquet_converter_max_block_label_names",user="tenant-a"} 0
 		cortex_overrides{limit_name="parquet_converter_tenant_shard_size",user="tenant-a"} 0
 		cortex_overrides{limit_name="parquet_max_fetched_chunk_bytes",user="tenant-a"} 0
 		cortex_overrides{limit_name="parquet_max_fetched_data_bytes",user="tenant-a"} 0
@@ -112,7 +114,6 @@ func TestOverridesExporter_withConfig(t *testing.T) {
 		cortex_overrides{limit_name="reject_old_samples",user="tenant-a"} 0
 		cortex_overrides{limit_name="reject_old_samples_max_age",user="tenant-a"} 1.2096e+06
 		cortex_overrides{limit_name="results_cache_ttl",user="tenant-a"} 0
-		cortex_overrides{limit_name="ruler_evaluation_delay_duration",user="tenant-a"} 0
 		cortex_overrides{limit_name="ruler_max_rule_groups_per_tenant",user="tenant-a"} 0
 		cortex_overrides{limit_name="ruler_max_rules_per_rule_group",user="tenant-a"} 0
 		cortex_overrides{limit_name="ruler_query_offset",user="tenant-a"} 0

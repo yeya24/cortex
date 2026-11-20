@@ -80,7 +80,7 @@ func (l runtimeConfigLoader) load(r io.Reader) (any, error) {
 					if err := ul.Validate(l.cfg.NameValidationScheme, l.cfg.Distributor.ShardByAllLabels, l.cfg.Ingester.ActiveSeriesMetricsEnabled, l.cfg.Distributor.HATrackerConfig.UpdateTimeout, l.cfg.Distributor.HATrackerConfig.UpdateTimeoutJitterMax); err != nil {
 						return nil, err
 					}
-					if err := ul.ValidateQueryLimits(userID, l.cfg.BlocksStorage.TSDB.CloseIdleTSDBTimeout); err != nil {
+					if err := ul.ValidateQueryLimits(userID); err != nil {
 						return nil, err
 					}
 				}
@@ -145,8 +145,8 @@ func runtimeConfigHandler(runtimeCfgManager *runtimeconfig.Manager, defaultLimit
 		case "diff":
 			// Default runtime config is just empty struct, but to make diff work,
 			// we set defaultLimits for every tenant that exists in runtime config.
-			defaultCfg := RuntimeConfigValues{}
-			defaultCfg.TenantLimits = map[string]*validation.Limits{}
+			defaultCfg := RuntimeConfigValues{
+				TenantLimits: map[string]*validation.Limits{}}
 			for k, v := range cfg.TenantLimits {
 				if v != nil {
 					defaultCfg.TenantLimits[k] = &defaultLimits
